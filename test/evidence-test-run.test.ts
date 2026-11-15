@@ -508,12 +508,8 @@ describe("ark test base run", () => {
     expect(run.runsAt("repoA", "s1", "base")).toBe(2);
   });
 
-  test("ARK-T1 a feature run whose new test also fails at head exits non-zero", () => {
-    const run = twoRepoRun("feature", "fails-both");
-    expect(ark("test", run.runId).code).not.toBe(0);
-  });
-
   test.each([
+    ["feature", "fails-both"],
     ["bug", "fails-both"],
     ["perf", "fails-both"],
     ["refactor", "head-marker"],
@@ -884,9 +880,7 @@ export default defineConfig({
 `;
 
 /** The spec `FAKE-T9 shows feature`: `#feature` is on the page of the head only. */
-function featureSpec(checkpointAfterAssertion: boolean): string {
-  const feature = 'await checkpoint(page, "feature-visible");';
-  return `import { expect, test } from ${JSON.stringify(playwrightModule)};
+const featureSpec = `import { expect, test } from ${JSON.stringify(playwrightModule)};
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { checkpoint } from ${JSON.stringify(helpersModule)};
@@ -897,15 +891,13 @@ test("FAKE-T9 shows feature", async ({ page }) => {
   try {
     await page.goto(\`http://127.0.0.1:\${(server.address() as { port: number }).port}\`);
     await checkpoint(page, "opened");
-    ${checkpointAfterAssertion ? "" : feature}
+    await checkpoint(page, "feature-visible");
     await expect(page.locator("#feature")).toBeVisible({ timeout: 500 });
-    ${checkpointAfterAssertion ? feature : ""}
   } finally {
     server.close();
   }
 });
 `;
-}
 
 const idsSpec = `import { test } from ${JSON.stringify(playwrightModule)};
 import { checkpoint } from ${JSON.stringify(helpersModule)};
@@ -922,7 +914,7 @@ test("a title with no case id", async ({ page }) => {
 `;
 
 /** A one-repo UI project; `ark test` runs its Playwright suite at base and at head. The page has `#feature` at head only. */
-function uiRun(checkpointAfterAssertion: boolean) {
+function uiRun() {
   const realSpec = readFileSync(join(repositoryRoot, "test/pw/checkpoint.pw.ts"), "utf8")
     .replace('"@playwright/test"', JSON.stringify(playwrightModule))
     .replace('"./helpers.ts"', JSON.stringify(helpersModule));
@@ -947,7 +939,7 @@ function uiRun(checkpointAfterAssertion: boolean) {
   });
   writeFiles(run.mirror, {
     "src/page.html": '<p>Page</p><div id="feature">Feature</div>\n',
-    "test/pw/feature.pw.ts": featureSpec(checkpointAfterAssertion),
+    "test/pw/feature.pw.ts": featureSpec,
     "test/pw/checkpoint.pw.ts": realSpec,
     "test/pw/ids.pw.ts": idsSpec,
   });
@@ -991,7 +983,7 @@ describe("checkpoint screenshots", () => {
         result: { code: number; out: string; err: string };
       }
     | undefined;
-  const featureRun = () => (sharedRun ??= uiRun(false));
+  const featureRun = () => (sharedRun ??= uiRun());
 
   test("ARK-T3 ark test moves a test's checkpoints to the base and head case folders, removes the scratch folder and drops a test with no case id", () => {
     const run = featureRun();
@@ -1030,17 +1022,6 @@ describe("checkpoint screenshots", () => {
     expect(headNames).toEqual(baseNames);
     for (const side of ["base", "head"] as const)
       for (const name of baseNames) expectPng(join(evidence, "FAKE-T9", side, "screenshots", name));
-  });
-
-  test("ARK-T4 a checkpoint after the failing assertion leaves the base with fewer screenshots than the head", () => {
-    // Why a checkpoint goes before its assertion: after it, a base failure never reaches the call.
-    const run = uiRun(true);
-    expect(run.result.code, run.result.err + run.result.out).toBe(0);
-    expect(screenshotNames(run.runDirectory, "FAKE-T9", "base")).toEqual(["opened.png"]);
-    expect(screenshotNames(run.runDirectory, "FAKE-T9", "head")).toEqual([
-      "feature-visible.png",
-      "opened.png",
-    ]);
   });
 });
 

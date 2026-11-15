@@ -30,9 +30,8 @@ Prove that `ark test` runs at the `worktree.created` base commit, for a `feature
 5. In each base checkout assert: `test/keep.test.ts` still exists (deletion is not copied); `test/old-name.test.ts` still exists beside `test/renamed.test.ts`; `src/feature.ts` has no `feature()` and `packages/app/src/p.ts` does not exist (production stays at base); `tests/nested/a.test.ts`, `packages/app/tests/a.test.ts` and `test/cases/ARK-X.md` are unchanged.
 6. Run `ark test` for K2 (`bug`) and K3 (`perf`). For each assert exit 0 and the same base assertions of steps 3 to 5.
 7. Run `ark test` for K4 (`refactor`). Assert exit non-zero. Run it a second time after changing `test/new.test.ts` at head so the suites pass at base the second time; assert the second run executed the suites again (suite output carries a fresh run counter written by the suite to a file outside the repo) and its exit code reflects the second result (0), not the first.
-8. Run `ark test` for K5. Assert exit non-zero although base failed as well.
-9. Run `ark test` for K6 (`bug`), K7 (`perf`) and K8 (`refactor`, suites pass at base, `test/new.test.ts` fails at head). For each assert exit non-zero and that the head suite output shows the failure.
-10. Run `ark test` for K1 twice with `test/new.test.ts` content changed in head between the runs; assert the second run's base checkout holds the second content and the suite run counter increased for K1 as well.
+8. Run `ark test` for K5 (`feature`, `test/new.test.ts` fails at base too), K6 (`bug`), K7 (`perf`) and K8 (`refactor`, suites pass at base, `test/new.test.ts` fails at head). For each assert exit non-zero and that the head suite output shows the failure.
+9. Run `ark test` for K1 twice with `test/new.test.ts` content changed in head between the runs; assert the second run's base checkout holds the second content and the suite run counter increased for K1 as well.
 
 ## Expected results
 
@@ -41,7 +40,7 @@ Prove that `ark test` runs at the `worktree.created` base commit, for a `feature
 - When `ark test` runs, the system shall copy head's added, changed and renamed-to files under any `test`, `tests` or `features` folder (any depth, including non-root folders such as `packages/app/test`, helpers, fixtures and `test/cases/`) into the base checkout, and shall not delete a base file deleted or renamed at head, and shall not copy production files.
 - When `ark test` runs a full (not `--quick`) `feature`, `bug`, `perf` or `refactor` run, the system shall run the suites at base on the first invocation for a given base commit and copied-test-file hash, and shall run them again whenever either changes (steps 7 and 10 change the head test file, so the copied hash changes). Reuse of an unchanged passed base result is owned by ARK-T163; a failed base result is never reused. The copying, base-SHA and outcome assertions of this case hold on every run that executes base.
 - When the suites fail at base in a `refactor` run with at least one `method: test` AC, the system shall exit non-zero. A `refactor` run with no `method: test` AC is not refused for this (ARK-T63).
-- When a suite fails at head, the system shall exit non-zero for every kind, including `bug`, `perf` and `refactor` runs whose base passes.
+- When a suite fails at head, the system shall exit non-zero for every kind, including a `feature` run whose new test fails at base too and `bug`, `perf` and `refactor` runs whose base passes, and the head log shall show the failure.
 
 ## Screenshot checkpoints
 

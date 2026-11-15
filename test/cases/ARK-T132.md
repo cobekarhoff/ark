@@ -5,8 +5,9 @@ level: integration
 technique: state transition (hang case sets a short timeout, then a later close must run without it); state release instead of timed answer
 priority: high
 risk: "the short ARK_ORCA_TIMEOUT_MS of the hang case stays in the process environment, so a later close times out against a slow orca and prints an orca line; or the slow orca answers by a timer and the test fails under host stall"
-status: active
-changed_by: 2026-11-08-ARK-331-1
+status: retired
+retired_reason: "the only test asserted the test's own runHangingClose helper timeout, not product behavior: no cli/ code sets or restores ARK_ORCA_TIMEOUT_MS (cli/orca.ts:58 documents it as a test override), so no product contract is left to keep (ledger mark D, no keeper)"
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective

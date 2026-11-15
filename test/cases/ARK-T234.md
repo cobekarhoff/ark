@@ -6,7 +6,7 @@ technique: state transition (manual answer, text amend with carry words), then a
 priority: high
 risk: the carry flag only reaches the CLI and not the event, so the reducer still clears the answer on replay, or the words are lost and the decision has no audit trail
 status: active
-changed_by: 2026-11-10-ARK-361-1
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
@@ -14,6 +14,8 @@ changed_by: 2026-11-10-ARK-361-1
 Prove that the human's explicit decision keeps the answer and is recorded in the event. Serves ARK-361/AC4.
 
 Expected: Where `--carry-manual <words>` is given with a text amend, the system shall keep the manual answer and record the old text, the new text, the reason and the words in criteria.amended.
+
+It keeps ARK-308-AC2 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 

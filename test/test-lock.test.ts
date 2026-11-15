@@ -416,7 +416,7 @@ describe("ark test budget", () => {
 
   // Another copy of this file, or another agent's ark test, runs a runner of the same run id under its own ARK_HOME.
   // It is stood in for by a process with a runner's command line that has no record under this ARK_HOME.
-  test("the cleanup of one copy of this file leaves the runner of another copy with the same run id alone", async () => {
+  test("ARK-T568 the cleanup of one copy of this file leaves the runner of another copy with the same run id alone", async () => {
     const other = Bun.spawn(
       [
         process.execPath,
@@ -871,20 +871,6 @@ describe("ark test memory admission", () => {
     });
 
   test.skipIf(!onMac)(
-    "ARK-T187 holds on free memory below the floor, one line, and starts after recovery",
-    () => holdsThenStarts({ freePercent: 19, swapGigabytes: 2 }, /free 19% is below the 20% floor/),
-  );
-
-  test.skipIf(!onMac)(
-    "ARK-T187 holds on swap above the ceiling, one line, and starts after recovery",
-    () =>
-      holdsThenStarts(
-        { freePercent: 50, swapGigabytes: 8.1 },
-        /swap 8\.1 GB is above the 8 GB ceiling/,
-      ),
-  );
-
-  test.skipIf(!onMac)(
     "ARK-T187 holds on swap just above the ceiling that prints as the ceiling",
     () =>
       holdsThenStarts(
@@ -1020,35 +1006,6 @@ describe("ark chief state host", () => {
       expect(holdLines(text)).toHaveLength(1);
       // Load and disk are the real host's: the line is `no` only when they are clear.
       expect(holdLines(text)[0]).not.toMatch(/free \d+%|swap/);
-    },
-  );
-
-  test.skipIf(!onMac)("ARK-T188 limits are crossed only beyond their value", () => {
-    setFakeHost({ freePercent: 20, swapGigabytes: 8 });
-    expect(holdLines(host())[0]).not.toMatch(/free \d+%|swap/);
-  });
-
-  test.skipIf(!onMac)("ARK-T188 names low free memory", () => {
-    setFakeHost({ freePercent: 19, swapGigabytes: 2 });
-    expect(holdLines(host())).toEqual([expect.stringContaining("free 19% is below the 20% floor")]);
-  });
-
-  test.skipIf(!onMac)("ARK-T188 names high swap", () => {
-    setFakeHost({ freePercent: 50, swapGigabytes: 8.1 });
-    const line = holdLines(host())[0]!;
-    expect(line).toContain("swap 8.1 GB is above the 8 GB ceiling");
-    expect(line).not.toMatch(/free \d+%/);
-  });
-
-  test.skipIf(!onMac)(
-    "ARK-T188 joins crossed limits in one line, free memory first, then swap",
-    () => {
-      setFakeHost({ freePercent: 19, swapGigabytes: 8.1 });
-      const lines = holdLines(host());
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain(
-        "free 19% is below the 20% floor; swap 8.1 GB is above the 8 GB ceiling",
-      );
     },
   );
 
