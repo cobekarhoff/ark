@@ -4,9 +4,9 @@ title: ARK-T155 ark test admits a suite in arrival order when its cores fit the 
 level: integration
 technique: state transition (waiting, running, ended) with boundary values on cores against the budget
 priority: high
-risk: A later small suite overtakes an older large one, a request above the budget waits forever, an ended pid keeps its cores, or the budget default or placeholder is wrong
+risk: A later small suite overtakes an older large one, a request above the budget waits forever, an ended pid keeps its cores, the budget default or placeholder is wrong, a ticket taken for a foreign owner pid (the coordinator of a `bun test --parallel`) is removed when the helper that took it exits, or a second take for the same owner adds a second ticket
 status: active
-changed_by: 2026-11-09-ARK-390-1
+changed_by: 2026-11-15-ARK-513-1
 ---
 
 ## Objective
@@ -30,6 +30,7 @@ Expected: A request that fits starts at once; one that does not waits; it starts
 6. With no `test_budget_cores` in `ark.yml` on a host the case fixes at 10 cores: the budget is 6.
 7. Real processes run the lock-free admission under paused interleavings (publication, started write, stale unlink) and never hold more cores than the budget together: an older ticket published after a newer one already runs waits; two tickets that both passed the admission check end with the later one revoking; an older started ticket waits for a newer one that missed it.
 8. Two real processes see the same ticket of an ended pid. The first is paused right before it removes it; the second removes it. The first's removal finds it gone and no live ticket is deleted; only one of them runs.
+9. A real owner process O that the case starts blocks on a file the case removes. Two real helper processes, children of the case and not of O, take tickets for the owner pid of O: helper H1 takes twice, helper H2 takes once. Read the store, end H1 and H2, read again, then end O and read again.
 
 Not repeated here: chief-state holder/waiter data (ARK-T61), dead-holder recovery (ARK-T60), SIGINT cleanup and whole-budget mutual exclusion (ARK-T59), older-waiter precedence of equal-size requests (ARK-T113). They are updated for budget tickets and linked to AC3.
 
@@ -42,6 +43,7 @@ Not repeated here: chief-state holder/waiter data (ARK-T61), dead-holder recover
 - Step 6: budget 6.
 - Step 7: at every observed state, only one of two whole-budget processes runs; the other runs after the first ends.
 - Step 8: the stale file is gone, both live tickets stay, and one process runs.
+- Step 9: one ticket for the pid of O with its cores (H1's second take and H2's take add none); it stays after H1 and H2 exit (a helper writes no exit cleanup); it is gone after O ends and the next reader runs.
 
 ## Screenshot checkpoints
 
