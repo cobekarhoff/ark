@@ -466,7 +466,8 @@ ark test-case new <KEY> [--run <run>] [--project <name>]
 
 Run in a git repo, or anywhere with `--run <run>` (with `--project <name>` when the run ID is in
 several projects), which writes into the root repo worktree of that run and refuses a closed run or
-one with no worktree. Without `--run` it refuses in the `workspace:` checkout of a project, since
+one with no worktree. Without `--run` it refuses in the `workspace:` checkout of a project and in a
+project folder (`ARK_HOME/projects/<project>`, with `runs/` and the other folders under it), since
 that file belongs to no run. It allocates the next test case ID `<KEY>-T<n>`, one above the highest
 of a counter file per key in the git common directory, the `<KEY>-T*` entries in `test/cases/` and
 the entries on the last fetched origin target branch (a missing origin counts as none; it never
