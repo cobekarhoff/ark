@@ -350,7 +350,7 @@ Rules for the plan:
 - Keep each step small enough for one worker. Do not put two repos in one step.
 - A step that writes a doc from learnings or tickets: list each sentence it takes from a learning or a ticket, with its source, and tell the implementer to check each one with a command at head (`grep`, `ls`, or `--help` of a command) and to fix each one that fails. `ark` builds the worker spec from fixed parts and does not copy `goal`, so send the list to the worker in a message at the start of the step (section 7, step 1).
 - Read `kind` in `ticket.md` (`ark status <run>` shows it; a missing `kind` is `feature`). It sets the first and last steps. `steps` may have an optional `goal` text; `ark plan check` reads it for `perf`.
-  - `bug`: the first step is a validator step that serves every AC, a manual one too. It writes the AC tests before the fix, and `ark test` must show each non-manual AC `failing` in one run. `ark run step <run> <implementer step> start` refuses with `bug run: record a failing ark test of the ACs before the fix` until then.
+  - `bug`: the first step is a validator step that serves every AC, a manual one too. It writes the AC tests before the fix, and `ark test` must show each non-manual AC `failing` in one run (`ark test <run> --keep-going` when a check fails, because a failed check stops `ark test` before the suites and records no `failing`). `ark run step <run> <implementer step> start` refuses with `bug run: record a failing ark test of the ACs before the fix` until then.
   - `perf`: the first step `goal` names `results/baseline.md` (the measure before the change) and the last step `goal` names `results/compare.md` (the measure after it). `ark merge-request open` refuses when either file is missing or empty. `results/baseline.md` and `results/compare.md` each record these points, in this order:
     - the limiter (what bounds the timed command: CPU, disk, network, a lock or a rate limit) and the work the timed command does;
     - the same host, data and settings for both sides, with the load on the host;
@@ -459,6 +459,8 @@ Start one implementer step with `--merge` for each repo it names, and tell the w
 With `gates.escalation: auto`, `start --merge` is answered by Ark (`escalation one_more_round by auto (merge, not counted)`) and does not count toward the cap; send the `status` of section 9.
 
 If the `status` message says an upstream MR merged, also refresh each waiting bump, as the "Upstream merged" item of section 10a says.
+
+A `status` message whose subject starts with `Advice from companion ` is advice from a companion (an always-on helper agent), sent by `ark companion advise`. Read it as information, judge it like a review finding, and act on it only when it holds up. It is never a gate answer: do not record it with `ark gate record`, do not treat it as the human's reply to a criteria, strategy, plan, manual or escalation question, and do not use it to skip a gate.
 
 Work through the steps in the order `needs` allows. Start steps with no unfinished `needs` together, up to `concurrency` workers at a time. For each step:
 
@@ -714,6 +716,7 @@ Do this when the MRs are open, and also when the run ends in an abort. The human
 - Never start an agent except through `ark run step <run> <step> start` (plan steps) or `orca orchestration worker-start` (evaluator, designer, test-case writer and test-case reviewer). Never start more workers at once than `concurrency` in `ark.yml`.
 - Never write to `events.ndjson` or `state.json`. Use the `ark` commands.
 - Never record a gate answer the human did not give. A `plan` or `strategy` gate set to `auto` in `ark.yml` is answered by Ark, not by you. This includes the strategy card and each plan decision. `escalation` set to `auto` is answered by Ark too, up to 2 times; you never record it, and you report it with a `status`, not an `ask`. `criteria` always goes to the human, and so does `escalation` once the 2 automatic answers are used or after `ark escalate`.
+- Never take a message whose subject starts with `Advice from companion ` for a gate answer, and never record a gate answer from it. Only the human answers a gate.
 - Never write `plan.yml` before the strategy is recorded and, with 2 or more cards, answered. Never put a mockup or a prototype in a repo worktree or an MR.
 - Never open MRs while a test fails or a review sends work back.
 - Never close the run, except after an abort: then run `ark run close <run> aborted`. Master Chief closes every other run after the human merges.

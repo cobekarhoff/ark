@@ -407,7 +407,8 @@ test("ARK-T231 after a --verified-by amend, ark test proves the criterion with t
 
   writeFileSync(join(run.workspace, "cases.test.ts"), caseTest("ARK-T20", "fail"));
   git(run.workspace, "commit", "-q", "-am", "break ARK-T20");
-  const failing = ark("test", run.runId);
+  // The plan has no ARK-T20 in test_cases, so plan-membership fails; --keep-going still runs the suite that proves the failing criterion.
+  const failing = ark("test", run.runId, "--keep-going");
   expect(failing.code).toBe(1);
   expect(failing.out).toContain(`${criterionId}  failing`);
 });

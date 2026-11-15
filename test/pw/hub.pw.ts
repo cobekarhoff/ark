@@ -40,6 +40,7 @@ import {
   fakeToolGateEnvironment,
   commitCase,
   ompMessagesText,
+  ompSessionText,
   orcaAnswersFor,
   today,
   transcriptText,
@@ -62,6 +63,7 @@ import {
 import {
   ark,
   checkpoint,
+  companionsProject,
   finiteAnimationsEnded,
   installFakeTools,
   serve,
@@ -72,8 +74,11 @@ import {
   tempDirectory,
   useCleanup,
   dateOf,
+  isoAgo,
   isoAt,
+  removeFakeCompanionTools,
   testNow,
+  type CompanionsProject,
   writeFakeOrca,
   writeProject,
 } from "./helpers.ts";
@@ -90,6 +95,7 @@ test.afterEach(async () => {
   delete process.env[fakeGateEnvironment];
   for (const tool of fakeTools) delete process.env[fakeToolGateEnvironment(tool)];
   await Promise.all(started.splice(0).map((hub) => stopHub(hub.process)));
+  removeFakeCompanionTools();
 });
 
 /** Holds every fake tool until the returned function runs. Call it before `launch`, so the hub inherits the gate. */
@@ -3360,7 +3366,7 @@ test("ARK-T128 the first action of Home is visible and its hover colour final af
   expect(await contrastRatioOf(action), "hovered first action of Home").toBeGreaterThanOrEqual(4.5);
 });
 
-test("ARK-T301 #/map redirects to #/runs and the nav lists Home, Runs, Roadmap and Resources", async ({
+test("ARK-T301 #/map redirects to #/runs and the nav lists Home, Runs, Roadmap, Resources and Companions", async ({
   page,
 }) => {
   isolate();
@@ -3370,7 +3376,7 @@ test("ARK-T301 #/map redirects to #/runs and the nav lists Home, Runs, Roadmap a
   await expect(page.getByTestId("lane")).toHaveCount(5);
   await expect(page).toHaveURL(/#\/runs$/);
   const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
-  await expect(links).toHaveText(["Home", "Runs", "Roadmap", "Resources"]);
+  await expect(links).toHaveText(["Home", "Runs", "Roadmap", "Resources", "Companions"]);
 });
 
 test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a ticket page and a run page read only their own text", async ({
@@ -3495,7 +3501,7 @@ const ticketsOf = (page: Page) =>
     .getByTestId("ticket-row")
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-ticket")));
 
-test("ARK-T301 the nav lists Home, Runs, Roadmap and Resources, and #/backlog and #/backlog/<ticket> redirect to #/roadmap and #/roadmap/<ticket>", async ({
+test("ARK-T301 the nav lists Home, Runs, Roadmap, Resources and Companions, and #/backlog and #/backlog/<ticket> redirect to #/roadmap and #/roadmap/<ticket>", async ({
   page,
 }) => {
   isolate();
@@ -3513,7 +3519,7 @@ test("ARK-T301 the nav lists Home, Runs, Roadmap and Resources, and #/backlog an
   await expect(page.getByTestId("roadmap-page")).toHaveCount(0);
 
   const links = page.getByRole("navigation", { name: "Views" }).getByRole("link");
-  await expect(links).toHaveText(["Home", "Runs", "Roadmap", "Resources"]);
+  await expect(links).toHaveText(["Home", "Runs", "Roadmap", "Resources", "Companions"]);
   await expect(page.getByRole("navigation", { name: "Views" })).not.toContainText("Backlog");
   await expect(links.nth(2)).toHaveAttribute("href", "#/roadmap");
 });
@@ -11966,4 +11972,457 @@ test("ARK-T357 the Now panel follows the scrubber, a type chip, a run filter and
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(viewport).not.toHaveClass(/full/);
   await expect(page.getByTestId("map")).toHaveCount(1);
+});
+
+// ---------------------------------------------------------------- ARK-480: the Companions page
+
+const xssPayload = '<img src=x onerror="window.__xss = 1">';
+const emoji = "😀"; // four UTF-8 bytes, one character
+
+type CompanionsPage = {
+  project: CompanionsProject;
+  baseUrl: string;
+  ticketFile: (id: string) => string;
+};
+
+/** One `ark` write as `METHOD /path`: every non-GET request the page sends. */
+function watchWrites(page: Page): string[] {
+  const writes: string[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "GET")
+      writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  });
+  return writes;
+}
+
+/** The calls that act on a worker or the queue in the fake orca: a read of Orca is not among them. */
+const actingVerbs = (project: CompanionsProject) =>
+  project.fake
+    .verbs()
+    .filter((verb) => ["send", "task-create", "worker-start", "worker-stop"].includes(verb));
+
+/**
+ * Project `p` with `cortana` and `gardener` started by a real `ark companions sync` against the fake
+ * orca, then `quiet` listed with no worker. Cortana: priced session ($0.25 + $0.50), two wakes, three
+ * ideas (the newest holds an HTML payload) and two proposed tickets. Gardener: a session with one
+ * unpriced message. Ticket ARK-903 is a human's proposal with no `source`.
+ */
+async function companionsPage(options: { orcaDown?: boolean } = {}): Promise<CompanionsPage> {
+  const project = companionsProject();
+  const triggers = {
+    cortana: ["run.merged", "escalation"],
+    gardener: ["run.started"],
+  };
+  project.list(triggers);
+  const synced = project.arkP("companions", "sync");
+  expect(synced.out).toBe("cortana: started\ngardener: started\n");
+  project.list({ ...triggers, quiet: ["criteria.opened"] });
+
+  // The sync recorded each companion's session (the file the fake's worker-start wrote, found by its
+  // prompt). The priced messages the harness would append go to that file.
+  const addMessages = (name: string, text: string) => {
+    const record = JSON.parse(
+      readFileSync(join(project.folder, "companions", name, "worker.json"), "utf8"),
+    );
+    expect(record.session, `${name} session recorded by the sync`).toEqual(expect.any(String));
+    appendFileSync(record.session, text.split("\n").slice(1).join("\n"));
+  };
+  const when = dateOf(testNow() - 60_000);
+  addMessages(
+    "cortana",
+    ompSessionText(project.folder, [
+      { time: when, costUsd: 0.25 },
+      { time: when, costUsd: 0.5 },
+    ]),
+  );
+  const unpriced = {
+    type: "message",
+    id: "unpriced",
+    timestamp: when.toISOString(),
+    message: {
+      role: "assistant",
+      provider: "anthropic",
+      model: "claude-fixture",
+      content: [],
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+      },
+      stopReason: "stop",
+    },
+  };
+  addMessages(
+    "gardener",
+    ompSessionText(project.folder, [{ time: when, costUsd: 0.5 }]) +
+      `${JSON.stringify(unpriced)}\n`,
+  );
+
+  const cortana = join(project.folder, "companions", "cortana");
+  writeFileSync(
+    join(cortana, "wake.log"),
+    [
+      {
+        time: isoAgo(3_600_000),
+        trigger: "run.started",
+        run: runId("ARK-100"),
+      },
+      { time: isoAgo(600_000), trigger: "run.merged", run: runId("ARK-101") },
+    ]
+      .map((wake) => JSON.stringify(wake))
+      .join("\n") + "\n",
+  );
+  writeFileSync(
+    join(cortana, "ideas.md"),
+    [
+      "# Cortana ideas",
+      "",
+      "## C-1: Watch main's push CI",
+      "- Idea: Print the last push CI result in chief state.",
+      "- Size: small",
+      "",
+      "## C-2: Stop ark test early",
+      "- Idea: Skip the suites when a check failed.",
+      "- Size: small",
+      "",
+      `## C-3: ${xssPayload}`,
+      `- Idea: ${xssPayload} and <script>window.__xss = 3</script>`,
+      "- Size: small",
+      "",
+    ].join("\n"),
+  );
+  mkdirSync(join(project.folder, "tickets"), { recursive: true });
+  const ticketFile = (id: string) => join(project.folder, "tickets", `${id}.md`);
+  for (const [id, source] of [
+    ["ARK-901", "source: cortana\n"],
+    ["ARK-902", "source: cortana\n"],
+    ["ARK-903", ""],
+  ])
+    writeFileSync(
+      ticketFile(id),
+      `---\nid: ${id}\ntitle: "Ticket ${id}"\nstatus: proposed\n${source}---\n\n## Problem\n\nWhy ${id}. More words follow.\n`,
+    );
+
+  if (options.orcaDown) project.fake.configure({ failAll: true });
+  return { project, baseUrl: await launch(), ticketFile };
+}
+
+const companionRow = (page: Page, name: string) =>
+  page.locator(`[data-testid="companion-row"][data-companion="${name}"]`);
+const companionItem = (page: Page, ref: string) =>
+  page.locator(`[data-testid="companion-item"][data-ref="${ref}"]`);
+const refsOf = (list: Locator) =>
+  list.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-ref")));
+
+test("ARK-T660 the Companions page lists a row for each companion with state, last wake, trigger and cost, the proposed tickets and ideas under them, and agent text stays text", async ({
+  page,
+}) => {
+  test.slow();
+  const { baseUrl } = await companionsPage();
+  const writes = watchWrites(page);
+
+  // Way in 1: the nav tab. Way in 2: the typed URL on a fresh load. Esc leaves the page where it is, as on the other views.
+  await open(page, baseUrl, "");
+  await page
+    .getByRole("navigation", { name: "Views" })
+    .getByRole("link", { name: "Companions" })
+    .click();
+  await expect(page).toHaveURL(/#\/companions$/);
+  await expect(page.getByTestId("companions-table")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/companions$/);
+  await page.goto("about:blank");
+  await page.goto(`${baseUrl}/#/companions`);
+  await expect(page.getByTestId("companions-table")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/#\/companions$/);
+
+  const rows = page.getByTestId("companion-row");
+  await expect(rows).toHaveCount(3);
+  expect(
+    await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-companion"))),
+  ).toEqual(["cortana", "gardener", "quiet"]);
+
+  const cortana = companionRow(page, "cortana");
+  await checkpoint(page, "populated-light-1280");
+  await expect(cortana).toHaveAttribute("data-state", "running");
+  await expect(cortana.getByTestId("companion-state")).toContainText("running");
+  await expect(cortana.getByTestId("companion-triggers").getByRole("listitem")).toHaveText([
+    "run.merged",
+    "escalation",
+  ]);
+  await expect(cortana.getByTestId("companion-wake")).toContainText("run.merged");
+  await expect(cortana.getByTestId("companion-wake")).toContainText(runId("ARK-101"));
+  await expect(cortana.getByTestId("companion-wake").locator("time")).toHaveAttribute(
+    "datetime",
+    isoAgo(600_000),
+  );
+  // Cost: the sum of the priced messages of its session, then the unpriced and the empty session as `unknown`.
+  await expect(cortana.getByTestId("companion-cost")).toHaveText("$0.75");
+  await expect(companionRow(page, "gardener")).toHaveAttribute("data-state", "running");
+  await expect(companionRow(page, "gardener").getByTestId("companion-cost")).toHaveText("unknown");
+  await checkpoint(page, "unknown-cost");
+  const quiet = companionRow(page, "quiet");
+  await expect(quiet).toHaveAttribute("data-state", "none");
+  await expect(quiet.getByTestId("companion-state")).toContainText("not running");
+  await expect(quiet.getByTestId("companion-wake")).toContainText("none");
+  await expect(quiet.getByTestId("companion-cost")).toHaveText("unknown");
+
+  // Under the table: cortana's two proposed tickets, newest first, and its three ideas; the human's ticket is not listed here.
+  await expect(
+    page.locator('[data-testid="companion-tickets"] [data-testid="companion-item"]'),
+  ).toHaveCount(2);
+  expect(
+    await refsOf(page.locator('[data-testid="companion-tickets"] [data-testid="companion-item"]')),
+  ).toEqual(["ARK-902", "ARK-901"]);
+  expect(
+    await refsOf(page.locator('[data-testid="companion-ideas"] [data-testid="companion-item"]')),
+  ).toEqual(["C-3", "C-2", "C-1"]);
+  await expect(companionItem(page, "ARK-901")).toContainText("cortana");
+  await expect(companionItem(page, "ARK-903")).toHaveCount(0);
+  await expect(page.locator('[data-testid="companion-item"][data-companion="quiet"]')).toHaveCount(
+    0,
+  );
+
+  // The payload is text: no element, no handler, no script.
+  const ideas = page.getByTestId("companion-ideas");
+  await expect(ideas).toContainText(xssPayload);
+  await expect(ideas).toContainText("window.__xss = 3");
+  await expect(ideas.locator("img, script")).toHaveCount(0);
+  expect(await page.evaluate(() => "__xss" in window)).toBe(false);
+
+  // The other looks of the page.
+  await page.emulateMedia({ colorScheme: "dark" });
+  await checkpoint(page, "populated-dark-1280");
+  await page.setViewportSize({ width: 720, height: 900 });
+  await checkpoint(page, "populated-dark-720");
+  await page.emulateMedia({ colorScheme: "light" });
+  await checkpoint(page, "populated-light-720");
+  await expect(cortana.getByTestId("companion-cost")).toHaveText("$0.75");
+
+  expect(writes).toEqual([]); // a read-only visit sends no write
+});
+
+test("ARK-T660 with no companions key in ark.yml the page says so and has no table", async ({
+  page,
+}) => {
+  test.slow();
+  const bare = companionsProject();
+  bare.list(undefined);
+  await open(page, await launch(), "companions");
+  await expect(page.getByTestId("companions-empty")).toBeVisible();
+  await expect(page.getByTestId("companions-table")).toHaveCount(0);
+  await expect(page.locator("main h1")).toContainText("none listed in ark.yml");
+  await checkpoint(page, "no-companions");
+});
+
+test("ARK-T660 with only quiet listed its row is not running, has no wake and an unknown cost, and has nothing under it", async ({
+  page,
+}) => {
+  test.slow();
+  const only = companionsProject();
+  only.list({ quiet: ["criteria.opened"] });
+  await open(page, await launch(), "companions");
+  await expect(page.getByTestId("companion-row")).toHaveCount(1);
+  const quiet = companionRow(page, "quiet");
+  await expect(quiet).toHaveAttribute("data-state", "none");
+  await expect(quiet.getByTestId("companion-state")).toContainText("not running");
+  await expect(quiet.getByTestId("companion-wake")).toContainText("none");
+  await expect(quiet.getByTestId("companion-cost")).toHaveText("unknown");
+  await expect(page.getByTestId("companion-item")).toHaveCount(0);
+  await checkpoint(page, "only-quiet");
+});
+
+test("ARK-T660 with Orca failing every row says unavailable, not stopped, Ask is off and Approve and Dismiss stay on", async ({
+  page,
+}) => {
+  test.slow();
+  const { baseUrl } = await companionsPage({ orcaDown: true });
+  await open(page, baseUrl, "companions");
+  await expect(page.getByTestId("companion-row")).toHaveCount(3);
+  for (const name of ["cortana", "gardener", "quiet"]) {
+    await expect(companionRow(page, name)).toHaveAttribute("data-state", "unavailable");
+    await expect(companionRow(page, name).getByTestId("companion-state")).toHaveText("unavailable");
+  }
+  await expect(page.getByTestId("companions-orca-notice")).toBeVisible();
+  expect((await page.getByTestId("companion-state").allTextContents()).join(" ")).not.toMatch(
+    /stopped/i,
+  );
+  await checkpoint(page, "orca-unavailable");
+  await expect(page.getByRole("button", { name: "Ask about ARK-901" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Ask about idea from cortana" }).first(),
+  ).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Approve ARK-901" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Dismiss ARK-901" })).toBeEnabled();
+});
+
+test("ARK-T660 Approve sets only the clicked ticket to ready, shows approved at once, queues nothing and sends one POST", async ({
+  page,
+}) => {
+  test.slow();
+  const { project, baseUrl, ticketFile } = await companionsPage();
+  const writes = watchWrites(page);
+  await open(page, baseUrl, "companions");
+  const others = ["ARK-902", "ARK-903"].map((id) => readFileSync(ticketFile(id), "utf8"));
+  const before = readFileSync(ticketFile("ARK-901"), "utf8");
+  const callsBefore = actingVerbs(project).length;
+
+  await checkpoint(page, "before-approve");
+  await page.getByRole("button", { name: "Approve ARK-901" }).click();
+  await checkpoint(page, "after-approve");
+  await expect(companionItem(page, "ARK-901")).toHaveAttribute("data-done", "approved");
+  await expect(companionItem(page, "ARK-901").locator(".pill")).toHaveText("approved");
+  await expect(companionItem(page, "ARK-901").getByRole("button")).toHaveCount(0);
+
+  expect(readFileSync(ticketFile("ARK-901"), "utf8")).toBe(
+    before.replace("status: proposed", "status: ready"),
+  );
+  expect(["ARK-902", "ARK-903"].map((id) => readFileSync(ticketFile(id), "utf8"))).toEqual(others);
+  expect(actingVerbs(project).slice(callsBefore)).toEqual([]); // no task-create, no send
+  expect(writes).toEqual(["POST /api/companions/approve"]);
+});
+
+test("ARK-T660 Dismiss refuses an empty reason on the form, then writes the ticket or the idea with its reason and time to dismissed.md, and a reload offers no action on either", async ({
+  page,
+}) => {
+  test.slow();
+  const { project, baseUrl } = await companionsPage();
+  const writes = watchWrites(page);
+  const dismissedFile = join(project.folder, "companions", "cortana", "dismissed.md");
+  await open(page, baseUrl, "companions");
+
+  const ticket = companionItem(page, "ARK-902");
+  await page.getByRole("button", { name: "Dismiss ARK-902" }).click();
+  await expect(ticket.getByTestId("companion-dismiss-form")).toBeVisible();
+  await ticket.getByRole("button", { name: "Dismiss ticket", exact: true }).click();
+  await checkpoint(page, "dismiss-refused");
+  await expect(ticket.getByTestId("companion-form-error")).toContainText("reason");
+  expect(existsSync(dismissedFile)).toBe(false);
+  expect(writes).toEqual([]);
+
+  await ticket.getByRole("textbox").fill("Duplicate of ARK-498");
+  await ticket.getByRole("button", { name: "Dismiss ticket", exact: true }).click();
+  await expect(ticket).toHaveAttribute("data-done", "dismissed");
+  await checkpoint(page, "ticket-dismissed");
+  const afterTicket = readFileSync(dismissedFile, "utf8");
+  expect(afterTicket).toContain("- item: ticket ARK-902");
+  expect(afterTicket).toContain("- reason: Duplicate of ARK-498");
+  expect(afterTicket).toContain(`## ${isoAt()}`);
+
+  const idea = companionItem(page, "C-2");
+  await idea.getByRole("button", { name: "Dismiss idea from cortana" }).click();
+  await idea.getByRole("textbox").fill("Out of scope");
+  await idea.getByRole("button", { name: "Dismiss idea", exact: true }).click();
+  await expect(idea).toHaveAttribute("data-done", "dismissed");
+  const afterIdea = readFileSync(dismissedFile, "utf8");
+  expect(afterIdea).toContain("- item: idea C-2");
+  expect(afterIdea).toContain("- reason: Out of scope");
+  expect(writes).toEqual(["POST /api/companions/dismiss", "POST /api/companions/dismiss"]);
+
+  await page.reload();
+  await expect(page.getByTestId("companions-table")).toBeVisible();
+  for (const dismissed of [companionItem(page, "ARK-902"), companionItem(page, "C-2")]) {
+    await expect(dismissed).toHaveAttribute("data-done", "dismissed");
+    await expect(dismissed.getByRole("button")).toHaveCount(0);
+  }
+  // The items nobody dismissed still offer their actions.
+  await expect(companionItem(page, "ARK-901").getByRole("button")).toHaveCount(3);
+  await checkpoint(page, "after-reload");
+});
+
+test("ARK-T660 Ask from a ticket and from an idea sends one message each to the worker with the question and the item, and with Orca failing the form shows the refusal and sends nothing", async ({
+  page,
+}) => {
+  test.slow();
+  const { project, baseUrl } = await companionsPage();
+  const writes = watchWrites(page);
+  await open(page, baseUrl, "companions");
+
+  const ticket = companionItem(page, "ARK-901");
+  await page.getByRole("button", { name: "Ask about ARK-901" }).click();
+  await ticket.getByRole("textbox").fill("Why is this small?");
+  await ticket.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(ticket.getByTestId("companion-status")).toContainText("Question sent to cortana");
+  await checkpoint(page, "ask-from-ticket");
+  expect(project.fake.sent()).toHaveLength(1);
+  expect(project.fake.sent()[0].body).toContain("About ticket ARK-901: Why is this small?");
+
+  const idea = companionItem(page, "C-1");
+  await idea.getByRole("button", { name: "Ask about idea from cortana" }).click();
+  await idea.getByRole("textbox").fill("Which runs failed?");
+  await idea.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(idea.getByTestId("companion-status")).toContainText("Question sent to cortana");
+  expect(project.fake.sent()).toHaveLength(2);
+  expect(project.fake.sent()[1].body).toContain("About idea C-1: Which runs failed?");
+  expect(writes).toEqual(["POST /api/companions/ask", "POST /api/companions/ask"]);
+
+  // Orca fails after the form is open: the refusal is on the form, and nothing was sent.
+  const failing = companionItem(page, "C-2");
+  await failing.getByRole("button", { name: "Ask about idea from cortana" }).click();
+  await failing.getByRole("textbox").fill("Will this fail?");
+  project.fake.configure({ failAll: true });
+  await failing.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(failing.getByTestId("companion-form-error")).toContainText("Not sent");
+  await checkpoint(page, "ask-refused");
+  expect(project.fake.sent()).toHaveLength(2);
+  expect(writes).toHaveLength(3);
+});
+
+test("ARK-T660 a reason or question of 400 four-byte characters is accepted whole, and one of 401 is refused on the form with the limit named and nothing sent", async ({
+  page,
+}) => {
+  test.slow();
+  const { project, baseUrl } = await companionsPage();
+  const bodies: Buffer[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST") bodies.push(request.postDataBuffer() ?? Buffer.alloc(0));
+  });
+  const dismissedFile = join(project.folder, "companions", "cortana", "dismissed.md");
+  const exactly = emoji.repeat(400);
+  const over = emoji.repeat(401);
+  await open(page, baseUrl, "companions");
+
+  // 400 characters, 1600 bytes: more than the 1024 bytes the server took before, and it passes.
+  const first = companionItem(page, "ARK-901");
+  await page.getByRole("button", { name: "Dismiss ARK-901" }).click();
+  await first.getByRole("textbox").fill(exactly);
+  await first.getByRole("button", { name: "Dismiss ticket", exact: true }).click();
+  await expect(first).toHaveAttribute("data-done", "dismissed");
+  expect(readFileSync(dismissedFile, "utf8")).toContain(`- reason: ${exactly}\n`);
+  expect(bodies).toHaveLength(1);
+  expect(bodies[0].length).toBeGreaterThan(1024);
+  expect(bodies[0].length).toBeLessThanOrEqual(4096);
+
+  // 401 characters: refused on the form, named limit, no request.
+  const second = companionItem(page, "ARK-902");
+  await page.getByRole("button", { name: "Dismiss ARK-902" }).click();
+  await second.getByRole("textbox").fill(over);
+  await second.getByRole("button", { name: "Dismiss ticket", exact: true }).click();
+  await checkpoint(page, "reason-over-limit");
+  await expect(second.getByTestId("companion-form-error")).toContainText("400");
+  await expect(second).not.toHaveAttribute("data-done", /./);
+  expect(readFileSync(dismissedFile, "utf8")).not.toContain("ARK-902");
+  expect(bodies).toHaveLength(1);
+
+  // The same two limits on the question.
+  const idea = companionItem(page, "C-1");
+  await idea.getByRole("button", { name: "Ask about idea from cortana" }).click();
+  await idea.getByRole("textbox").fill(exactly);
+  await idea.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(idea.getByTestId("companion-status")).toContainText("Question sent to cortana");
+  expect(project.fake.sent()).toHaveLength(1);
+  expect(project.fake.sent()[0].body).toContain(exactly);
+  expect(bodies).toHaveLength(2);
+  expect(bodies[1].length).toBeGreaterThan(1024);
+
+  const other = companionItem(page, "C-2");
+  await other.getByRole("button", { name: "Ask about idea from cortana" }).click();
+  await other.getByRole("textbox").fill(over);
+  await other.getByRole("button", { name: "Send question", exact: true }).click();
+  await expect(other.getByTestId("companion-form-error")).toContainText("400");
+  expect(project.fake.sent()).toHaveLength(1);
+  expect(bodies).toHaveLength(2);
 });

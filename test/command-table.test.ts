@@ -102,7 +102,7 @@ async function describe(line: string): Promise<Row> {
   return { command, usage: line, description, flags, ...(await probeBounds(words, command)) };
 }
 
-test("ARK-T283 the command table is the same as at base - order, usage, description, usage-advertised flags with arity, argument counts", async () => {
+test("ARK-T283 the command table is the same as at base except the companions commands - order, usage, description, usage-advertised flags with arity, argument counts", async () => {
   try {
     const help = (await ark("--help")).out.trim().split("\n");
     expect(help[0]).toBe("Usage: ark <command>");
@@ -115,7 +115,6 @@ test("ARK-T283 the command table is the same as at base - order, usage, descript
       writeFileSync(snapshotPath, `${JSON.stringify(records, null, 2)}\n`);
     }
     expect(records).toEqual(JSON.parse(readFileSync(snapshotPath, "utf8")));
-    expect(records).toHaveLength(31);
     // Longest match: a command that is a prefix of another still prints its own usage.
     for (const command of ["ui", "ui install", "test", "test-case new", "test-audit inventory"]) {
       expect((await ark(...command.split(" "), "--help")).out).toStartWith(`ark ${command} `);

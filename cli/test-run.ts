@@ -1044,19 +1044,35 @@ async function runAtBase(
 export async function testRun(
   runId: string,
   inProject: string | undefined,
-  options: { quick: boolean; wait: boolean; stop: boolean },
+  options: { quick: boolean; keepGoing: boolean; wait: boolean; stop: boolean },
 ): Promise<void> {
   const { project, directory } = findRun(runId, inProject);
   await callTest(runId, project, directory, options);
 }
 
 /** `ark test-runner`: the process of the detached runner; returns its exit code. SIGTERM stops every suite process group. */
-export function testRunnerMain(runId: string, project: string, quick: boolean): Promise<number> {
+export function testRunnerMain(
+  runId: string,
+  project: string,
+  quick: boolean,
+  keepGoing: boolean,
+): Promise<number> {
   const { directory } = findRun(runId, project);
-  return runnerMain(directory, quick, () => executeTest(runId, project, quick), stopChildren);
+  return runnerMain(
+    directory,
+    quick,
+    keepGoing,
+    () => executeTest(runId, project, quick, keepGoing),
+    stopChildren,
+  );
 }
 
-async function executeTest(runId: string, inProject: string, quick: boolean): Promise<void> {
+async function executeTest(
+  runId: string,
+  inProject: string,
+  quick: boolean,
+  keepGoing: boolean,
+): Promise<void> {
   const { project, directory } = findRun(runId, inProject);
   const config = loadConfig(project);
   const mirror = mirrorRoot(directory);
@@ -1192,6 +1208,44 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
         repos.map(async (repo) => [repo, await headOf(repo, config.workspace, mirror)]),
       ),
     );
+    // ARK-481: a failed check stops the run after the last check: no compose, suite, base run or evidence. `--keep-going` runs them.
+    const failedChecks = checks.filter((check) => !check.passed);
+    const stopped = failedChecks.length > 0 && !keepGoing;
+    // Information only: what `ark merge-request open` would refuse that needs just the head, shown while a fix is cheap.
+    const printHeadCheck = () => {
+      const headEvents = readEvents(directory);
+      const headCheck = checkStage(
+        runId,
+        project,
+        directory,
+        headEvents,
+        deriveState(headEvents),
+        "head",
+      );
+      const headLines = [...headCheck.problems, ...headCheck.evidence];
+      if (headLines.length > 0) console.log(["merge-request check", ...headLines].join("\n"));
+    };
+    if (stopped) {
+      rmSync(evidenceDirectory, { recursive: true, force: true });
+      // Never `failing`: that would fake the bug-run red proof. A stopped full run records no `red_on_main`, so the chief's list of files red on main is empty until the next full run: accepted.
+      appendEvent(directory, "test.completed", {
+        passed: false,
+        checks,
+        heads,
+        suites: [],
+        criteria: Object.fromEntries(
+          criteria.map((criterion) => [criterion, quick ? "not run" : "missing"]),
+        ),
+        passed_count: 0,
+        skipped: 0,
+        mode: quick ? "quick" : "full",
+        duration: Math.round((Date.now() - started) / 1000),
+      });
+      printHeadCheck();
+      throw new ArkError(
+        `tests did not prove every criterion: ${failedChecks.map((check) => `check ${check.name} failed`).join("; ")}`,
+      );
+    }
     // A dirty checkout has results no head names: nothing of this run is read from or stored in the cache.
     const dirty = (
       await Promise.all(
@@ -1429,18 +1483,7 @@ async function executeTest(runId: string, inProject: string, quick: boolean): Pr
       console.log(`evidence   results/evidence/${id}/{base,head}`);
 
     if (quick) console.log(`mode: quick (not a gate: run ark test ${runId} before the MR)`);
-    // Information only: what `ark merge-request open` would refuse that needs just the head, shown while a fix is cheap.
-    const headEvents = readEvents(directory);
-    const headCheck = checkStage(
-      runId,
-      project,
-      directory,
-      headEvents,
-      deriveState(headEvents),
-      "head",
-    );
-    const headLines = [...headCheck.problems, ...headCheck.evidence];
-    if (headLines.length > 0) console.log(["merge-request check", ...headLines].join("\n"));
+    printHeadCheck();
     const problems = [
       ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed`),
       ...suites.filter((suite) => !suite.passed).map((suite) => `suite ${suite.name} failed`),

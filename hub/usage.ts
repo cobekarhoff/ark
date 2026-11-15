@@ -132,14 +132,17 @@ export class UsageIndex {
     this.#workerUrl = workerUrl;
   }
 
-  /** Brings the index up to date for the open runs of `directories`. Calls run one after the other. */
-  refresh(directories: string[]): Promise<void> {
-    const next = this.#queue.then(() => this.#refresh(directories));
+  /**
+   * Brings the index up to date for the open runs of `directories`, and parses the session files of
+   * `companionFiles` whatever their cwd (a companion runs in no run). Calls run one after the other.
+   */
+  refresh(directories: string[], companionFiles: string[] = []): Promise<void> {
+    const next = this.#queue.then(() => this.#refresh(directories, new Set(companionFiles)));
     this.#queue = next.catch(() => {});
     return next;
   }
 
-  async #refresh(directories: string[]): Promise<void> {
+  async #refresh(directories: string[], companionFiles: Set<string>): Promise<void> {
     const parents = directories.flatMap(parentsOf);
     const seen = new Set<string>();
     const changed: [string, Entry][] = [];
@@ -189,9 +192,12 @@ export class UsageIndex {
     );
     const parses: Promise<void>[] = [];
     for (const [file, entry] of this.#entries) {
-      if (entry.cwd === null || entry.failed) continue;
+      if (entry.failed) continue;
       const cwd = entry.cwd;
-      if (!parents.some((parent) => isInside(cwd, parent))) {
+      const wanted =
+        companionFiles.has(file) ||
+        (cwd !== null && parents.some((parent) => isInside(cwd, parent)));
+      if (!wanted) {
         if (entry.messages !== null) entry.messages = null; // the run closed: free the memory
         continue;
       }
@@ -247,6 +253,18 @@ export class UsageIndex {
     const steps: Record<string, number | null> = {};
     for (const window of windows) steps[window.id] = sum(byStep.get(window.id) ?? []);
     return { total: incomplete ? null : sum(all), steps };
+  }
+
+  /**
+   * Cost of one session file the last refresh parsed as a companion's: the sum of its messages. Null
+   * (unknown) when the index does not hold the file, it is unreadable or not parsed yet, it has no
+   * message, or one message has no price. A companion session grows for as long as the companion
+   * lives, and a change parses the whole file again in a worker thread.
+   * ponytail: whole-file reparse; read only the new tail if a session gets large enough to show.
+   */
+  fileCost(file: string): number | null {
+    const entry = this.#entries.get(file);
+    return !entry || entry.failed || entry.messages === null ? null : sum(entry.messages);
   }
 
   /**

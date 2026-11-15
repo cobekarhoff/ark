@@ -68,7 +68,7 @@ An ADR records one decision and why it was made. A superseded ADR stays as histo
 | [0006](adr/0006-integration-and-e2e-proof-only.md)     | An AC is proven only by integration or E2E tests passing at head               | Superseded by 0010                                                                              |
 | [0007](adr/0007-control-center.md)                     | A read-only control center gives the high-level view                           | Superseded in part by 0008 and 0009                                                             |
 | [0008](adr/0008-hub-steers-through-master-chief.md)    | The hub steers agents through Master Chief                                     | Superseded by 0009                                                                              |
-| [0009](adr/0009-hub-is-a-read-only-live-view.md)       | Hub is a read-only live view                                                   | Accepted                                                                                        |
+| [0009](adr/0009-hub-is-a-read-only-live-view.md)       | Hub is a read-only live view                                                   | Accepted. Amended by ARK-284 (focus action) and ARK-480 (three Companions writes).              |
 | [0010](adr/0010-test-cases-describe-the-product.md)    | Test cases describe the product, and an AC is proven through them              | Accepted                                                                                        |
 
 ## Writing docs

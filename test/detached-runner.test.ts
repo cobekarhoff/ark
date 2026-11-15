@@ -1511,7 +1511,7 @@ test("ARK-T354 a runner that exits before it writes runner.json fails ark test w
   const directory = mkdtempSync(join(tmpdir(), "ark-early-"));
   try {
     const script = `import { callTest } from ${JSON.stringify(join(import.meta.dir, "../cli/test-runner.ts"))};
-try { await callTest("NOPE-1", "nope", ${JSON.stringify(directory)}, { quick: false, wait: false, stop: false }); } catch (err) { console.log((err as Error).message); }`;
+try { await callTest("NOPE-1", "nope", ${JSON.stringify(directory)}, { quick: false, keepGoing: false, wait: false, stop: false }); } catch (err) { console.log((err as Error).message); }`;
     const child = Bun.spawn(["bun", "-e", script], {
       env: { ...process.env, ARK_HOME: join(directory, "home") },
       stdout: "pipe",

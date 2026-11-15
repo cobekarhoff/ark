@@ -25,6 +25,13 @@ import {
 } from "./commands/merge-request.ts";
 import { retroCommand } from "./commands/retro.ts";
 import { chiefHandoverCommand, chiefStateCommand } from "./commands/chief.ts";
+import {
+  companionAdviseCommand,
+  companionAnswerCommand,
+  companionAskCommand,
+  companionProposeCommand,
+  companionsSyncCommand,
+} from "./commands/companions.ts";
 import { uiCommand, uiInstallCommand, uiUninstallCommand } from "./commands/ui.ts";
 import {
   servicesInstallCommand,
@@ -60,6 +67,11 @@ const commands: Command[] = [
   retroCommand,
   chiefStateCommand,
   chiefHandoverCommand,
+  companionsSyncCommand,
+  companionAskCommand,
+  companionAnswerCommand,
+  companionAdviseCommand,
+  companionProposeCommand,
   uiCommand,
   uiInstallCommand,
   uiUninstallCommand,
@@ -109,6 +121,7 @@ async function main(args: string[]): Promise<void> {
         args[1]!,
         args[args.indexOf("--project") + 1]!,
         args.includes("--quick"),
+        args.includes("--keep-going"),
       ),
     );
   }
