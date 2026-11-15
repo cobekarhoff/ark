@@ -146,8 +146,14 @@ of a validator step, without --failed and after the refusal for uncommitted chan
 `step` of `ark merge-request check` for the ACs of the step and is refused, with no event written,
 when it lists a problem: an AC string in no tracked file (counted once every implementer step that
 serves the AC has finished), a malformed evidence file, or a missing evidence file of an `analysis`
-AC. It never refuses for the MR title, a manual criterion with no answer, the last line `human: ok`
-or `reviewer:`, or an AC the step does not serve.
+AC. A `finish` of an implementer step, without --failed and after the refusal for uncommitted
+changes, runs the plan membership check of `ark test` on the run's diff for the bun suites of the
+step's repo and is refused, with no event written, when a changed test holds a case id that
+`test_cases` of plan.yml does not list: it prints each missing case id with its test file and the
+hint to add the ids to `test_cases`, run `ark plan check <run>` and finish again. `--failed`,
+`--not-started`, a step that started with --merge, a missing or invalid plan.yml and a scan that
+fails are not refused. It never refuses for the MR title, a manual criterion with no answer, the
+last line `human: ok` or `reviewer:`, or an AC the step does not serve.
 ```
 
 ### run close

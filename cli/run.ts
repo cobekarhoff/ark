@@ -45,6 +45,7 @@ import { assertAllowed } from "./transitions.ts";
 import { commitsAhead, submoduleLines, worktreeCleanup, worktreeDirtyLines } from "./worktree.ts";
 import { repoBase, targetBranch } from "./workspace.ts";
 import { loadPlan, repoGraph, type Plan, type PlanStep } from "./plan.ts";
+import { planMembership } from "./test-audit.ts";
 import { hasTestCriterion, manualCriteria, readTicket, setTicketStatus } from "./ticket.ts";
 import { unplannedWithoutReason } from "../skills/pr-writing/lib/ledger.ts";
 
@@ -435,6 +436,42 @@ async function launchWorker(
   ];
 }
 
+/**
+ * ARK-496: an implementer finish runs the plan-membership check of `ark test` on the run diff, so a touched test that
+ * `test_cases` does not list stops here and not in the validator's full test. A `--merge` step skips it: its diff from
+ * the old base still holds the target's tests until `recordMergedTarget` moves the base. A missing plan and a failed
+ * scan print a skip line and do not refuse.
+ */
+async function refuseCaseIdsOutsidePlan(
+  runId: string,
+  project: string,
+  directory: string,
+  events: ArkEvent[],
+  state: RunState,
+  stepId: string,
+): Promise<void> {
+  const step = state.steps.find((entry) => entry.id === stepId);
+  const worktree = state.worktrees.find((entry) => entry.repo === step?.repo)?.path;
+  const started = events.findLast(
+    (event) => event.type === "step.started" && event.data.step === stepId,
+  );
+  if (!step || !worktree || !existsSync(worktree) || started?.data.merge) return;
+  const missing = (
+    await planMembership(
+      directory,
+      loadConfig(project).suites,
+      state.worktrees,
+      () => worktree,
+      step.repo,
+    )
+  ).flatMap((result) => result.missing);
+  if (missing.length > 0)
+    throw new ArkError(
+      `step ${stepId} refused: the run diff changes a test whose case id plan.yml test_cases does not list\n${missing.join("\n")}\n` +
+        `fix       add each id to test_cases in plan.yml with the action reuse, update or retire, then run ark plan check ${runId}, answer the plan gate again when it reopens, and finish again (use --failed to close a step that did not finish its work)`,
+    );
+}
+
 export async function runStep(
   runId: string,
   stepId: string,
@@ -524,6 +561,8 @@ export async function runStep(
             unplanned.map((file) => `  - Not in plan: ${file} — <reason>`).join("\n"),
         );
     }
+    if (planned?.role === "implementer" && !failed)
+      await refuseCaseIdsOutsidePlan(runId, project, directory, events, state, stepId);
     const outcome = failed ? "failed" : "succeeded";
     const last = events.findLast(
       (event) =>

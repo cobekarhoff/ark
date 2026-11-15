@@ -23,8 +23,7 @@ import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts
 import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
-import { caseIdsOutsidePlan, oldIdsTouched } from "./test-audit.ts";
-import { loadPlan } from "./plan.ts";
+import { baseSide, oldIdsTouched, planMembership } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { checkStage } from "./merge-request.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
@@ -572,10 +571,6 @@ async function runSuite(
     taken?.release();
   }
 }
-
-/** The commit the base side of `ark test` runs at: the newest synced target commit, else the worktree.created base. `base` itself stays the created base for every other reader. */
-const baseSide = (worktree?: RunState["worktrees"][number]): string | undefined =>
-  worktree?.synced ?? worktree?.base;
 
 const testFolder = /(^|\/)(test|tests|features)\//;
 
@@ -1166,30 +1161,12 @@ async function executeTest(
       }
     }
     // ARK-431: a changed test must hold only case ids that plan.yml test_cases lists. Ids only, any action passes.
-    let planned: Set<string> | undefined;
-    try {
-      planned = new Set(loadPlan(directory).test_cases.map((testCase) => testCase.id));
-    } catch (err) {
-      console.log(`plan-membership check  skipped  (${String(err)})`);
-    }
-    for (const suite of planned === undefined ? [] : config.suites) {
-      const label = `plan-membership suite ${suite.name} (${suite.parser})`;
-      // the newest synced target commit, not the created base: what main changed is not this run's change
-      const base = baseSide(state.worktrees.find((worktree) => worktree.repo === suite.repo));
-      if (suite.parser !== "bun" || base === undefined) continue;
-      let missing: string[];
-      try {
-        missing = await caseIdsOutsidePlan(
-          join(mirror, suite.repo),
-          base,
-          suite,
-          config.suites,
-          planned!,
-        );
-      } catch (err) {
-        console.log(`${label}  skipped  (scan failed: ${String(err)})`);
-        continue;
-      }
+    for (const { suite, label, missing } of await planMembership(
+      directory,
+      config.suites,
+      state.worktrees,
+      (repo) => join(mirror, repo),
+    )) {
       writeFileSync(
         join(resultsDirectory, `check-plan-membership-${suite.name}.log`),
         missing.join("\n"),
