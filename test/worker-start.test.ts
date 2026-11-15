@@ -4,18 +4,51 @@ import { join } from "node:path";
 import { appendEvent } from "../cli/events.ts";
 import { addWorktree, fakeSessionFolder, useFakeOrca } from "./fake-orca.ts";
 import {
-  ark,
+  arkWithin,
   recordEvaluation,
-  startHub,
-  stopHub,
+  startHub as startHubWithin,
+  stopHub as stopHubWithoutLimit,
+  type StartedHub,
   tempArkHome,
-  tempGitRepo,
+  tempGitRepo as tempGitRepoWithin,
+  writeFakeCommand,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
+
+/** Limit of every process call of this file, below the 30 s test timeout so a stalled call fails with its command line and stderr. */
+const processLimitMs = 25_000;
+const ark = (...args: string[]) => arkWithin(processLimitMs, ...args);
+const tempGitRepo = (files?: Record<string, string>) => tempGitRepoWithin(files, processLimitMs);
+
+const startHub = () => startHubWithin(processLimitMs);
+
+/** Stops the hub; one that has not exited after the limit is killed and the call throws with the command line, the limit and stderr. */
+async function stopHub(hub: StartedHub["process"]) {
+  let timedOut = false;
+  AbortSignal.timeout(processLimitMs).addEventListener("abort", () => {
+    timedOut = true;
+    hub.kill("SIGKILL");
+  });
+  await stopHubWithoutLimit(hub);
+  if (timedOut)
+    throw new Error(
+      `bun hub/main.ts --port 0 timed out after ${processLimitMs} ms: ${await new Response(hub.stderr).text()}`,
+    );
+}
+
+/** A git call of this file; throws with the command line, the limit and stderr when it stalls. */
+function git(args: string[], cwd?: string) {
+  const result = Bun.spawnSync(["git", ...args], { cwd, timeout: processLimitMs });
+  if (result.exitedDueToTimeout)
+    throw new Error(
+      `git ${args.join(" ")} timed out after ${processLimitMs} ms: ${result.stderr.toString()}`,
+    );
+  return result;
+}
 
 // ARK-T210 to ARK-T216: `ark run step <run> <step> start|interrupted` against a fake `orca` on PATH, a fake omp
 // session folder and the test clock (ARK_NOW, set for each `ark` call, so no test waits 60 s). No real orca, omp or
@@ -159,9 +192,9 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
     worktree = join(directory, "workspace");
     mkdirSync(worktree, { recursive: true });
     // a step worktree is a git repo: finish refuses when `git status` fails
-    expect(Bun.spawnSync(["git", "init", "-q", worktree]).exitCode).toBe(0);
+    expect(git(["init", "-q", worktree]).exitCode).toBe(0);
   }
-  return { runId, directory, worktree: addWorktree(directory, ".", worktree) };
+  return { runId, directory, worktree: addWorktree(directory, ".", worktree ?? tempGitRepo()) };
 }
 
 type Recorded = { type: string; time: string; data: Record<string, any> };
@@ -249,10 +282,7 @@ test("ARK-T210 a --merge start launches a worker briefed to merge the target bra
   started(run, "a");
   expect(ark("run", "step", run.runId, "a", "finish").code).toBe(0);
   // The creation base is "main"; the brief must name the target branch origin/HEAD resolves to.
-  Bun.spawnSync(
-    ["git", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"],
-    { cwd: run.worktree },
-  );
+  git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop"], run.worktree);
   appendEvent(run.directory, "worktree.synced", { repo: ".", conflict: true });
   const before = workerStarts().length;
   const merged = ark("run", "step", run.runId, "a", "start", "--merge");
@@ -365,7 +395,7 @@ function dirtyWorktree(worktree: string): Snapshot {
   return snapshotOf(worktree);
 }
 const snapshotOf = (worktree: string): Snapshot => ({
-  status: Bun.spawnSync(["git", "status", "--porcelain"], { cwd: worktree }).stdout.toString(),
+  status: git(["status", "--porcelain"], worktree).stdout.toString(),
   tracked: readFileSync(join(worktree, "README.md"), "utf8"),
   untracked: readFileSync(join(worktree, "scratch.txt"), "utf8"),
 });
@@ -845,4 +875,62 @@ test("ARK-T308 two steps started through the current start path each open their 
   } finally {
     await stopHub(hub.process);
   }
+});
+
+// ARK-T569: a process call of this file that stalls fails at its own limit, below the 30 s test timeout above.
+const testTimeoutMs = 30_000;
+
+/** Runs `call` with a shim named `name` first on PATH; returns the message of the error it threw. */
+async function stalledWith(name: string, script: string, call: () => unknown): Promise<string> {
+  const savedPath = process.env.PATH;
+  try {
+    writeFakeCommand(name, script);
+    await call();
+  } catch (error) {
+    return (error as Error).message;
+  } finally {
+    process.env.PATH = savedPath;
+  }
+  throw new Error(`the ${name} call returned and threw nothing`);
+}
+
+const limitOf = (message: string): number => Number(message.match(/timed out after (\d+) ms/)?.[1]);
+const stalledGit = "echo shim-git-stderr-marker >&2\nexec sleep 90";
+
+test("ARK-T569 an ark call that stalls fails with its command line and a limit below the test timeout", async () => {
+  const message = await stalledWith("bun", "exec sleep 90", () => ark("status"));
+  expect(message).toContain("ark status timed out after ");
+  expect(limitOf(message)).toBeGreaterThan(0);
+  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+});
+
+test("ARK-T569 a git call of tempGitRepo that stalls fails with its command line, a limit below the test timeout and its stderr", async () => {
+  const message = await stalledWith("git", stalledGit, () =>
+    tempGitRepo({ "worker-start-stalled-template.txt": "x\n" }),
+  );
+  expect(message).toContain(" init -q -b main timed out after ");
+  expect(message).toContain("shim-git-stderr-marker");
+  expect(limitOf(message)).toBeGreaterThan(0);
+  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+});
+
+test("ARK-T569 the git status call of snapshotOf that stalls fails with its command line, a limit below the test timeout and its stderr", async () => {
+  const worktree = tempGitRepo();
+  const message = await stalledWith("git", stalledGit, () => dirtyWorktree(worktree));
+  expect(message).toContain("git status --porcelain");
+  expect(message).toContain("shim-git-stderr-marker");
+  expect(limitOf(message)).toBeGreaterThan(0);
+  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+});
+
+test("ARK-T569 a hub that never prints its address fails with its command line, a limit below the test timeout and its stderr", async () => {
+  const message = await stalledWith(
+    "bun",
+    "echo shim-hub-stderr-marker >&2\nexec sleep 90",
+    startHub,
+  );
+  expect(message).toContain("bun hub/main.ts --port 0 timed out after ");
+  expect(message).toContain("shim-hub-stderr-marker");
+  expect(limitOf(message)).toBeGreaterThan(0);
+  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
 });
