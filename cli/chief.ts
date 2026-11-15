@@ -61,8 +61,8 @@ function elapsed(since: string): string {
   return seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h`;
 }
 
-/** Count of unread messages to Master Chief's Run, and the whole minutes since the oldest was created (null when none). */
-export type ChiefUnread = { count: number; oldestMinutes: number | null };
+/** Count of unread messages to Master Chief's Run, and the ISO time the oldest was created (null when none). The hub ages the time itself; `ark chief state` prints whole minutes. */
+export type ChiefUnread = { count: number; oldest: string | null };
 
 /**
  * The unread messages of one Orca Run's inbox: `orca orchestration inbox --terminal run:<id> --full`, rows with
@@ -87,8 +87,7 @@ export async function readChiefUnreadOfRun(
     ok: true,
     value: {
       count: unread.length,
-      oldestMinutes:
-        unread.length === 0 ? null : Math.max(0, Math.floor((now() - oldest) / 60_000)),
+      oldest: unread.length === 0 ? null : new Date(oldest).toISOString(),
     },
   };
 }
@@ -223,9 +222,11 @@ export async function chiefState(inProject?: string): Promise<void> {
   if (chiefRunId) {
     const unread = await readChiefUnreadOfRun(chiefRunId, orcaTimeoutMilliseconds);
     if (!unread.ok) inboxText = unavailable("inbox", unread.reason);
-    else if (unread.value.oldestMinutes === null) inboxText = "unread for Master Chief: 0";
-    else
-      inboxText = `unread for Master Chief: ${unread.value.count}, oldest ${unread.value.oldestMinutes} min`;
+    else if (unread.value.oldest === null) inboxText = "unread for Master Chief: 0";
+    else {
+      const minutes = Math.max(0, Math.floor((now() - Date.parse(unread.value.oldest)) / 60_000));
+      inboxText = `unread for Master Chief: ${unread.value.count}, oldest ${minutes} min`;
+    }
   }
   sections.push("## Master Chief inbox", inboxText);
 

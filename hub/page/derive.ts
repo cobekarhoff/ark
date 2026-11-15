@@ -339,8 +339,37 @@ export function scoped(snapshot: Snapshot, project: string | null): Snapshot {
     tickets: only(snapshot.tickets),
     ticket_runs: only(snapshot.ticket_runs),
     queues: only(snapshot.queues),
+    chief_unread: only(snapshot.chief_unread),
     roadmap: known(snapshot.roadmap)
       ? Object.fromEntries(Object.entries(snapshot.roadmap).filter(([name]) => name === project))
       : snapshot.roadmap,
+  };
+}
+
+/** The oldest unread message to Master Chief warns above this many whole minutes (16 min and more). The age is floored, so 15 min 59 s shows `15 min` and does not warn. */
+export const unreadWarnsAbove = 15;
+
+export type ChiefUnreadValue =
+  | "unknown"
+  | { unavailable: string }
+  | { count: number; minutes: number | null };
+
+/**
+ * The count of unread messages to Master Chief and the whole minutes since the oldest, for the
+ * projects of the (scoped) snapshot: the sum and the oldest of all. One project that could not be
+ * read makes the whole value unavailable, never a partial sum.
+ */
+export function chiefUnreadOf(snapshot: Snapshot, age: (time: string) => number): ChiefUnreadValue {
+  const reads = snapshot.chief_unread;
+  if (!known(reads) || reads.length === 0) return "unknown";
+  const failed = reads.find((read) => "unavailable" in read);
+  if (failed && "unavailable" in failed) return { unavailable: failed.unavailable };
+  const counted = reads.flatMap((read) => ("unavailable" in read ? [] : [read]));
+  const oldest = counted
+    .flatMap((read) => (read.oldest === null ? [] : [read.oldest]))
+    .toSorted()[0];
+  return {
+    count: counted.reduce((sum, read) => sum + read.count, 0),
+    minutes: oldest === undefined ? null : Math.floor(age(oldest) / 60_000),
   };
 }

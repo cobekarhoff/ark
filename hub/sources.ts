@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { readChiefUnread } from "../cli/chief.ts";
 import { now } from "../cli/clock.ts";
 import { canonicalCriterion } from "../cli/criterion-id.ts";
 import { execJson } from "../cli/exec.ts";
@@ -41,6 +42,7 @@ import type {
   ProviderWindow,
   TicketDocument,
   TicketView,
+  ProjectUnread,
   Wait,
 } from "./types.ts";
 
@@ -321,6 +323,19 @@ export async function readQueues(): Promise<Map<string, QueueRead>> {
     }),
   );
   return new Map(projects.map((project, index) => [project, reads[index]]));
+}
+
+/**
+ * The unread messages to each project's Master Chief Run, through the reader `ark chief state` uses.
+ * A failed read is that project's own `unavailable` entry, never a count of 0.
+ */
+export async function readChiefUnreads(): Promise<ProjectUnread[]> {
+  return Promise.all(
+    listProjects().map(async (project): Promise<ProjectUnread> => {
+      const unread = await readChiefUnread(project, orcaTimeoutMilliseconds);
+      return unread.ok ? { project, ...unread.value } : { project, unavailable: unread.reason };
+    }),
+  );
 }
 
 // ---------------------------------------------------------------- Orca
