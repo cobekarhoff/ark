@@ -7,6 +7,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,6 +29,34 @@ export function tempArkHome(): string {
   const home = mkdtempSync(join(tmpdir(), "ark-home-"));
   process.env.ARK_HOME = home;
   return home;
+}
+
+/** Like `tempArkHome`, but ARK_HOME is a symlink to the real folder, as macOS `/var` is to `/private/var`: `git rev-parse --show-toplevel` then prints a path that differs from `ARK_HOME` as written. */
+export function linkedArkHome(): string {
+  const real = mkdtempSync(join(tmpdir(), "ark-home-real-"));
+  const link = `${real}-link`;
+  symlinkSync(real, link);
+  process.env.ARK_HOME = link;
+  return link;
+}
+
+/** Makes the project folder a git repo the way the autocommit pass does (ARK-482): `runs/` ignored, everything else committed. */
+export function initProjectRepo(projectFolder: string): void {
+  mkdirSync(projectFolder, { recursive: true });
+  writeFileSync(join(projectFolder, ".gitignore"), "runs/\n");
+  git(projectFolder, commandLimitMs, "init", "-q", "-b", "main");
+  git(projectFolder, commandLimitMs, "add", "-A");
+  git(
+    projectFolder,
+    commandLimitMs,
+    "-c",
+    "user.name=t",
+    "-c",
+    "user.email=t@e.x",
+    "commit",
+    "-qm",
+    "project",
+  );
 }
 
 /** Writes `$ARK_HOME/projects/<name>/ark.yml`. JSON is valid YAML, so the config is written as JSON. */
