@@ -6,7 +6,7 @@ technique: equivalence classes over the last test.completed (full with deletions
 priority: high
 risk: the MR body hides skipped or deleted tests from the reviewer, a title with backticks or a pipe breaks the markdown, the line prints for an old run or a quick run with a wrong claim (n/a, a base count that does not exist), or the body differs between two builds of the same events so the STALE01 body hash fails
 status: active
-changed_by: 2026-11-10-ARK-393-1
+changed_by: 2026-11-14-ARK-507-1
 ---
 
 ## Objective
@@ -36,6 +36,7 @@ Prove that the Tests line and the deleted bullets in the Evidence block come fro
 - (f) The body shall have no Tests line and the existing no-evidence text shall be unchanged.
 - Two builds from the same events shall give identical bodies, so the STALE01 body hash holds.
 - `lintBody` shall accept every body.
+- Deleted bullets (a) and (c) hold while the body fits `githubBodyLimit` with no log lines; a body over the limit even then writes one line with the count and the path of the full list (ARK-T680).
 
 ## Screenshot checkpoints
 
