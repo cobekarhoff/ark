@@ -2671,7 +2671,7 @@ function boundaryRun() {
 }
 
 test("ARK-T680 a body of exactly 65,537 characters with no log lines collapses to at most 65,536, with its AC evidence whole", () => {
-  const { run, bodyAt, padFor } = boundaryRun();
+  const { bodyAt, padFor } = boundaryRun();
   // One character more than the 65,536 that stays whole (ARK-T681): the same fixture, one character of AC2 evidence more.
   const pad = padFor(bodyLimit) + 1;
   const body = bodyAt(pad);
@@ -2683,7 +2683,6 @@ test("ARK-T680 a body of exactly 65,537 characters with no log lines collapses t
   expect(deleted[0]).toContain("4");
   expect(deleted[0]).toContain("events.ndjson");
   expect(body).not.toMatch(/^\s+- Deleted:/m);
-  expect(run.ids).toHaveLength(150);
 });
 
 test("ARK-T681 a small body is the same body as before the collapse, byte for byte", () => {

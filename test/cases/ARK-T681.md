@@ -16,7 +16,7 @@ Prove the two things no other case proves: a small body is byte-equal to the bod
 ## Preconditions
 
 - Row 1: the real `buildBody` on a literal ledger as in `baseLedger` of `test/pr-writing.test.ts`: kind `bug`, problem `Stale bodies.`, change `1. Fix it.`, plan cases `ARK-T1` and `ARK-T2`, each `base fail`, `head pass`, sha `abc1234def5678abc1234def5678abc1234def56`, a 3-line head log `ARK-T<n> line 1..3`, and a last `test.completed` with 10 passed, 1 skipped, base skipped 1 and 3 deleted tests (`test/b.test.ts` titled ``second `b` | pipe``, `test/a.test.ts` titled `first`, and one with no file titled `no file`). The literal expected body below was produced by `buildBody` before ARK-507 and is pasted into the test as written; it is not read from the code under test.
-- Rows 2 and 3: two runs as in ARK-T364, with 150 plan cases, 20-line logs and 4 deleted tests, with the `ticket.md` problem text padded so that the body at log keep 0 is exactly 65,535 characters in row 2 and exactly 65,536 in row 3. Both are over the limit with 20 log lines, so the log tails are cut. Real ledger reader and `buildBody`. No mocks.
+- Rows 2 and 3: one run built by `boundaryRun` in `test/pr-writing.test.ts` from `suiteRun(150)`, with 150 plan cases, 20-line logs and 4 deleted tests. The test rewrites its `AC2.md` evidence file with a pad of `x` characters, found by `padFor`, so that the body at log keep 0 is exactly 65,535 characters in row 2 and exactly 65,536 in row 3. Both are over the limit with 20 log lines, so the log tails are cut. Real ledger reader and `buildBody`. No mocks.
 
 Literal expected body of row 1:
 
