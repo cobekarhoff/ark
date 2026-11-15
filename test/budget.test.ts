@@ -118,6 +118,30 @@ describe("ark test budget admission", () => {
     expect((await grantAbove).cores).toBe(6);
   });
 
+  test("ARK-T155 a ticket taken for a foreign owner pid stays one per owner, outlives its helpers, and goes when the owner ends", async () => {
+    tempArkHome();
+    const owner = Bun.spawn(["sleep", "300"]);
+    children.push(owner);
+    const helper = (takes: number) =>
+      Bun.spawnSync([
+        "bun",
+        "-e",
+        `import { openTestBudget } from ${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))};
+const budget = openTestBudget("bun test", 6, { owner: ${owner.pid}, print: () => {} });
+for (let take = 0; take < ${takes}; take++) await budget.take(2);`,
+      ]);
+    // H1 takes twice and H2 once, each in a process of its own that ends before the next read.
+    expect(helper(2).exitCode).toBe(0);
+    expect(helper(1).exitCode).toBe(0);
+    const tickets = readTestLock();
+    expect(tickets.waiting).toEqual([]);
+    expect(tickets.running).toMatchObject([{ run: "bun test", pid: owner.pid, cores: 2 }]);
+
+    owner.kill("SIGKILL");
+    await owner.exited;
+    expect(readTestLock()).toEqual({ running: [], waiting: [] });
+  });
+
   test.each([
     [10, 6],
     [1, 1],

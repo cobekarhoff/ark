@@ -19,13 +19,13 @@ Expected: no wait, no waiting line, and the exit code of the suite.
 
 - The scratch repo of ARK-T683 (repo preload, marker-writing test files `a`, `b` and `c` under `test/`) as a fake suite; the `gate` file is not used.
 - The built environment of ARK-T683 for every child: the environment of the case minus the `ark test` marker, `BUN_TEST_WORKER_ID`, `JEST_WORKER_ID`, `ARK_PROJECT` and `ARK_HOME`; each step then sets only what it names. A step that unsets `ARK_HOME` also sets `HOME` to an empty temp folder, so the fallback `~/.ark` (`cli/paths.ts`) is a folder with no project and no ticket, as in CI and on a fresh clone, never the real home of the host.
-- A real holder process that holds all 3 cores of a project `p` in a temp `ARK_HOME` whose `workspace` is not the scratch repo. A row is a state of `ARK_HOME` and cwd; each row runs `bun test --parallel=3` unless the step says otherwise.
+- A real holder process that holds all 3 cores of a project `demo` in a temp `ARK_HOME` whose `workspace` is not the scratch repo. A row is a state of `ARK_HOME` and cwd; each row runs `bun test --parallel=3` unless the step says otherwise.
 - No sleeps: events only.
 
 ## Steps
 
 1. Run with `ARK_HOME` unset, `HOME` an empty temp folder and no `ARK_PROJECT`.
-2. Run with `ARK_HOME` set to a folder that has project `p` while the scratch repo is not its `workspace` and not under its `runs/` (no match), with the holder holding all cores.
+2. Run with `ARK_HOME` set to a folder that has project `demo` while the scratch repo is not its `workspace` and not under its `runs/` (no match), with the holder holding all cores.
 3. Run with `ARK_HOME` set and the project's `ark.yml` empty, then with invalid YAML, then with `test_budget_cores: 0`. The scratch repo is the `workspace` of the project in each.
 4. Run with `ARK_PROJECT` naming a project that does not exist.
 5. Run `bun test` (serial, 1 core) with a project that matches and has no `test_budget_cores`, with no holder: the budget is the default of the host, never 0.
