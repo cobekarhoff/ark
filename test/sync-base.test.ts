@@ -825,27 +825,31 @@ test("ARK-T380 ark test prints the head problems under merge-request check, keep
   );
 });
 
-test("ARK-T380 a failing run still prints the head block before the failure, with the exit code and passed of the run without the problem", () => {
-  const failing = (withString: boolean) => {
+test("ARK-T380 a run stopped by a failed old-id check still prints the head block before the failure, with the exit code and passed of the run without the problem", () => {
+  const stopped = (withString: boolean) => {
     const run = stageRun({ criteria: stageCriteria().slice(0, 2), steps: stageSteps.slice(0, 1) });
     if (withString) commitTracked(run, "strings.txt", `${noString}\n`);
     answerManual(run, "AC2");
+    // Editing the declaration of an old-id test fails the old-id check, which stops ark test before the suites.
     writeFileSync(
       join(run.mirror, "test/own.test.ts"),
       readFileSync(join(run.mirror, "test/own.test.ts"), "utf8").replace(
-        'test("FAKE-T1 works", () => {});',
-        'test("FAKE-T1 works", () => { throw new Error("red"); });',
+        'test("FAKE-1-AC1 works", () => {});',
+        'test("FAKE-1-AC1 works", () => { void 0; });',
       ),
     );
-    git(run.mirror, "commit", "-qam", "break FAKE-T1");
+    git(run.mirror, "commit", "-qam", "edit the old-id declaration");
     return { run, result: fullTest(run, 1) };
   };
-  const problem = failing(false);
-  const control = failing(true);
+  const problem = stopped(false);
+  const control = stopped(true);
   expect(problem.result.out).toContain(`merge-request check\n${absentLine}\n`);
   expect(control.result.out).not.toContain("merge-request check");
-  expect(problem.result.err).toContain("suite e2e failed");
+  expect(problem.result.err).toBe(
+    "ark: tests did not prove every criterion: check old-id e2e failed\n",
+  );
   expect(problem.result.err).toBe(control.result.err);
+  expect(problem.result.err).not.toContain("suite e2e failed");
   expect(lastCompleted(problem.run).passed).toBe(false);
   expect(lastCompleted(control.run).passed).toBe(false);
 });

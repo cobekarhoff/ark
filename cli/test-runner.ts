@@ -31,6 +31,8 @@ export type RunnerRecord = {
   /** `ps` start time of the pid: a reused pid or a reboot gives another value. */
   start: string;
   mode: "quick" | "full";
+  /** `--keep-going`: the run runs its suites after a failed check. Absent in a record of an older runner. */
+  keepGoing?: boolean;
   state: "running" | "done" | "stopped";
   started: string;
   finished?: string;
@@ -157,6 +159,7 @@ function claim(resultsDirectory: string, start: string): boolean {
 export async function runnerMain(
   directory: string,
   quick: boolean,
+  keepGoing: boolean,
   execute: () => Promise<void>,
   stop: () => Promise<void>,
 ): Promise<number> {
@@ -169,6 +172,7 @@ export async function runnerMain(
     pid: process.pid,
     start,
     mode: quick ? "quick" : "full",
+    keepGoing,
     state: "running",
     started: new Date().toISOString(),
   };
@@ -273,6 +277,7 @@ async function startAndFollow(
   project: string,
   resultsDirectory: string,
   quick: boolean,
+  keepGoing: boolean,
 ): Promise<number> {
   const mode = quick ? "quick" : "full";
   for (;;) {
@@ -283,6 +288,10 @@ async function startAndFollow(
           `a ${live.mode} ark test of ${runId} is running (pid ${live.pid}): ark test ${runId} --wait waits for it, ark test ${runId} --stop stops it`,
         );
       console.error(`ark: attaching to the ${mode} ark test of ${runId} (pid ${live.pid})`);
+      if ((live.keepGoing ?? false) !== keepGoing)
+        console.error(
+          `ark: that runner ${live.keepGoing ? "was started with" : "was started without"} --keep-going: it ${live.keepGoing ? "runs" : "stops at"} a failed check; ark test ${runId} --stop ends it`,
+        );
       return follow(resultsDirectory, runId);
     }
     // The shell starts the runner in the background, prints its pid and exits at once, so the runner is reparented to
@@ -301,6 +310,7 @@ async function startAndFollow(
         "--project",
         project,
         ...(quick ? ["--quick"] : []),
+        ...(keepGoing ? ["--keep-going"] : []),
       ],
       { stdin: "ignore", stdout: "pipe", stderr: "ignore", detached: true },
     );
@@ -341,13 +351,13 @@ export async function callTest(
   runId: string,
   project: string,
   directory: string,
-  options: { quick: boolean; wait: boolean; stop: boolean },
+  options: { quick: boolean; keepGoing: boolean; wait: boolean; stop: boolean },
 ): Promise<void> {
   const resultsDirectory = join(directory, "results");
   mkdirSync(resultsDirectory, { recursive: true });
   if (options.stop) return stopRunner(runId, resultsDirectory);
   const code = options.wait
     ? await follow(resultsDirectory, runId)
-    : await startAndFollow(runId, project, resultsDirectory, options.quick);
+    : await startAndFollow(runId, project, resultsDirectory, options.quick, options.keepGoing);
   if (code !== 0) process.exitCode = code;
 }

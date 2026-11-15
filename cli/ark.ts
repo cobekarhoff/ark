@@ -109,6 +109,7 @@ async function main(args: string[]): Promise<void> {
         args[1]!,
         args[args.indexOf("--project") + 1]!,
         args.includes("--quick"),
+        args.includes("--keep-going"),
       ),
     );
   }
