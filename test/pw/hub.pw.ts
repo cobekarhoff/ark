@@ -4585,7 +4585,6 @@ async function homeWithUnread(page: Page) {
 test("ARK-T670 the Home tile shows the unread count and the whole-minute age of the oldest, and warns in words and tone only from 16 minutes", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
   const { tile, show } = await homeWithUnread(page);
   const count = tile.locator(".big");
   const warning = /older than 15 min/;
@@ -4656,7 +4655,6 @@ test("ARK-T670 the Home tile shows the unread count and the whole-minute age of 
 test("ARK-T670 a failed unread read shows ? and unavailable on the tile, keeps the other tiles, and does not mark the queue stale", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
   const { tile, show } = await homeWithUnread(page);
   show([unreadMessage("question", 95)]);
   await expect(tile.locator(".big")).toHaveText("1");
