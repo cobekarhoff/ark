@@ -28,6 +28,7 @@ import {
 } from "./store.tsx";
 import { TicketPage } from "./Ticket.tsx";
 import { Resources } from "./Resources.tsx";
+import { Companions } from "./Companions.tsx";
 import { ResourcesStrip } from "./ResourcesStrip.tsx";
 
 const views = [
@@ -35,6 +36,7 @@ const views = [
   ["runs", "#/runs", "Runs"],
   ["roadmap", "#/roadmap", "Roadmap"],
   ["resources", "#/resources", "Resources"],
+  ["companions", "#/companions", "Companions"],
 ] as const;
 
 const themes: [ThemeChoice, string][] = [
@@ -185,6 +187,7 @@ function Shell() {
         {route.view === "roadmap" ? <Roadmap /> : null}
         {route.view === "ticket" ? <TicketPage id={route.arg!} /> : null}
         {route.view === "resources" ? <Resources /> : null}
+        {route.view === "companions" ? <Companions /> : null}
       </main>
     </>
   );

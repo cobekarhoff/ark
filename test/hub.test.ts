@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, jest, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, jest, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import {
@@ -22,6 +22,7 @@ import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ProjectAnswer, RunConversation } from "../hub/conversation.ts";
 import type {
+  CompanionsReply,
   RunDetail,
   RunView,
   Snapshot,
@@ -62,6 +63,8 @@ import {
   writeSessionFile,
 } from "./hub-fixtures.ts";
 import { installProcessFakes } from "./resources-fixtures.ts";
+import { arkP, entry, scenario, type Scenario } from "./companions-fixtures.ts";
+import { removeFakeCompanionTools, type FakeCompanionTools } from "./fake-companion-tools.ts";
 import { waitForRepoFacts } from "./hub-facts-wait.ts";
 import {
   installFakeTools,
@@ -188,46 +191,372 @@ async function heldPastTenSeconds<T>(
 
 const readDoc = (path: string) => readFileSync(join(root, path), "utf8");
 
-// ---------------------------------------------------------------- AC2
+// ---------------------------------------------------------------- ARK-T662 (ARK-480: the write rule of ADR 0009, amended)
 
-test("ARK-277-AC2 every route of the hub but open-in-orca answers POST, PUT, PATCH and DELETE with 404 or 405", async () => {
+const companionRoutes = ["approve", "dismiss", "ask"].map((action) => `/api/companions/${action}`);
+
+test("ARK-T662 every route of the hub but open-in-orca and the three companion routes answers POST, PUT, PATCH and DELETE with 404 or 405, and each of those four answers every other method with 405", async () => {
   isolatedEnvironment();
   const run = `${today()}-ARK-801-1`;
-  writeRun({ project: "p", run, ticket: { id: "ARK-801", title: "Open" }, phase: "building" });
-  writeBacklogTicket({ project: "p", id: "ARK-801", title: "Open", status: "ready" });
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-801", title: "Open" },
+    phase: "building",
+  });
+  writeBacklogTicket({
+    project: "p",
+    id: "ARK-801",
+    title: "Open",
+    status: "ready",
+  });
   installFakeTools({ orca: orcaAnswersFor(run) });
   const { baseUrl } = await start();
 
   const html = await (await fetch(`${baseUrl}/`)).text();
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
   expect(assets.length).toBeGreaterThan(0);
-  const served = ["/", "/api/snapshot", "/events", `/api/run/${run}`, ...assets];
+  // `/api/companions` is the Companions page's read route: it is served, and it takes no write.
+  const served = ["/", "/api/snapshot", "/events", "/api/companions", `/api/run/${run}`, ...assets];
   // A route that does not exist answers a write method like a route that does.
-  const unserved = ["/nope", "/api/nope", "/api/snapshot/extra", "/assets/nope.js"];
+  const unserved = [
+    "/nope",
+    "/api/nope",
+    "/api/snapshot/extra",
+    "/assets/nope.js",
+    "/api/companions/nope",
+  ];
 
   // The routes are live: a GET gets 200, so the write methods below are tried on real routes.
   for (const route of served) {
     const controller = new AbortController();
-    const response = await fetch(`${baseUrl}${route}`, { signal: controller.signal });
+    const response = await fetch(`${baseUrl}${route}`, {
+      signal: controller.signal,
+    });
     expect(response.status, route).toBe(200);
     controller.abort();
   }
   for (const route of [...served, ...unserved])
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-      const response = await fetch(`${baseUrl}${route}`, { method, body: "{}" });
+      const response = await fetch(`${baseUrl}${route}`, {
+        method,
+        body: "{}",
+      });
       expect([404, 405], `${method} ${route}`).toContain(response.status);
     }
-  // The one route that takes a POST (ADR 0009) still refuses every other method.
-  for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
-    const response = await fetch(`${baseUrl}/api/open-in-orca`, { method });
-    expect(response.status, `${method} /api/open-in-orca`).toBe(405);
+  // The four routes that take a POST (ADR 0009, amended by ARK-480) refuse every other method.
+  for (const route of ["/api/open-in-orca", ...companionRoutes])
+    for (const method of ["GET", "PUT", "PATCH", "DELETE"]) {
+      const response = await fetch(`${baseUrl}${route}`, { method });
+      expect(response.status, `${method} ${route}`).toBe(405);
+    }
+});
+
+afterEach(removeFakeCompanionTools);
+
+type CompanionHub = {
+  baseUrl: string;
+  fixture: Scenario;
+  fake: FakeCompanionTools;
+  /** `$ARK_HOME/projects`: every file a write could change. */
+  projects: string;
+};
+
+/**
+ * A hub on project `p` whose `ark.yml` lists `cortana`, with its worker started by a real
+ * `ark companions sync` against the fake orca. Tickets: ARK-901 proposed by cortana, ARK-902
+ * proposed with no `source` (a human's), ARK-903 ready with no `source`, ARK-904 ready by cortana.
+ */
+async function companionHub(): Promise<CompanionHub> {
+  const fixture = scenario([entry("cortana", ["run.merged"])]);
+  installProcessFakes(scratch("ark-process-fakes-")).setProcesses([]);
+  expect(arkP("companions", "sync").out).toBe("cortana: started\n");
+  mkdirSync(join(fixture.folder, "tickets"), { recursive: true });
+  const writeTicket = (id: string, status: string, source?: string) =>
+    writeFileSync(
+      join(fixture.folder, "tickets", `${id}.md`),
+      `---\nid: ${id}\ntitle: "Ticket ${id}"\nstatus: ${status}\n${source ? `source: ${source}\n` : ""}---\n\n## Problem\n\nWhy ${id}. More words.\n`,
+    );
+  writeTicket("ARK-901", "proposed", "cortana");
+  writeTicket("ARK-902", "proposed");
+  writeTicket("ARK-903", "ready");
+  writeTicket("ARK-904", "ready", "cortana");
+  const { baseUrl } = await start();
+  return {
+    baseUrl,
+    fixture,
+    fake: fixture.fake,
+    projects: join(process.env.ARK_HOME as string, "projects"),
+  };
+}
+
+/** Every file under `directory` with its text: two reads that are equal mean no write happened between them. */
+function filesOf(directory: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const dirent of readdirSync(directory, {
+    recursive: true,
+    withFileTypes: true,
+  }))
+    if (dirent.isFile()) {
+      const file = join(dirent.parentPath, dirent.name);
+      files[relative(directory, file)] = readFileSync(file, "utf8");
+    }
+  return files;
+}
+
+const goodBodies = {
+  approve: { project: "p", name: "cortana", id: "ARK-901" },
+  dismiss: {
+    project: "p",
+    name: "cortana",
+    item: { kind: "ticket", ref: "ARK-901" },
+    reason: "Already covered",
+  },
+  ask: {
+    project: "p",
+    name: "cortana",
+    item: { kind: "ticket", ref: "ARK-901" },
+    question: "Why this size?",
+  },
+};
+
+/** A POST from the hub's own page: Origin is the hub's authority. */
+const ownPost = (hub: CompanionHub, route: string, body: unknown) =>
+  fetch(`${hub.baseUrl}/api/companions/${route}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin: hub.baseUrl },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+
+/** Orca calls that act on a worker or the queue: the hub's own reads of Orca are not among them. */
+const actingCalls = (fake: FakeCompanionTools) =>
+  fake
+    .verbs()
+    .filter((verb) => ["send", "task-create", "worker-start", "worker-stop"].includes(verb));
+
+test("ARK-T662 each companion route does its write from the hub's own page: approve sets one status line to ready and creates no task, dismiss appends the reason, ask sends one message to the worker", async () => {
+  const hub = await companionHub();
+  const ticketFile = join(hub.fixture.folder, "tickets", "ARK-901.md");
+  const before = readFileSync(ticketFile, "utf8");
+  const callsBefore = actingCalls(hub.fake).length;
+
+  const dismiss = await ownPost(hub, "dismiss", goodBodies.dismiss);
+  expect(dismiss.status).toBe(200);
+  expect(await dismiss.json()).toEqual({ ok: true });
+  const dismissed = readFileSync(
+    join(hub.fixture.folder, "companions", "cortana", "dismissed.md"),
+    "utf8",
+  );
+  expect(dismissed).toContain("- item: ticket ARK-901");
+  expect(dismissed).toContain("- reason: Already covered");
+
+  const ask = await ownPost(hub, "ask", goodBodies.ask);
+  expect(ask.status).toBe(200);
+  expect(await ask.json()).toEqual({ ok: true });
+  const [message, ...others] = hub.fake.sent();
+  expect(others).toEqual([]);
+  expect(message.to).toBe(
+    `dispatch:${JSON.parse(readFileSync(join(hub.fixture.folder, "companions", "cortana", "worker.json"), "utf8")).dispatch}`,
+  );
+  expect(message.body).toContain("ARK-901");
+  expect(message.body).toContain("Why this size?");
+
+  expect(readFileSync(ticketFile, "utf8")).toBe(before); // dismiss and ask leave the ticket alone
+  const approve = await ownPost(hub, "approve", goodBodies.approve);
+  expect(approve.status).toBe(200);
+  expect(await approve.json()).toEqual({ ok: true });
+  expect(readFileSync(ticketFile, "utf8")).toBe(
+    before.replace("status: proposed", "status: ready"),
+  );
+  // One send (the ask) and nothing else that acts on Orca: approve creates no task and sends nothing.
+  expect(actingCalls(hub.fake).slice(callsBefore)).toEqual(["send"]);
+});
+
+test("ARK-T662 a request that is not from the hub's own page (no Origin, a foreign Origin, a foreign Host) answers 403 on each companion route and changes nothing", async () => {
+  const hub = await companionHub();
+  const files = filesOf(hub.projects);
+  const calls = actingCalls(hub.fake);
+  const foreignHost = (route: string, body: unknown) =>
+    rawRequest(
+      hub.baseUrl,
+      "evil.example",
+      "http://evil.example",
+      JSON.stringify(body),
+      `/api/companions/${route}`,
+    );
+
+  for (const route of ["approve", "dismiss", "ask"] as const) {
+    const body = goodBodies[route];
+    const noOrigin = await fetch(`${hub.baseUrl}/api/companions/${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(noOrigin.status, `${route} with no Origin`).toBe(403);
+    const foreignOrigin = await fetch(`${hub.baseUrl}/api/companions/${route}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "http://evil.example",
+      },
+      body: JSON.stringify(body),
+    });
+    expect(foreignOrigin.status, `${route} with a foreign Origin`).toBe(403);
+    expect((await foreignHost(route, body)).status, `${route} with a foreign Host`).toBe(403);
   }
+  expect(filesOf(hub.projects)).toEqual(files);
+  expect(hub.fake.sent()).toEqual([]);
+  expect(actingCalls(hub.fake)).toEqual(calls);
+  // The same bodies from the hub's own page are accepted: the 403s above are about the origin alone.
+  expect((await ownPost(hub, "dismiss", goodBodies.dismiss)).status).toBe(200);
+});
+
+test("ARK-T662 a companion, ticket or item outside the listed companions answers 400 or 404 and changes nothing, and a bad body answers 400", async () => {
+  const hub = await companionHub();
+  const files = filesOf(hub.projects);
+  const refused = (status: number) => expect([400, 404]).toContain(status);
+
+  // approve: a ticket nobody proposed, a ready ticket, an unknown id, and ids that climb out of tickets/
+  for (const id of [
+    "ARK-902",
+    "ARK-903",
+    "ARK-904",
+    "ARK-999",
+    "../tickets/ARK-901",
+    "..%2f..%2fark.yml",
+  ])
+    refused((await ownPost(hub, "approve", { ...goodBodies.approve, id })).status);
+  // dismiss and ask: a name that is not listed, a name that climbs out of companions/, and a ticket of no companion
+  for (const name of ["ghost", "../x"]) {
+    refused((await ownPost(hub, "dismiss", { ...goodBodies.dismiss, name })).status);
+    refused((await ownPost(hub, "ask", { ...goodBodies.ask, name })).status);
+  }
+  for (const route of ["dismiss", "ask"] as const)
+    refused(
+      (
+        await ownPost(hub, route, {
+          ...goodBodies[route],
+          item: { kind: "ticket", ref: "ARK-902" },
+        })
+      ).status,
+    );
+  // a bad body, and an empty reason or question
+  for (const route of ["approve", "dismiss", "ask"])
+    expect((await ownPost(hub, route, "{not json")).status, `${route} with bad JSON`).toBe(400);
+  expect((await ownPost(hub, "dismiss", { ...goodBodies.dismiss, reason: "  " })).status).toBe(400);
+  expect((await ownPost(hub, "ask", { ...goodBodies.ask, question: "" })).status).toBe(400);
+
+  expect(filesOf(hub.projects)).toEqual(files);
+  expect(existsSync(join(hub.fixture.folder, "companions", "ghost"))).toBe(false);
+  expect(existsSync(join(hub.fixture.folder, "x"))).toBe(false);
+  expect(hub.fake.sent()).toEqual([]);
+});
+
+test("ARK-T662 a reason or question of 400 four-byte characters passes the raised body cap and is kept whole, 401 characters answers 400 and names the limit, and a body over 4096 bytes is refused", async () => {
+  const hub = await companionHub();
+  const emoji = "😀";
+  const exactly = emoji.repeat(400);
+  expect(Buffer.byteLength(exactly)).toBe(1600); // over the 1024 bytes the server took before
+  const dismissedFile = join(hub.fixture.folder, "companions", "cortana", "dismissed.md");
+
+  const overReason = await ownPost(hub, "dismiss", {
+    ...goodBodies.dismiss,
+    reason: emoji.repeat(401),
+  });
+  expect(overReason.status).toBe(400);
+  const overReasonBody: { error: string } = await overReason.json();
+  expect(overReasonBody.error).toContain("400");
+  const overQuestion = await ownPost(hub, "ask", {
+    ...goodBodies.ask,
+    question: emoji.repeat(401),
+  });
+  expect(overQuestion.status).toBe(400);
+  const overQuestionBody: { error: string } = await overQuestion.json();
+  expect(overQuestionBody.error).toContain("400");
+  expect(existsSync(dismissedFile)).toBe(false);
+  expect(hub.fake.sent()).toEqual([]);
+
+  // Body cap: 4097 bytes is refused with a status (no dropped connection) and writes nothing; 4096 passes.
+  const padded = (bytes: number) => {
+    const bare = JSON.stringify({ ...goodBodies.dismiss, pad: "" });
+    return JSON.stringify({
+      ...goodBodies.dismiss,
+      pad: "x".repeat(bytes - Buffer.byteLength(bare)),
+    });
+  };
+  expect(Buffer.byteLength(padded(4097))).toBe(4097);
+  const tooLarge = await ownPost(hub, "dismiss", padded(4097));
+  expect([400, 413]).toContain(tooLarge.status);
+  expect(existsSync(dismissedFile)).toBe(false);
+  expect(Buffer.byteLength(padded(4096))).toBe(4096);
+  expect((await ownPost(hub, "dismiss", padded(4096))).status).toBe(200);
+  rmSync(dismissedFile);
+
+  expect((await ownPost(hub, "dismiss", { ...goodBodies.dismiss, reason: exactly })).status).toBe(
+    200,
+  );
+  expect(readFileSync(dismissedFile, "utf8")).toContain(`- reason: ${exactly}\n`);
+  expect((await ownPost(hub, "ask", { ...goodBodies.ask, question: exactly })).status).toBe(200);
+  const [message, ...others] = hub.fake.sent();
+  expect(others).toEqual([]);
+  expect(message.body).toContain(exactly);
+  // The ask is one `orchestration send` to the worker, never a text typed into a terminal.
+  expect(hub.fake.verbs()).not.toContain("terminal send");
+});
+
+test("ARK-T662 with an invalid ark.yml the Companions data route answers its error as data and the snapshot and the page still answer 200", async () => {
+  const hub = await companionHub();
+  hub.fixture.raw(3); // `companions: 3`
+
+  const data = await fetch(`${hub.baseUrl}/api/companions`);
+  expect(data.status).toBe(200);
+  const reply: CompanionsReply = await data.json();
+  const project = reply.projects.find((candidate) => candidate.project === "p");
+  expect(project && "error" in project ? project.error : "").toContain("companions");
+  expect((await fetch(`${hub.baseUrl}/api/snapshot`)).status).toBe(200);
+  const page = await fetch(`${hub.baseUrl}/`);
+  expect(page.status).toBe(200);
+  expect(await page.text()).toContain('<div id="root"></div>');
+});
+
+test("ARK-T662 with orca down the data route says unavailable, approve and dismiss still write, and ask answers a refusal and sends nothing, where the same ask with orca back answers 200 and sends", async () => {
+  const hub = await companionHub();
+  const actingBefore = actingCalls(hub.fake);
+  hub.fake.configure({ failAll: true });
+
+  const reply: CompanionsReply = await (await fetch(`${hub.baseUrl}/api/companions`)).json();
+  expect(reply.orca).toBe("unavailable");
+  const project = reply.projects.find((candidate) => candidate.project === "p");
+  expect(
+    project && "companions" in project ? project.companions.map((row) => row.state) : [],
+  ).toEqual(["unavailable"]);
+
+  const ask = await ownPost(hub, "ask", goodBodies.ask);
+  expect(ask.status).toBe(502);
+  const refusal: { error: string } = await ask.json();
+  expect(refusal.error).not.toBe("");
+  expect(hub.fake.sent()).toEqual([]);
+  // Not even an attempt: the ask found no worker to send to, so Orca never saw a `send`.
+  expect(actingCalls(hub.fake)).toEqual(actingBefore);
+  expect((await ownPost(hub, "dismiss", goodBodies.dismiss)).status).toBe(200);
+  expect((await ownPost(hub, "approve", goodBodies.approve)).status).toBe(200);
+
+  // Control: the refusal above came from Orca being down, not from this ask or this companion.
+  hub.fake.configure({ failAll: false });
+  expect((await ownPost(hub, "ask", goodBodies.ask)).status).toBe(200);
+  expect(hub.fake.sent()).toHaveLength(1);
 });
 
 // ---------------------------------------------------------------- ARK-284
 
-/** One raw HTTP request, so a test can set a `Host` that `fetch` would not send. */
-async function rawPost(baseUrl: string, host: string, origin: string, body: string) {
+/** One raw HTTP POST, so a test can set a `Host` that `fetch` would not send. Answers the status and the body text. */
+async function rawRequest(
+  baseUrl: string,
+  host: string,
+  origin: string,
+  body: string,
+  path = "/api/open-in-orca",
+): Promise<{ status: number; text: string }> {
   const { port } = new URL(baseUrl);
   const { promise, resolve } = Promise.withResolvers<string>();
   let answer = "";
@@ -240,22 +569,35 @@ async function rawPost(baseUrl: string, host: string, origin: string, body: stri
     },
   });
   socket.write(
-    `POST /api/open-in-orca HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n${body}`,
+    `POST ${path} HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
   );
-  return Number((await promise).match(/^HTTP\/1\.1 (\d+)/)?.[1]);
+  const raw = await promise;
+  return {
+    status: Number(raw.match(/^HTTP\/1\.1 (\d+)/)?.[1]),
+    text: raw.split("\r\n\r\n").slice(1).join("\r\n\r\n"),
+  };
 }
 
-test("ARK-284-AC1 open-in-orca answers 200, 403, 400 and 502, runs only terminal switch, and never sends text", async () => {
+// ARK-480 amended ADR 0009: open-in-orca is one of four routes that take a POST. It still runs only `terminal switch`.
+test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only terminal switch, and never sends text", async () => {
   isolatedEnvironment();
   const run = `${today()}-ARK-805-1`;
-  writeRun({ project: "p", run, ticket: { id: "ARK-805", title: "Open" }, phase: "building" });
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-805", title: "Open" },
+    phase: "building",
+  });
   const state = installFakeTools({ orca: orcaAnswersFor(run) });
   const { baseUrl } = await start();
   const own = new URL(baseUrl).host;
   const post = (terminal: unknown, origin: string | null = baseUrl) =>
     fetch(`${baseUrl}/api/open-in-orca`, {
       method: "POST",
-      headers: { "content-type": "application/json", ...(origin ? { origin } : {}) },
+      headers: {
+        "content-type": "application/json",
+        ...(origin ? { origin } : {}),
+      },
       body: JSON.stringify({ terminal }),
     });
   const switches = () =>
@@ -273,15 +615,22 @@ test("ARK-284-AC1 open-in-orca answers 200, 403, 400 and 502, runs only terminal
   expect(switches()).toEqual(["terminal switch --terminal term-worker"]);
   expect((await post("term-worker", "http://evil.example")).status).toBe(403);
   expect((await post("term-worker", null)).status).toBe(403);
-  expect(await rawPost(baseUrl, "evil.example", baseUrl, '{"terminal":"term-worker"}')).toBe(403);
-  expect(await rawPost(baseUrl, own, baseUrl, '{"terminal":"term-worker"}')).toBe(200);
+  expect(
+    (await rawRequest(baseUrl, "evil.example", baseUrl, '{"terminal":"term-worker"}')).status,
+  ).toBe(403);
+  expect((await rawRequest(baseUrl, own, baseUrl, '{"terminal":"term-worker"}')).status).toBe(200);
   expect((await post("term-unlisted")).status).toBe(400);
   expect((await post("--help; rm -rf /")).status).toBe(400);
   expect((await post(42)).status).toBe(400);
+  // The route keeps its own 1024-byte limit although the server now takes 4096 bytes for the companion routes.
+  expect((await post("t".repeat(1025))).status).toBe(413);
   expect(switches()).toHaveLength(2);
   expect(readFileSync(join(state, "orca.log"), "utf8")).not.toContain("terminal send");
 
-  writeFakeToolState(state, { orca: orcaAnswersFor(run), orcaSwitchFails: true });
+  writeFakeToolState(state, {
+    orca: orcaAnswersFor(run),
+    orcaSwitchFails: true,
+  });
   expect((await post("term-worker")).status).toBe(502);
 });
 
@@ -663,7 +1012,7 @@ const transcriptUrl = (baseUrl: string, run: string, file: string, cursor: numbe
 const resultUrl = (baseUrl: string, run: string, file: string, call: string) =>
   `${baseUrl}/api/run/${run}/transcript/result?file=${encodeURIComponent(file)}&call=${encodeURIComponent(call)}`;
 
-test("ARK-284-AC1 with orca down the hub keeps serving, open-in-orca answers 400 and runs nothing, and no run file changes", async () => {
+test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400 and runs no terminal switch, and no run file changes", async () => {
   isolatedEnvironment();
   const run = `${today()}-ARK-806-1`;
   const directory = writeRun({
@@ -673,7 +1022,10 @@ test("ARK-284-AC1 with orca down the hub keeps serving, open-in-orca answers 400
     phase: "building",
   });
   const events = readFileSync(join(directory, "events.ndjson"), "utf8");
-  const state = installFakeTools({ orca: orcaAnswersFor(run), orcaMode: "down" });
+  const state = installFakeTools({
+    orca: orcaAnswersFor(run),
+    orcaMode: "down",
+  });
   const { baseUrl } = await start();
   let snapshot: Snapshot;
   do {
@@ -698,7 +1050,6 @@ test("ARK-284-AC1 with orca down the hub keeps serving, open-in-orca answers 400
     ? readFileSync(join(state, "orca.log"), "utf8")
     : "";
   expect(log).not.toContain("terminal switch");
-  expect(log).not.toContain("terminal send");
   expect(readFileSync(join(directory, "events.ndjson"), "utf8")).toBe(events);
 });
 
@@ -2743,6 +3094,35 @@ test("ARK-291-AC2 the snapshot has roadmap per project (the readRoadmap result, 
   expect(why("ARK-702")).toBe("Because it is needed!");
   expect(why("ARK-703")).toBeNull();
   expect(why("ARK-704")).toBe("Run ark chief state first");
+});
+
+test("ARK-T659 the hub snapshot lists a ticket written by ark companion propose, with its source key, once, in Review", async () => {
+  const { folder } = scenario([entry("cortana", ["run.merged"])]);
+  writeRoadmap("p");
+  const draft = join(scratch("ark-draft-"), "draft.md");
+  writeFileSync(
+    draft,
+    '---\nid: ARK-901\ntitle: "A companion idea"\nstatus: ready\nacceptance_criteria:\n  - id: AC1\n    text: "The idea works"\n---\n## Why\n\nBecause the suite is slow.\n',
+  );
+  expect(arkP("companion", "propose", "cortana", draft).code).toBe(0);
+  expect(readFileSync(join(folder, "tickets", "ARK-901.md"), "utf8")).toMatch(
+    /^source: .*cortana/m,
+  );
+
+  const { baseUrl } = await start();
+  const snapshot = await snapshotWhen(
+    baseUrl,
+    (current) => current.tickets !== "unknown" && current.roadmap !== "unknown",
+  );
+  if (snapshot.tickets === "unknown" || snapshot.roadmap === "unknown")
+    throw new Error("unreachable");
+  expect(snapshot.tickets.find((ticket) => ticket.id === "ARK-901")?.status).toBe("proposed");
+  const roadmap = snapshot.roadmap.p;
+  if (!roadmap || !("review" in roadmap)) throw new Error(`no roadmap: ${JSON.stringify(roadmap)}`);
+  expect(roadmap.review.map((item) => item.id)).toEqual(["ARK-901"]);
+  const elsewhere = [roadmap.now, roadmap.next, roadmap.later, roadmap.unranked].flat();
+  expect(elsewhere.map((item) => item.id)).not.toContain("ARK-901");
+  expect(roadmap.shipped).toEqual([]);
 });
 
 test("ARK-291-AC2 a change to ROADMAP.md reaches a client of the event stream within 5 s", async () => {

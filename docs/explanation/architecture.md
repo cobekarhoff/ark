@@ -60,13 +60,13 @@ Bootstrap writes one `harness` and `model` per role into `ark.yml` (`roles:`). A
 
 ## Where each concern lives
 
-| Concern                                                            | Lives in       | Why                                                                                                                                 |
-| ------------------------------------------------------------------ | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Hosting agents, messages between agents, the ticket queue          | Orca           | It already runs agents from several harnesses and tracks tasks with dependencies                                                    |
-| Plan review, MR review, questions when you are away from the chat  | Plannotator    | A review interface exists, so Ark does not build one                                                                                |
-| Run state, worktrees, tests, MRs, metrics                          | `ark` command  | These steps must give the same result every time, so no agent does them by hand                                                     |
-| Judgment: planning, writing tests, writing code, reviewing, retros | Skills         | Judgment changes often, and a skill is easy to change and review                                                                    |
-| What needs you, across projects                                    | Hub (`ark ui`) | A view. It has one action, "Open in Orca". You steer through Master Chief ([ADR 0009](../adr/0009-hub-is-a-read-only-live-view.md)) |
+| Concern                                                            | Lives in       | Why                                                                                                                                                                          |
+| ------------------------------------------------------------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hosting agents, messages between agents, the ticket queue          | Orca           | It already runs agents from several harnesses and tracks tasks with dependencies                                                                                             |
+| Plan review, MR review, questions when you are away from the chat  | Plannotator    | A review interface exists, so Ark does not build one                                                                                                                         |
+| Run state, worktrees, tests, MRs, metrics                          | `ark` command  | These steps must give the same result every time, so no agent does them by hand                                                                                              |
+| Judgment: planning, writing tests, writing code, reviewing, retros | Skills         | Judgment changes often, and a skill is easy to change and review                                                                                                             |
+| What needs you, across projects                                    | Hub (`ark ui`) | A view. Its actions are "Open in Orca" and the three writes of the Companions page. You steer through Master Chief ([ADR 0009](../adr/0009-hub-is-a-read-only-live-view.md)) |
 
 The rule: if a step must be repeatable, it goes in the `ark` command. If it needs judgment, it goes in a skill. The [command reference](../reference/cli.md) lists the commands; the `skills/ark-*/` folders hold the judgment, one for each role.
 
@@ -253,6 +253,6 @@ The run lead runs `ark retro` and writes `retro.md` while the MRs are open, befo
 
 - **Agents are trusted.** They act with your access, and branch protection on the git host decides what merges: no agent and no `ark` command merges. This replaced a hash-chained ledger, hashed gate packets, a launcher with tool restrictions and credential scrubbing that were hard to build and blocked work. See [ADR 0004](../adr/0004-trusted-agents-lightweight-harness.md).
 - **Orca and Plannotator do the hosting and review.** Ark builds no agent hosting, messaging, queue or review interface. See [ADR 0005](../adr/0005-orca-and-plannotator.md).
-- **The hub only reads.** It has one action, "Open in Orca", and you steer through Master Chief. See [ADR 0009](../adr/0009-hub-is-a-read-only-live-view.md).
+- **The hub only reads.** Its actions are "Open in Orca" and the three writes of the Companions page (approve a proposed ticket to `ready`, dismiss, ask), and you steer through Master Chief. See [ADR 0009](../adr/0009-hub-is-a-read-only-live-view.md).
 - **Test cases describe the product, and an AC is proven through them.** Product repos keep their own validation; Ark adds no second proof system. See [ADR 0010](../adr/0010-test-cases-describe-the-product.md), which replaces [ADR 0006](../adr/0006-integration-and-e2e-proof-only.md).
 - **Repeatable steps are commands, judgment is skills.** The `ark` command holds only repeatable steps (see the [command reference](../reference/cli.md)). When a retro finds a repeatable mistake, it becomes a refusal, not a paragraph in a skill.

@@ -26,3 +26,4 @@ ADR 0007 made the control center read-only. The human now wants to guide agents 
 - ADR 0007 is superseded in part: its read-only rule and its name. Its three-tools split stays.
 - ADR 0005 stays accepted and is unchanged.
 - `orca terminal send` gives no proof of delivery beyond its exit code, so the hub shows "sent", not "read".
+- ADR 0009 later let the hub make four writes (the focus action, then the three of the Companions page, ARK-480). None of them types into a terminal or writes run state, and Master Chief stays the only path to queue work.

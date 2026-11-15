@@ -15,6 +15,11 @@ import {
   writeMinimalConfig,
   type FakeToolOptions,
 } from "../hub-fixtures.ts";
+import {
+  installFakeCompanionTools,
+  removeFakeCompanionTools,
+  type FakeCompanionTools,
+} from "../fake-companion-tools.ts";
 
 export const repositoryRoot = join(import.meta.dirname, "..", "..");
 
@@ -115,6 +120,66 @@ export function ark(...args: string[]): { code: number; out: string; err: string
   });
   return { code: result.status ?? 1, out: result.stdout, err: result.stderr };
 }
+
+export type CompanionsProject = {
+  /** `$ARK_HOME/projects/p`. */
+  folder: string;
+  fake: FakeCompanionTools;
+  /** Rewrites ark.yml with these companions (name to triggers, in order) and their instructions files; no `companions` key for undefined. */
+  list(companions: Record<string, string[]> | undefined): void;
+  /** `ark <args> --project p`. */
+  arkP(...args: string[]): { code: number; out: string; err: string };
+};
+
+/**
+ * A fresh ARK_HOME with project `p` (a git workspace, local tickets) and the fake `orca` and `gh` of
+ * ARK-480 first on PATH (test/fake-companion-tools.ts), so a hub started afterwards and the `ark`
+ * commands of the test see them. Call `removeFakeCompanionTools` after the test.
+ */
+export function companionsProject(): CompanionsProject {
+  const arkHome = tempArkHome();
+  const workspace = tempGitRepo();
+  const fake = installFakeCompanionTools({ project: "p", workspace });
+  const folder = join(arkHome, "projects", "p");
+  const base = {
+    workspace,
+    ticket_source: "local",
+    suites: [
+      {
+        name: "unit",
+        level: "unit",
+        repo: ".",
+        command: "true {report}",
+        parser: "bun",
+      },
+    ],
+    roles: {
+      implementer: { harness: "omp", model: "test-model" },
+      validator: { harness: "omp", model: "test-model" },
+      reviewer: { harness: "omp", model: "test-model" },
+    },
+  };
+  return {
+    folder,
+    fake,
+    list(companions) {
+      const entries = Object.entries(companions ?? {}).map(([name, on]) => ({
+        name,
+        instructions: `companions/${name}.md`,
+        harness: "omp",
+        model: "test-model",
+        on,
+      }));
+      writeProject("p", companions === undefined ? base : { ...base, companions: entries });
+      mkdirSync(join(folder, "companions"), { recursive: true });
+      for (const entry of entries)
+        writeFileSync(join(folder, entry.instructions), `Instructions of ${entry.name}.\n`);
+    },
+    arkP: (...args) => ark(...args, "--project", "p"),
+  };
+}
+
+export { removeFakeCompanionTools };
 
 /** Writes an executable `<name>` with the given shell script and puts it first on PATH. Returns its directory. */
 export function writeFakeCommand(name: string, script: string): string {

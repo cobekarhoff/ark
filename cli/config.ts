@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { cpus } from "node:os";
 import { defaultMaximumSwapGigabytes, defaultMinimumFreeMemoryPercent } from "./host.ts";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { projectDirectory } from "./paths.ts";
 import { discoverRepos } from "./workspace.ts";
@@ -21,6 +21,26 @@ const optionalRoleNames = [
   "test_writer",
   "test_reviewer",
 ] as const;
+
+/** The events that wake a companion (`companions[].on` of ark.yml). */
+export const COMPANION_TRIGGERS = [
+  "run.merged",
+  "run.started",
+  "criteria.opened",
+  "escalation",
+  "ci.failed",
+] as const;
+
+export type CompanionTrigger = (typeof COMPANION_TRIGGERS)[number];
+
+/** An always-on helper agent. `instructions` is a file relative to the project folder. */
+export type CompanionConfig = {
+  name: string;
+  instructions: string;
+  harness: string;
+  model: string;
+  on: CompanionTrigger[];
+};
 
 type Role = (typeof roleNames)[number];
 type RoleConfig = { harness: string; model: string };
@@ -79,6 +99,8 @@ export type ProjectConfig = {
   };
   /** Base and target branch per repo, keyed by repo path exactly as `ark worktree create` names it (`.` or `repos/a`). */
   repos?: Record<string, { base: string }>;
+  /** Always-on helper agents. Absent, not empty, when ark.yml has no `companions` key. */
+  companions?: CompanionConfig[];
   concurrency: number;
   /** The `pr_writing:` block with defaults filled in. */
   pr_writing: PrWriting;
@@ -116,6 +138,7 @@ const topLevelKeys = keysOf<ProjectConfig>({
   gates: true,
   generated: true,
   security: true,
+  companions: true,
 });
 const securityKeys = keysOf<NonNullable<ProjectConfig["security"]>>({ accepted: true });
 const acceptedKeys = keysOf<NonNullable<ProjectConfig["security"]>["accepted"][number]>({
@@ -138,6 +161,13 @@ const checkKeys = keysOf<ProjectConfig["checks"][number]>({
   repo: true,
   command: true,
   cores: true,
+});
+const companionKeys = keysOf<CompanionConfig>({
+  name: true,
+  instructions: true,
+  harness: true,
+  model: true,
+  on: true,
 });
 const roleKeys = keysOf<RoleConfig>({ harness: true, model: true });
 const repoKeys = keysOf<NonNullable<ProjectConfig["repos"]>[string]>({ base: true });
@@ -397,6 +427,63 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       }),
     };
   }
+  let companions: ProjectConfig["companions"];
+  if (fields.companions !== undefined) {
+    if (!Array.isArray(fields.companions)) fail("companions must be a list of entries");
+    const companionNames = new Set<string>();
+    const projectFolder = dirname(path);
+    companions = (fields.companions as unknown[]).map((entry, i) => {
+      const companion = asObject(entry, `companions[${i}]`);
+      onlyKeys(companion, `companions[${i}]`, companionKeys);
+      const name = text(companion, "name", `companions[${i}].name`);
+      if (/[/\\\s]/.test(name) || name.includes("..") || name === ".")
+        fail(
+          `companions[${i}].name must not contain /, \\, .. or whitespace: ${JSON.stringify(name)}`,
+        );
+      if (companionNames.has(name))
+        fail(`companions[${i}].name duplicates another companion: ${name}`);
+      companionNames.add(name);
+      const instructions = text(companion, "instructions", `companions[${i}].instructions`);
+      const instructionsFile = resolve(projectFolder, instructions);
+      const outside = relative(projectFolder, instructionsFile);
+      if (
+        isAbsolute(instructions) ||
+        instructions.split(/[/\\]/).includes("..") ||
+        outside.startsWith("..") ||
+        isAbsolute(outside)
+      )
+        fail(
+          `companions[${i}] (${name}).instructions must be a path inside the project folder: ${instructions}`,
+        );
+      if (!existsSync(instructionsFile) || !statSync(instructionsFile).isFile())
+        fail(`companions[${i}] (${name}).instructions is not a file: ${instructions}`);
+      const harness = text(companion, "harness", `companions[${i}].harness`);
+      if (!(HARNESSES as readonly string[]).includes(harness))
+        fail(
+          `companions[${i}] (${name}).harness must be claude, codex, omp or pi (got ${harness})`,
+        );
+      const triggers = companion.on;
+      if (!Array.isArray(triggers) || triggers.length === 0)
+        fail(
+          `companions[${i}] (${name}).on must be a non-empty list of ${COMPANION_TRIGGERS.join(", ")}`,
+        );
+      for (const trigger of triggers as unknown[])
+        if (
+          typeof trigger !== "string" ||
+          !(COMPANION_TRIGGERS as readonly string[]).includes(trigger)
+        )
+          fail(
+            `companions[${i}] (${name}).on has an unknown trigger ${JSON.stringify(trigger)}: use ${COMPANION_TRIGGERS.join(", ")}`,
+          );
+      return {
+        name,
+        instructions,
+        harness,
+        model: text(companion, "model", `companions[${i}].model`),
+        on: triggers as CompanionTrigger[],
+      };
+    });
+  }
 
   const prWritingField = asObject(fields.pr_writing ?? {}, "pr_writing");
   onlyKeys(prWritingField, "pr_writing", prWritingKeys);
@@ -456,5 +543,6 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   if (fields.setup !== undefined) config.setup = fields.setup as string;
   if (fields.generated !== undefined) config.generated = generated;
   if (security !== undefined) config.security = security;
+  if (companions !== undefined && companions.length > 0) config.companions = companions;
   return config;
 }

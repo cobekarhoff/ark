@@ -257,7 +257,7 @@
   {
     "command": "chief state",
     "usage": "chief state [--project <name>]",
-    "description": "Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file: open runs with phase and current step, run leads (live ones only, dispatch and terminal) from `orca orchestration worker-list`, which reads Master Chief's own Orca Run; `task-list` reads the same Run for the queue, queued Orca Tasks (`ready` and `pending`), the head of the workspace's main branch, `gates` and `concurrency` from ark.yml, the number of closed runs since the last interview (`(due)` at 10 or more) and free disk space. It reads every page of the Run list, so a Master Chief Run past the first page is found. A source that fails prints `unavailable: <command> failed: <reason>` under its heading, and the other sections still print. An empty source prints `none`. The `Red on main` section lists each file that an open run's last full `test.completed` recorded in `red_on_main`, with the run id, once; a run whose events cannot be read prints `unavailable` there. --project falls back to ARK_PROJECT.",
+    "description": "Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a file: open runs with phase and current step, run leads (live ones only, dispatch and terminal) from `orca orchestration worker-list`, which reads Master Chief's own Orca Run; `task-list` reads the same Run for the queue, queued Orca Tasks (`ready` and `pending`), the head of the workspace's main branch, `gates` and `concurrency` from ark.yml, the number of closed runs since the last interview (`(due)` at 10 or more) and free disk space. It reads every page of the Run list, so a Master Chief Run past the first page is found. A source that fails prints `unavailable: <command> failed: <reason>` under its heading, and the other sections still print. An empty source prints `none`. The `Red on main` section lists each file that an open run's last full `test.completed` recorded in `red_on_main`, with the run id, once; a run whose events cannot be read prints `unavailable` there. It also runs `ark companions sync` and prints its lines, and each failure as `unavailable: <reason>`, under `Companions`; with no `companions` in ark.yml and no recorded companion worker it adds no section and no Orca call, and a failing sync never changes the exit code. --project falls back to ARK_PROJECT.",
     "flags": {
       "--project": "value"
     },
@@ -275,9 +275,59 @@
     "maximum": 0
   },
   {
+    "command": "companions sync",
+    "usage": "companions sync [--project <name>]",
+    "description": "Keeps one Orca worker alive for each companion listed under `companions` in ark.yml, and wakes it. A companion with no live worker is started with `orca orchestration worker-start --keep-open --run <Master Chief's Run>`, with the harness and model of its entry, the repo of the `workspace` of ark.yml as its worktree (the only path Orca resolves; the project folder is named in the spec), and a spec made of the fixed companion preamble and the text of its instructions file. A worker is live when its recorded dispatch id (`companions/<name>/worker.json`, written only after the start succeeded) is a row of `worker-list` of Master Chief's Run with liveness `live`: a kept-open companion stays live, and retained, after each turn. A `companions/<name>/` folder whose companion is no longer listed gets `worker-stop` and then `worker-release` for its recorded dispatch id; the folder keeps its ideas and answers. It prints one line for each companion: `<name>: running`, `<name>: started` or `<name>: stopped`. Each live companion then gets one `orca orchestration send --to dispatch:<id>` for each new event of a trigger it lists in `on`: `run.merged` is a `run.closed` event with outcome `merged`, `run.started` is `run.started`, `criteria.opened` is an `evaluation.recorded` event with at least one blocker, `escalation` is `escalation.requested`, and `ci.failed` is a failed check on an MR of a run in `merge_requests_open`, read live from `gh` or `glab` and keyed by run, MR number and check name. The message names the trigger and the run id. `companions/<name>/cursor.json` holds the last event of each run and the failures already sent; it is written after the send worked, so a failed send is sent again, and a companion's first sync only writes it and sends nothing for older events. A run whose events cannot be read is named on a `note:` line and skipped. A sync that finds another sync running for a companion refuses that companion with an `ark: ` line. It exits 1 after printing an `ark: ` line for each failure, and still handles the other companions; it exits 1 and changes nothing when Master Chief's Run or Orca cannot be read. With no `companions` key and no recorded worker it prints nothing and makes no Orca call. `ark chief state` runs the same sync. --project falls back to ARK_PROJECT.",
+    "flags": {
+      "--project": "value"
+    },
+    "minimum": 0,
+    "maximum": 0
+  },
+  {
+    "command": "companion ask",
+    "usage": "companion ask <name> <question> [--project <name>]",
+    "description": "Sends the live worker of the companion one message that holds the question and says it is a question from the human or Master Chief, not a trigger wake; the companion answers with `ark companion answer`. It exits 1 with an `ark: ` line, and sends nothing, when the name is not in ark.yml (it creates no folder) or the companion has no live worker. --project falls back to ARK_PROJECT.",
+    "flags": {
+      "--project": "value"
+    },
+    "minimum": 2,
+    "maximum": 2
+  },
+  {
+    "command": "companion answer",
+    "usage": "companion answer <name> <text> [--project <name>]",
+    "description": "Appends the text and its time to `companions/<name>/answers.md` with one write, then sends Master Chief a copy. Master Chief is the live one of the project, found as `ark chief handover` finds it, so it works with no Orca session variable (the hub calls it that way). It exits 1 with an `ark: ` line when the name is not in ark.yml (it creates no folder), and when the copy fails: then the answer is already in the file. --project falls back to ARK_PROJECT.",
+    "flags": {
+      "--project": "value"
+    },
+    "minimum": 2,
+    "maximum": 2
+  },
+  {
+    "command": "companion advise",
+    "usage": "companion advise <name> <run> <text> [--project <name>]",
+    "description": "Sends the run lead of an open run one message of type `status` whose subject starts with `Advice from companion <name>:` and whose body says it is advice and not a gate answer, then sends Master Chief a copy with the run id. The lead is the worker of Master Chief's Run that leads the run, found as `ark chief state` finds it. Nothing is sent unless both the lead and the live Master Chief are found. It exits 1 with an `ark: ` line when the name is not in ark.yml, the run does not exist or is closed, the run has no live lead, or a send fails; when the send to the lead fails no copy goes out, and when only the copy fails the lead keeps the advice. --project falls back to ARK_PROJECT.",
+    "flags": {
+      "--project": "value"
+    },
+    "minimum": 3,
+    "maximum": 3
+  },
+  {
+    "command": "companion propose",
+    "usage": "companion propose <name> <file> [--project <name>]",
+    "description": "Copies the draft ticket (a relative path is resolved against the project folder, not the current folder) to `tickets/<id>.md` of the project with `status: proposed` (whatever status the draft names) and the front matter line `source: companion <name>`, and prints the path. The draft must be a valid ticket with an id like `ARK-123`. It exits 1 with an `ark: ` line and writes nothing when the name is not in ark.yml, the file is missing, the draft has no id or is not a valid ticket, or a ticket with that id already exists (an existing ticket is never overwritten). It never queues the ticket and sends no message: the human approves it, and Master Chief queues it. --project falls back to ARK_PROJECT.",
+    "flags": {
+      "--project": "value"
+    },
+    "minimum": 2,
+    "maximum": 2
+  },
+  {
     "command": "ui",
     "usage": "ui [--port <number>] [--name <host>]",
-    "description": "Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). --name <host> (such as ark.localhost) also lets the hub answer to that name. One background reader builds a snapshot of the runs, plans, models, MRs, usage cost, tickets and roadmap; the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). A closed run, its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot. Views: Home (tiles for what needs you, then blockers, the review queue and run progress with usage), Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page (any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts) and Roadmap (grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read when the page asks, GET /api/ticket/<project>/<id>). A run whose steps work in 2 or more repos draws its repo graph instead of the step DAG: one card per repo in merge order (hand-off order when no MR exists) with the repo's why, its MR, CI and `waits for !N` or its hand-off branch, a ring and a dot per step, repo edges labelled with kind and pin (evidence and bump state on hover or focus), and, in an open card, the steps in the columns Implement, Bump, Validate and Review. Cards start closed from 4 repos. Cross-repo step edges show only while a step has hover or focus. The ticket page shows the repo chain of its newest run; a click opens `#/run/<run>/repo/<repo>`. A run with one step repo, a dependency cycle between repos, or no plan keeps the step DAG and no chain. Branch commits and submodule pointers are read by git in the background, never per request. The hub's one action is POST /api/open-in-orca, which runs orca terminal switch for a live terminal; it sends no text to a terminal, changes no run state and steers no agent. One hub runs per Ark repo: a second hub for the same repo (any port) prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the running hub and exits 0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs only while a page is connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and watches no Ark folder (GET /api/snapshot does not wake it), and it reads Plannotator only while an open run has an open gate.",
+    "description": "Serves the hub in hub/ on 127.0.0.1, port 4317 unless --port says otherwise (0 picks a free port). --name <host> (such as ark.localhost) also lets the hub answer to that name. One background reader builds a snapshot of the runs, plans, models, MRs, usage cost, tickets and roadmap; the page gets it over one Server-Sent Events stream (/events; GET /api/snapshot returns the same JSON). A closed run, its decisions, files and agent transcripts are read when the page asks, not kept in the snapshot. Views: Home (tiles for what needs you, then blockers, the review queue and run progress with usage), Runs (every run on one board and a cross-run dependency graph; #/map redirects here), a run page (any run: progress strip, plan, agents, MR evidence, decisions, files, transcripts), Roadmap (grouped table; a ticket opens as a full page with its dependency graph; the ticket text is read when the page asks, GET /api/ticket/<project>/<id>) and Companions (one row for each companion of ark.yml with its state, last wake, trigger and cost, then its latest ideas and proposed tickets; GET /api/companions). A run whose steps work in 2 or more repos draws its repo graph instead of the step DAG: one card per repo in merge order (hand-off order when no MR exists) with the repo's why, its MR, CI and `waits for !N` or its hand-off branch, a ring and a dot per step, repo edges labelled with kind and pin (evidence and bump state on hover or focus), and, in an open card, the steps in the columns Implement, Bump, Validate and Review. Cards start closed from 4 repos. Cross-repo step edges show only while a step has hover or focus. The ticket page shows the repo chain of its newest run; a click opens `#/run/<run>/repo/<repo>`. A run with one step repo, a dependency cycle between repos, or no plan keeps the step DAG and no chain. Branch commits and submodule pointers are read by git in the background, never per request. The hub has four writes, each a POST from the hub's own page only: /api/open-in-orca, which runs orca terminal switch for a live terminal, and the three of the Companions page, /api/companions/approve (a proposed ticket of a companion goes to `ready`), /api/companions/dismiss (a reason is appended to companions/<name>/dismissed.md) and /api/companions/ask (runs `ark companion ask`). It sends no text to a terminal, queues no work and steers no run; Master Chief queues. One hub runs per Ark repo: a second hub for the same repo (any port) prints `Ark hub already runs on http://127.0.0.1:<port>` with the port of the running hub and exits 0 (lock file in ARK_HOME; a lock of a dead pid is taken over). The reader runs only while a page is connected to /events: an idle hub runs no Orca, Plannotator or GitHub read and watches no Ark folder (GET /api/snapshot does not wake it), and it reads Plannotator only while an open run has an open gate.",
     "flags": {
       "--port": "value",
       "--name": "value"

@@ -4,6 +4,7 @@ import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { deriveState, readEvents, type RunState } from "./events.ts";
 import { exec, execJson } from "./exec.ts";
+import { syncCompanions } from "./companions.ts";
 import {
   findChiefRun,
   findLiveChief,
@@ -11,15 +12,14 @@ import {
   orcaTimeoutMilliseconds,
   readChiefTasks,
   readTerminals,
+  runOfLead,
+  type OrcaRunRow,
+  type WorkerRow,
 } from "./orca.ts";
 import { holdReasons, readHost, sampleCpuPercent } from "./host.ts";
 import { servicesStatusText } from "./services.ts";
 import { readTestLock } from "./test-lock.ts";
 import { projectDirectory, resolveProject, runsDirectory } from "./paths.ts";
-
-type OrcaRunRow = { id: string; objective?: string; coordinator_handle?: string };
-/** A `worker-list --json` row. A structured worker has `liveness: "unverifiable"` and no terminal handle; its `workspace` is `<host>::<run folder>/workspace`. */
-type WorkerRow = { dispatchId: string; terminal?: string; workspace?: string };
 
 const unavailable = (verb: string, reason: string): string =>
   `unavailable: orca orchestration ${verb} failed: ${reason}`;
@@ -122,13 +122,7 @@ export async function chiefState(inProject?: string): Promise<void> {
   const chiefRun = orcaRuns.ok ? findChiefRun(project, orcaRuns.value) : null;
   const chiefRunId = chiefRun?.ok ? chiefRun.value : undefined;
   const noChiefRun = `unavailable: ${chiefRun && !chiefRun.ok ? chiefRun.reason : ""}`;
-  // A run lead is a worker in Master Chief's own Orca Run. It is the lead of the Ark run whose
-  // Orca Run names the worker's terminal as its coordinator.
-  const runOfLead = new Map(
-    (orcaRuns.ok ? orcaRuns.value : [])
-      .filter((orcaRun) => orcaRun.objective?.startsWith("Ark run ") && orcaRun.coordinator_handle)
-      .map((orcaRun) => [orcaRun.coordinator_handle!, orcaRun.objective!.slice("Ark run ".length)]),
-  );
+  // A run lead is a worker in Master Chief's own Orca Run: see `runOfLead`.
   const openRunNames = new Set(openRuns.map((state) => state.run));
   let leadsText = noChiefRun;
   let queueText = noChiefRun;
@@ -146,9 +140,7 @@ export async function chiefState(inProject?: string): Promise<void> {
     ]);
     if (workers.ok) {
       const rows = workers.value.flatMap((worker) => {
-        const run =
-          runOfLead.get(worker.terminal ?? "") ??
-          worker.workspace?.match(/\/runs\/([^/]+)\/workspace$/)?.[1];
+        const run = runOfLead(orcaRuns.ok ? orcaRuns.value : [], worker);
         return run && openRunNames.has(run)
           ? [[run, worker.dispatchId, worker.terminal ?? "-"]]
           : [];
@@ -176,6 +168,20 @@ export async function chiefState(inProject?: string): Promise<void> {
             );
   }
   sections.push("## Run leads", leadsText, "## Queued Orca Tasks", queueText);
+
+  // The same sync as `ark companions sync`. With no companion listed or recorded it makes no Orca call and adds no section.
+  try {
+    const synced = await syncCompanions(project, config, orcaRuns);
+    if (synced)
+      sections.push(
+        "## Companions",
+        [...synced.lines, ...synced.problems.map((problem) => `unavailable: ${problem}`)].join(
+          "\n",
+        ) || "none",
+      );
+  } catch (error) {
+    sections.push("## Companions", `unavailable: ${(error as Error).message}`);
+  }
 
   const head = await exec(["git", "-C", workspace, "log", "-1", "--format=%h %s", "main"]);
   sections.push(
