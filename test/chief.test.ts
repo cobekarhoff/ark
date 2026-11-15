@@ -63,6 +63,28 @@ case "$1 $2" in
   "orchestration task-list")
     case "$*" in *--ready*) cat "$d/ready" ;; *) cat "$d/pending" ;; esac ;;
   "terminal list") cat "$d/terminals" ;;
+  "orchestration inbox")
+    # Like real orca: the rows of --terminal only (to_handle), newest first, 20 rows without --limit,
+    # and no created_at without --full. The store is $d/inbox.ndjson; nothing here changes it.
+    limit=20; terminal=""; full=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --limit) limit=$2 ;;
+        --terminal) terminal=$2 ;;
+        --full) full=1 ;;
+      esac
+      shift
+    done
+    rows=$(grep -F "\\"to_handle\\":\\"$terminal\\"" "$d/inbox.ndjson" | sed -n "1,\${limit}p")
+    [ -n "$full" ] || rows=$(printf '%s\\n' "$rows" | sed 's/,"created_at":"[^"]*"//')
+    printf '{"result":{"messages":[%s]}}\\n' "$(printf '%s\\n' "$rows" | paste -sd, -)" ;;
+  "orchestration check")
+    # Like real orca: --peek is refused for a caller that is not the Run's coordinator; a plain check marks every message read.
+    case "$*" in
+      *--peek*) echo worker_cannot_coordinate_own_run >&2; exit 1 ;;
+    esac
+    sed 's/"read":0/"read":1/' "$d/inbox.ndjson" > "$d/inbox.consumed" && mv "$d/inbox.consumed" "$d/inbox.ndjson"
+    printf '{"result":{"messages":[]}}\\n' ;;
   "agent launch") cat "$d/launch" ;;
   *) exit 2 ;;
 esac
@@ -83,9 +105,13 @@ type Scenario = {
   pending?: unknown[];
   terminals?: unknown[];
   launch?: unknown;
+  /** Messages of every Orca Run, newest first, as `inbox --full --json` rows. */
+  inbox?: unknown[];
 };
 
 function setScenario(scenario: Scenario) {
+  // One scenario's failure never leaks into the next one in the same test.
+  for (const name of ["fail", "stderr", "hang"]) rmSync(join(fakeDirectory, name), { force: true });
   const reply = (name: string, result: unknown) =>
     writeFileSync(join(fakeDirectory, name), JSON.stringify({ result }));
   if (scenario.fail) {
@@ -104,6 +130,10 @@ function setScenario(scenario: Scenario) {
   reply("pending", { tasks: scenario.pending ?? [] });
   reply("terminals", { terminals: scenario.terminals ?? [] });
   reply("launch", { outcome: scenario.launch });
+  writeFileSync(
+    join(fakeDirectory, "inbox.ndjson"),
+    (scenario.inbox ?? []).map((row) => `${JSON.stringify(row)}\n`).join(""),
+  );
 }
 
 function orcaCalls(): string[][] {
@@ -469,11 +499,128 @@ test("ARK-244-AC1 chief state says unavailable for Orca sections and still print
   expect(section(out, "Run leads")).not.toMatch(/\bnone\b/);
   expect(section(out, "Queued Orca Tasks")).toContain("unavailable");
   expect(section(out, "Queued Orca Tasks")).not.toMatch(/\bnone\b/);
+  expect(section(out, "Master Chief inbox")).toContain("unavailable");
+  expect(section(out, "Master Chief inbox")).not.toContain("unread for Master Chief");
   expect(section(out, "Open runs")).toContain(openRun);
   const head = Bun.spawnSync(["git", "log", "-1", "--format=%h", "main"], { cwd: workspace })
     .stdout.toString()
     .trim();
   expect(out).toContain(head);
+});
+
+const frozenNow = "2026-11-04T12:00:00Z";
+const minute = 60_000;
+
+/** A message row as `orca orchestration inbox --full --json` returns it; `created_at` is `ageMilliseconds` before the frozen clock. */
+const inboxRow = (
+  type: string,
+  read: 0 | 1,
+  ageMilliseconds: number,
+  toHandle = "run:run_chief",
+) => ({
+  id: `msg_${Math.random().toString(16).slice(2, 10)}`,
+  to_handle: toHandle,
+  type,
+  read,
+  created_at: new Date(Date.parse(frozenNow) - ageMilliseconds).toISOString(),
+});
+
+/** The line `chief state` prints under `## Master Chief inbox`, with the clock frozen at `frozenNow` for the `ark` subprocess. */
+function inboxLine(): string {
+  const previous = process.env.ARK_NOW;
+  process.env.ARK_NOW = frozenNow;
+  try {
+    const result = ark("chief", "state", "--project", project);
+    expect(result.err).toBe("");
+    expect(result.code).toBe(0);
+    return section(result.out, "Master Chief inbox")
+      .replace(/^Master Chief inbox\s*/, "")
+      .trim();
+  } finally {
+    if (previous === undefined) delete process.env.ARK_NOW;
+    else process.env.ARK_NOW = previous;
+  }
+}
+
+test("ARK-T669 chief state prints the count of unread messages of every type and the age of the oldest, and marks none read", () => {
+  // Nothing unread: a read row (300 min) and an unread row of another Orca Run (500 min) do not count.
+  setScenario({
+    runs: [chiefOrcaRun],
+    inbox: [
+      inboxRow("escalation", 1, 300 * minute),
+      inboxRow("question", 0, 500 * minute, "run:run_other"),
+    ],
+  });
+  expect(inboxLine()).toBe("unread for Master Chief: 0");
+
+  // Three unread of three types; the read escalation (300 min) is neither counted nor the oldest.
+  const rows = [
+    inboxRow("status", 0, 2 * minute),
+    inboxRow("worker_done", 0, 40 * minute),
+    inboxRow("question", 0, 95 * minute),
+    inboxRow("escalation", 1, 300 * minute),
+  ];
+  setScenario({ runs: [chiefOrcaRun], inbox: rows });
+  const before = readFileSync(join(fakeDirectory, "inbox.ndjson"), "utf8");
+  expect(inboxLine()).toBe("unread for Master Chief: 3, oldest 95 min");
+  // Looking at the inbox consumed nothing: Orca's store still holds every `read` flag as it was.
+  expect(readFileSync(join(fakeDirectory, "inbox.ndjson"), "utf8")).toBe(before);
+});
+
+test("ARK-T669 the age of the oldest unread message is whole minutes, floored, never hours", () => {
+  for (const [ageMilliseconds, printed] of [
+    [59 * minute, "59 min"],
+    [60 * minute, "60 min"],
+    [61 * minute, "61 min"],
+    [95 * minute + 59_000, "95 min"],
+  ] as const) {
+    setScenario({ runs: [chiefOrcaRun], inbox: [inboxRow("question", 0, ageMilliseconds)] });
+    expect(inboxLine()).toBe(`unread for Master Chief: 1, oldest ${printed}`);
+  }
+});
+
+test("ARK-T669 unread messages past Orca's default 20 rows are counted", () => {
+  // Newest first: 20 read status and heartbeat rows, then three unread rows, then an older read one.
+  const rows = [
+    ...Array.from({ length: 20 }, (_, index) =>
+      inboxRow(index % 2 === 0 ? "status" : "heartbeat", 1, (index + 1) * minute),
+    ),
+    inboxRow("status", 0, 60 * minute),
+    inboxRow("worker_done", 0, 90 * minute),
+    inboxRow("question", 0, 200 * minute),
+    inboxRow("escalation", 1, 400 * minute),
+  ];
+  setScenario({ runs: [chiefOrcaRun], inbox: rows });
+  expect(inboxLine()).toBe("unread for Master Chief: 3, oldest 200 min");
+});
+
+test("ARK-T669 a failed read says unavailable with its reason, never 0, and chief state still exits 0", () => {
+  const unread = [inboxRow("question", 0, 30 * minute)];
+  const lines = {} as Record<string, string>;
+
+  setScenario({
+    runs: [chiefOrcaRun],
+    inbox: unread,
+    fail: { verb: "run-list", stderr: "connection refused\n" },
+  });
+  lines.runList = inboxLine();
+  setScenario({
+    runs: [{ id: "run_ark", objective: `Ark run ${openRun}`, coordinator_handle: "term_lead" }],
+    inbox: unread,
+  });
+  lines.noRun = inboxLine();
+  setScenario({
+    runs: [chiefOrcaRun],
+    inbox: unread,
+    fail: { verb: "inbox", stderr: "inbox store locked\n" },
+  });
+  lines.inbox = inboxLine();
+
+  expect(lines).toEqual({
+    runList: "unavailable: orca orchestration run-list failed: connection refused",
+    noRun: `unavailable: no Orca Run "Master Chief: ${project} tickets"`,
+    inbox: "unavailable: orca orchestration inbox failed: inbox store locked",
+  });
 });
 
 test("ARK-244-AC2 chief handover starts a new Master Chief in a terminal and prints its handle", () => {
@@ -622,7 +769,7 @@ test("ARK-306-AC2 the text --cursor is in exactly one file of cli/ and hub/", ()
 });
 
 const noRunListFailure = (out: string, reason: string) => {
-  for (const heading of ["Run leads", "Queued Orca Tasks"]) {
+  for (const heading of ["Run leads", "Queued Orca Tasks", "Master Chief inbox"]) {
     const text = section(out, heading);
     expect(text).toContain(`unavailable: orca orchestration run-list failed: ${reason}`);
     expect(text).not.toMatch(/\bnone\b/);
@@ -679,7 +826,7 @@ test("ARK-306-AC3 230 Runs without a Master Chief Run print the no Orca Run text
   setScenario(leadScenario(230, null));
   const { out } = ark("chief", "state", "--project", project);
   expect(runListPages()).toBe(Math.ceil(230 / rowsPerPage));
-  for (const heading of ["Run leads", "Queued Orca Tasks"]) {
+  for (const heading of ["Run leads", "Queued Orca Tasks", "Master Chief inbox"]) {
     const text = section(out, heading);
     expect(text).toContain(`unavailable: no Orca Run "Master Chief: ${project} tickets"`);
     expect(text).not.toMatch(/\bnone\b/);

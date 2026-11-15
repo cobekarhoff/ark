@@ -147,6 +147,14 @@ function isolate(): { sessions: string } {
 const runId = (ticket: string, number = 1) => `${today()}-${ticket}-${number}`;
 const ago = (seconds: number) => dateOf(testNow() - seconds * 1000);
 
+/** An unread message in a Master Chief Run's inbox, `minutes` before the frozen clock (`read` 1 for a read one). */
+const unreadMessage = (type: string, minutes: number, read: 0 | 1 = 0) => ({
+  id: `msg_${type}_${minutes}_${read}`,
+  type,
+  read,
+  created_at: isoAgo(minutes * 60_000),
+});
+
 /** Opens a view and waits for the app to mount (the main heading) before any input. */
 async function open(page: Page, baseUrl: string, hash: string): Promise<void> {
   await page.goto(`${baseUrl}/#/${hash}`);
@@ -2339,6 +2347,14 @@ async function homeWithBlockers(
     orca,
     mergeRequestViews: { [older.url]: older.view, [newer.url]: newer.view },
     ompUsage: usageAt(0.82, baseInstant),
+    // Master Chief has 3 unread messages, the oldest 95 min old: the Chief unread tile is a warning.
+    chiefUnread: {
+      p: [
+        unreadMessage("status", 2),
+        unreadMessage("worker_done", 40),
+        unreadMessage("question", 95),
+      ],
+    },
     plannotatorSessions: [
       { index: 1, target: join(gate, "ticket.md"), url: "http://localhost:20000/review/gate" },
     ],
@@ -2379,11 +2395,12 @@ async function checkHomeWithBlockers(page: Page, baseInstant: number, reset: Reg
 
   // The tile strip comes first, in this order, then three columns.
   const tiles = page.getByTestId("tile");
-  await expect(tiles).toHaveCount(6);
+  await expect(tiles).toHaveCount(7);
   await expect(tiles.locator(".tile-label")).toHaveText([
     "Needs me",
     "Reviews waiting",
     "Stuck agents",
+    "Chief unread",
     "anthropic 5h limit",
     "Cost today",
     "Open runs",
@@ -2392,6 +2409,7 @@ async function checkHomeWithBlockers(page: Page, baseInstant: number, reset: Reg
   await expect(value("needs-me")).toHaveText("1");
   await expect(value("reviews")).toHaveText("2");
   await expect(value("runs")).toHaveText("4");
+  await expect(value("chief-unread")).toHaveText("3", { timeout: 20_000 });
   await expect(value("stuck")).toHaveText("1", { timeout: 20_000 });
   await expect(value("usage")).toHaveText("82%", { timeout: 20_000 });
   const strip = (await page.locator(".tiles").boundingBox())!;
@@ -3239,7 +3257,7 @@ test("ARK-T96 the theme follows the system, the nav switch sets Auto, Light or D
     for (const [name, hash] of views) {
       await page.evaluate((target) => (location.hash = `#/${target}`), hash);
       await expect(page.locator("main h1")).toBeVisible();
-      if (hash === "") await expect(page.getByTestId("tile")).toHaveCount(6);
+      if (hash === "") await expect(page.getByTestId("tile")).toHaveCount(7);
       if (hash === "runs") await expect(page.getByTestId("lane")).toHaveCount(5);
       if (hash.startsWith("ticket")) await expect(page.getByTestId("ticket-problem")).toBeVisible();
       // A color that still fades from the other theme is not the color the page rests on.
@@ -4427,7 +4445,16 @@ async function homeWorld() {
     read: 0,
     created_at: dateOf().toISOString(),
   });
-  installFakeTools({
+  // Unread messages to each project's Master Chief Run: alpha 2 (oldest 40 min), beta 3 (oldest 95 min).
+  const options: Parameters<typeof installFakeTools>[0] = {
+    chiefUnread: {
+      alpha: [unreadMessage("status", 5), unreadMessage("question", 40)],
+      beta: [
+        unreadMessage("status", 2),
+        unreadMessage("worker_done", 20),
+        unreadMessage("question", 95),
+      ],
+    },
     orca: {
       ...orcaAnswersFor(runs[0].run),
       runs: runs.map(({ run }) => ({
@@ -4459,15 +4486,16 @@ async function homeWorld() {
     },
     mergeRequestViews: Object.fromEntries(runs.map(({ review }) => [review.url, review.view])),
     ompUsage: usageAt(0.82),
-  });
-  return launch();
+  };
+  const state = installFakeTools(options);
+  return { baseUrl: await launch(), state, options };
 }
 
 test("ARK-T370 Home counts only the chosen project in its tiles, lists, cost and the header, and the provider limit says all projects, for All, each project and after a reload", async ({
   page,
 }) => {
   test.setTimeout(120_000);
-  const baseUrl = await homeWorld();
+  const { baseUrl, state, options } = await homeWorld();
   // The page dates today's cost by its own clock: put it on the frozen instant of the fixtures.
   await page.clock.setFixedTime(testNow());
   const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"] .big`);
@@ -4502,6 +4530,172 @@ test("ARK-T370 Home counts only the chosen project in its tiles, lists, cost and
       await expect(page.getByTestId("nav-usage")).toContainText("82%");
       await expect(page.getByTestId("nav-usage")).toContainText("all projects");
     }
+
+  // The Chief unread tile: All is the sum and the oldest of every project, each project shows its own.
+  const unread = page.locator('[data-testid="tile"][data-tile="chief-unread"]');
+  const unreadExpected = [
+    { hash: "", count: "5", oldest: "oldest 95 min" },
+    { hash: "?project=alpha", count: "2", oldest: "oldest 40 min" },
+    { hash: "?project=beta", count: "3", oldest: "oldest 95 min" },
+  ];
+  for (const { hash, count, oldest } of unreadExpected)
+    for (const reload of [false, true]) {
+      await open(page, baseUrl, hash);
+      if (reload) await page.reload();
+      await expect(unread.locator(".big")).toHaveText(count, { timeout: 20_000 });
+      await expect(unread).toContainText(oldest);
+    }
+
+  // One project whose read fails: All shows unavailable, never the partial sum 2; the other project still shows its own value.
+  writeFakeToolState(state, { ...options, chiefUnread: { ...options.chiefUnread, beta: "fails" } });
+  await open(page, baseUrl, "");
+  await expect(unread.locator(".big")).toHaveText("?", { timeout: 30_000 });
+  await expect(unread).toContainText("unavailable");
+  await open(page, baseUrl, "?project=beta");
+  await expect(unread.locator(".big")).toHaveText("?");
+  await open(page, baseUrl, "?project=alpha");
+  await expect(unread.locator(".big")).toHaveText("2");
+  await expect(unread).toContainText("oldest 40 min");
+});
+
+/**
+ * Home of project `p` with its Master Chief Run, on the frozen clock. Every source reads at 300 ms, so
+ * `show` (a new answer of the fake orca) reaches the tile in about a second.
+ */
+async function homeWithUnread(page: Page) {
+  isolate();
+  writeRun({
+    project: "p",
+    run: runId("ARK-670"),
+    ticket: { id: "ARK-670", title: "Unread messages" },
+    phase: "building",
+  });
+  const state = installFakeTools({});
+  process.env.ARK_HUB_INTERVAL_MS = "300";
+  const baseUrl = await launch();
+  delete process.env.ARK_HUB_INTERVAL_MS;
+  await page.clock.setFixedTime(testNow());
+  await open(page, baseUrl, "");
+  return {
+    tile: page.locator('[data-testid="tile"][data-tile="chief-unread"]'),
+    show: (rows: unknown[] | "fails") => writeFakeToolState(state, { chiefUnread: { p: rows } }),
+  };
+}
+
+test("ARK-T670 the Home tile shows the unread count and the whole-minute age of the oldest, and warns in words and tone only from 16 minutes", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const { tile, show } = await homeWithUnread(page);
+  const count = tile.locator(".big");
+  const warning = /older than 15 min/;
+
+  // Nothing unread: a read row of 300 min does not count, and nothing warns.
+  show([unreadMessage("escalation", 300, 1)]);
+  await expect(count).toHaveText("0");
+  await expect(tile).toContainText("nothing unread");
+  await expect(tile).not.toContainText(warning);
+  await expect(tile).not.toHaveClass(/\bwarn\b/);
+
+  // Unread of three types, the oldest 12 min: the age shows, no warning.
+  show([
+    unreadMessage("question", 1),
+    unreadMessage("status", 5),
+    unreadMessage("worker_done", 12),
+  ]);
+  await expect(count).toHaveText("3");
+  await expect(tile).toContainText("oldest 12 min");
+  await expect(tile).not.toContainText(warning);
+  await expect(tile).not.toHaveClass(/\bwarn\b/);
+
+  // The threshold on whole minutes, floored: 14 min and 15 min 59 s do not warn, 16 min does.
+  const row = (ageMilliseconds: number) => ({
+    ...unreadMessage("question", 0),
+    id: `msg_${ageMilliseconds}`,
+    created_at: isoAgo(ageMilliseconds),
+  });
+  for (const [ageMilliseconds, oldest, warns] of [
+    [14 * 60_000, "oldest 14 min", false],
+    [15 * 60_000 + 59_000, "oldest 15 min", false],
+    [16 * 60_000, "oldest 16 min", true],
+  ] as const) {
+    show([row(ageMilliseconds)]);
+    await expect(tile).toContainText(oldest);
+    if (warns) {
+      await expect(tile).toContainText(warning);
+      await expect(tile).toHaveClass(/\bwarn\b/);
+    } else {
+      await expect(tile).not.toContainText(warning);
+      await expect(tile).not.toHaveClass(/\bwarn\b/);
+    }
+  }
+
+  // 95 min: the same count and age as `ark chief state` prints, and a warning in words and tone; the read row is not counted.
+  show([
+    unreadMessage("status", 2),
+    unreadMessage("worker_done", 40),
+    unreadMessage("question", 95),
+    unreadMessage("escalation", 300, 1),
+  ]);
+  await expect(count).toHaveText("3");
+  await checkpoint(page, "chief-unread-warning");
+  await expect(tile).toContainText("oldest 95 min");
+  await expect(tile).toContainText(warning);
+  await expect(tile).toHaveClass(/\bwarn\b/);
+
+  // Unread rows past Orca's default 20 rows are counted: 20 read rows, then 2 unread.
+  show([
+    ...Array.from({ length: 20 }, (_, index) => unreadMessage("status", index + 1, 1)),
+    unreadMessage("question", 30),
+    unreadMessage("worker_done", 90),
+  ]);
+  await expect(count).toHaveText("2");
+  await expect(tile).toContainText("oldest 90 min");
+});
+
+test("ARK-T670 a failed unread read shows ? and unavailable on the tile, keeps the other tiles, and does not mark the queue stale", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  const { tile, show } = await homeWithUnread(page);
+  show([unreadMessage("question", 95)]);
+  await expect(tile.locator(".big")).toHaveText("1");
+
+  show("fails");
+  await expect(tile.locator(".big")).toHaveText("?");
+  await expect(tile).toContainText("unavailable");
+  await expect(tile).not.toHaveClass(/\bwarn\b/);
+  await expect(page.locator('[data-testid="tile"][data-tile="runs"] .big')).toHaveText("1");
+  // Only its own source is stale: the queue read has its own slot.
+  await expect(await staleRow(page, "chiefUnread")).toBeVisible();
+  await expect(await staleRow(page, "queue")).toHaveCount(0);
+
+  // The read recovers: the value returns and the stale chip goes.
+  show([unreadMessage("question", 95)]);
+  await expect(tile.locator(".big")).toHaveText("1");
+  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 30_000 });
+});
+
+test("ARK-T670 at 1024 px the warning words of the tile stay whole", async ({ page }) => {
+  const { tile, show } = await homeWithUnread(page);
+  await page.setViewportSize({ width: 1024, height: 800 });
+  show([unreadMessage("worker_done", 40), unreadMessage("question", 95)]);
+  await expect(tile.locator(".big")).toHaveText("2");
+  await expect(tile).toContainText("older than 15 min");
+  await checkpoint(page, "chief-unread-warning-1024");
+  const fit = await tile.evaluate((node) => {
+    const note = node.querySelector(".tile-note")!;
+    const range = document.createRange();
+    range.selectNodeContents(note);
+    const lines = new Set([...range.getClientRects()].map((box) => Math.round(box.top)));
+    return {
+      tileClipped: node.scrollWidth > node.clientWidth + 1,
+      noteClipped: note.scrollWidth > note.clientWidth + 1,
+      lines: lines.size,
+    };
+  });
+  // `oldest 95 min` on one line and `older than 15 min` on another: never one word per line.
+  expect(fit).toEqual({ tileClipped: false, noteClipped: false, lines: 2 });
 });
 
 test("ARK-309-AC3 Runs shows only the chosen project in its lanes, heading and filter counts, graph and unblocks list, and the heading names the filter", async ({
@@ -6774,12 +6968,23 @@ async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   installFakeTools({
     mergeRequestViews: { [review.url]: review.view },
     ompUsage: usageAt(0.82, instant),
+    // The Chief unread tile is in its warning state, the longest text a tile holds.
+    chiefUnread: {
+      p: [
+        unreadMessage("status", 2),
+        unreadMessage("worker_done", 40),
+        unreadMessage("question", 95),
+      ],
+    },
   });
   const baseUrl = await launch();
   const tile = (name: string) => page.locator(`[data-testid="tile"][data-tile="${name}"]`);
   const ready = async () => {
     await open(page, baseUrl, "");
-    await expect(page.getByTestId("tile")).toHaveCount(6);
+    await expect(page.getByTestId("tile")).toHaveCount(7);
+    await expect(tile("chief-unread").locator(".tile-note")).toContainText("older than 15 min", {
+      timeout: 20_000,
+    });
     await expect(tile("usage").locator(".big")).toHaveText("82%", { timeout: 20_000 });
     await expect(tile("usage").locator(".tile-note")).toContainText(reset);
     await expect(tile("cost").locator(".big")).toHaveText("$34.52");
@@ -6796,11 +7001,38 @@ async function checkHomeFits(page: Page, instant: number, reset: RegExp) {
   await checkpoint(page, "home-1024");
   await tile("cost").scrollIntoViewIfNeeded();
   expect(await homeFitProblems(page)).toEqual([]);
+  await expectTilesFourAndThree(page);
 
   // The same checks at 1280 px: the fix does not move the break.
   await page.setViewportSize({ width: 1280, height: 800 });
   await ready();
   expect(await homeFitProblems(page)).toEqual([]);
+  await expectTilesFourAndThree(page);
+}
+
+/** The 7 Home tiles lie 4 + 3 in two rows, each inside the tile strip and none wider than its box. */
+async function expectTilesFourAndThree(page: Page): Promise<void> {
+  const rows = async () =>
+    page.getByTestId("tile").evaluateAll((nodes) => {
+      const strip = document.querySelector(".tiles")!.getBoundingClientRect();
+      const perRow = new Map<number, number>();
+      let outside = 0;
+      for (const node of nodes) {
+        const box = node.getBoundingClientRect();
+        perRow.set(Math.round(box.top), (perRow.get(Math.round(box.top)) ?? 0) + 1);
+        if (
+          box.left < strip.left - 1 ||
+          box.right > strip.right + 1 ||
+          node.scrollWidth > node.clientWidth + 1
+        )
+          outside += 1;
+      }
+      return {
+        perRow: [...perRow.entries()].toSorted((a, b) => a[0] - b[0]).map(([, n]) => n),
+        outside,
+      };
+    });
+  await expect.poll(rows).toEqual({ perRow: [4, 3], outside: 0 });
 }
 
 test.describe("Home at 1024 px on a fixed clock", () => {
