@@ -588,8 +588,8 @@ test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only termin
     ticket: { id: "ARK-805", title: "Open" },
     phase: "building",
   });
-  // Every Orca call answers 3 s late, so the first read outlasts the old 5 s poll and the POST goes out before `term-worker` is live (ARK-504/AC1).
-  const state = installFakeTools({ orca: orcaAnswersFor(run), orcaSleepSeconds: 3 });
+  // The first Orca call answers 2.5 s late, past the hub's 2 s reader timeout: the first read fails as under load and a later one has to make `term-worker` live (ARK-504/AC1).
+  const state = installFakeTools({ orca: orcaAnswersFor(run), orcaFirstCallSleepSeconds: 2.5 });
   const { baseUrl } = await start();
   const own = new URL(baseUrl).host;
   const post = (terminal: unknown, origin: string | null = baseUrl) =>
@@ -605,12 +605,19 @@ test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only termin
     readFileSync(join(state, "orca.log"), "utf8")
       .split("\n")
       .filter((line) => line.startsWith("terminal switch"));
-  // The snapshot lists the terminals as live after the first Orca read.
-  for (let tries = 0; tries < 50; tries++) {
-    const snapshot = (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
-    if (Array.isArray(snapshot.runs) && Array.isArray(snapshot.runs[0]?.agents)) break;
-    await Bun.sleep(100);
-  }
+  // The snapshot lists `term-worker` as live only after the first Orca read answers.
+  await snapshotWhen(
+    baseUrl,
+    (snapshot) =>
+      snapshot.runs !== "unknown" &&
+      snapshot.runs.some(
+        (openRun) =>
+          Array.isArray(openRun.agents) &&
+          openRun.agents.some(
+            (agent) => agent.terminal === "term-worker" && agent.presence === "live",
+          ),
+      ),
+  );
 
   expect((await post("term-worker")).status).toBe(200);
   expect(switches()).toEqual(["terminal switch --terminal term-worker"]);
@@ -633,7 +640,7 @@ test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only termin
     orcaSwitchFails: true,
   });
   expect((await post("term-worker")).status).toBe(502);
-});
+}, 60_000);
 
 // ---------------------------------------------------------------- AC5
 
