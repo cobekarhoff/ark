@@ -288,11 +288,15 @@ function bunTest(directory: string, args: readonly string[], env: Record<string,
 /** The `ark chief state` text of the temp ARK_HOME, the reader that the run lead greps. */
 const chiefState = (): string => ark("chief", "state", "--project", "demo").out;
 
+/** The ticket files that a bare run wrote: the owner files of the store (a holder's ticket is not one). */
+const ownerTicketFiles = (fixture: Fixture): string[] =>
+  existsSync(fixture.storeDirectory())
+    ? readdirSync(fixture.storeDirectory()).filter((name) => name.endsWith("-owner.json"))
+    : [];
+
 /** Resolves when a bare run has written its ticket, which is the point where the run waits or holds. */
 const bareTicketWritten = (fixture: Fixture) =>
-  waitFor(fixture.storeDirectory(), () =>
-    readdirSync(fixture.storeDirectory()).some((name) => name.endsWith("-owner.json")),
-  );
+  waitFor(fixture.storeDirectory(), () => ownerTicketFiles(fixture).length > 0);
 
 const cpuCores = Math.min(availableParallelism(), 3);
 
@@ -421,7 +425,8 @@ test.each([
     await run.output.done;
     expect(run.output.text).not.toContain(waitingLine);
     for (const name of ran) expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
-    expect(readTestLock().waiting).toEqual([]);
+    // The file of an ended pid stays until a reader prunes it, and no reader ran: a run that took a ticket shows here.
+    expect(ownerTicketFiles(fixture)).toEqual([]);
     await holder.release();
   },
 );
@@ -437,7 +442,7 @@ test("ARK-T684 a whole-suite bun test with the ark test marker starts at once, a
   expect(await marked.child.exited).toBe(0);
   await marked.output.done;
   expect(marked.output.text).not.toContain(waitingLine);
-  expect(readTestLock().waiting).toEqual([]);
+  expect(ownerTicketFiles(fixture)).toEqual([]);
 
   // Control: the same command line with no marker waits behind the holder.
   const linesBefore = fixture.markerLines("runs.log").length;
@@ -684,7 +689,7 @@ test.each([
     expect(run.output.text).not.toContain(waitingLine);
     for (const name of ["a", "b", "c", "gate"])
       expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
-    expect(readTestLock().waiting).toEqual([]);
+    expect(ownerTicketFiles(fixture)).toEqual([]);
     if (noHome) expect(existsSync(join(extra.HOME!, ".ark"))).toBe(false);
     await holder.release();
   },

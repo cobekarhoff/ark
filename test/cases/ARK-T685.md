@@ -17,9 +17,9 @@ Expected: no wait, no waiting line, and the exit code of the suite.
 
 ## Preconditions
 
-- The scratch repo of ARK-T683 (repo preload, marker-writing test files `a`, `b` and `c` under `test/`) as a fake suite; the `gate` file is not used.
+- The scratch repo of ARK-T683 (repo preload, marker-writing test files `a`, `b` and `c` under `test/`, and the `gate` file, which in these rows has no pipe and so ends at once) as a fake suite: every row expects `ran-a`, `ran-b`, `ran-c` and `ran-gate` to exist once.
 - The built environment of ARK-T683 for every child: the environment of the case minus the `ark test` marker, `BUN_TEST_WORKER_ID`, `JEST_WORKER_ID`, `ARK_PROJECT` and `ARK_HOME`; each step then sets only what it names. A step that unsets `ARK_HOME` also sets `HOME` to an empty temp folder, so the fallback `~/.ark` (`cli/paths.ts`) is a folder with no project and no ticket, as in CI and on a fresh clone, never the real home of the host.
-- A real holder process that holds all 3 cores of a project `demo` in a temp `ARK_HOME` whose `workspace` is not the scratch repo. A row is a state of `ARK_HOME` and cwd; each row runs `bun test --parallel=3` unless the step says otherwise.
+- A real holder process that holds all 3 cores of a project `demo` in a temp `ARK_HOME`. The scratch repo is the `workspace` of `demo` in every row except step 2 (the `elsewhere` row), where it is neither the `workspace` nor under `runs/`. A row is a state of `ARK_HOME` and cwd; each row runs `bun test --parallel=3` unless the step says otherwise.
 - No sleeps: events only.
 
 ## Steps
