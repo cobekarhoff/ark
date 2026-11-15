@@ -19,7 +19,7 @@ Expected: no wait, no waiting line, and the exit code of the suite.
 
 - The scratch repo of ARK-T683 (repo preload, marker-writing test files `a`, `b` and `c` under `test/`, and the `gate` file, which in these rows has no pipe and so ends at once) as a fake suite: every row expects `ran-a`, `ran-b`, `ran-c` and `ran-gate` to exist once.
 - The built environment of ARK-T683 for every child: the environment of the case minus the `ark test` marker, `BUN_TEST_WORKER_ID`, `JEST_WORKER_ID`, `ARK_PROJECT` and `ARK_HOME`; each step then sets only what it names. A step that unsets `ARK_HOME` also sets `HOME` to an empty temp folder, so the fallback `~/.ark` (`cli/paths.ts`) is a folder with no project and no ticket, as in CI and on a fresh clone, never the real home of the host.
-- A real holder process that holds all 3 cores of a project `demo` in a temp `ARK_HOME`. The scratch repo is the `workspace` of `demo` in every row except step 2 (the `elsewhere` row), where it is neither the `workspace` nor under `runs/`. A row is a state of `ARK_HOME` and cwd; each row runs `bun test --parallel=3` unless the step says otherwise.
+- A real holder process that holds all 3 cores of a project `demo` in a temp `ARK_HOME`. The scratch repo is the `workspace` of `demo` in every row except step 2 (the `elsewhere` row) and step 7, where it is neither the `workspace` nor under `runs/`. A row is a state of `ARK_HOME` and cwd; each row runs `bun test --parallel=3` unless the step says otherwise.
 - No sleeps: events only.
 
 ## Steps
@@ -30,7 +30,7 @@ Expected: no wait, no waiting line, and the exit code of the suite.
 4. Run with `ARK_PROJECT` naming a project that does not exist.
 5. Run `bun test` (serial, 1 core) with a project that matches and has no `test_budget_cores`, with no holder: the budget is the default of the host, never 0.
 6. Run with a project that matches, `test_budget_cores: 3` and the holder holding all 3 cores, with a `ps` shim first on the PATH of the child: once a `ps` that prints nothing and exits 1, once a `ps` that prints nothing and exits 0. The hook calls `ps` by name through PATH (as `readHost` calls `sysctl`), so the shim reaches it.
-7. In one row of steps 1 to 4 make a test file fail.
+7. Run the state of step 1 (`ARK_HOME` unset, no `ARK_PROJECT`, no holder, the scratch repo outside any workspace) with a test file that fails. Here `HOME` is the marker folder of the case, not an empty folder: the hook has no `ark.yml` to read either way.
 
 ## Expected results
 
