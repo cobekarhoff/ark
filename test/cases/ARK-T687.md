@@ -19,7 +19,7 @@ Expected: When a test starts an ark process through `spawnArk`, the system shall
 
 ## Preconditions
 
-- The fake `orca` of `test/chief.test.ts` (`setScenario`, `callsTo`), with a new delay setting for the verb `terminal list`: the script sleeps 2.5 s before it answers that verb only, and `beforeEach` and `afterEach` clear it. The delay is released by its own sleep, not by a test signal. Other verbs answer at once.
+- The fake `orca` of `test/chief.test.ts` (`setScenario`, `callsTo`), with a new delay setting for the verb `terminal list`: the script sleeps 2.5 s before it answers that verb only. `setScenario` removes the delay file, and the fresh temporary directory of `beforeEach` holds none, so no later test meets it. The delay is released by its own sleep, not by a test signal. Other verbs answer at once.
 - One Master Chief Run for the project and one live connected Master Chief terminal in the workspace, and `agent launch --surface terminal` answering with the handle `term_new` (the scenario of ARK-244-AC2).
 - `ARK_READER_TIMEOUT_MS` is not set in `process.env` of the test process before the steps; `test/chief.test.ts` does not call `installProcessFakes`. `ARK_ORCA_TIMEOUT_MS` is not set.
 - The override channel of the control row: the test sets `process.env.ARK_READER_TIMEOUT_MS = "2000"` before it calls `ark()`, and `afterEach` deletes it. `spawnArk` puts its 30000 first and `process.env` after it, so a value in `process.env` wins.

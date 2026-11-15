@@ -28,7 +28,7 @@ Expected: When `ARK_READER_TIMEOUT_MS` is a number from 1 to 2147483647, the sys
 - Bun test, in `test/exec.test.ts` or beside it. The modules are imported once at the top of the file, and the test sets and deletes `process.env.ARK_READER_TIMEOUT_MS` between the starts of the calls. `afterEach` restores the value that was set before the file started.
 - A fake `orca` (shell script) first on `process.env.PATH`. For any `orca orchestration probe <seconds> --json` it sleeps `<seconds>` and prints `{"result":{"ok":true}}`. The row for `orcaRead` calls `orcaRead(["probe", "<seconds>"])`; the case does not assert the argv.
 - The commands: `["/bin/sh", "-c", "sleep 2.5; echo done"]` (the 2.5 s command) and `["/bin/sh", "-c", "sleep 6; echo done"]` (the 6 s command); `execJson` rows print `{"ok":true}` instead of `done`.
-- The default of each reader is read when the call starts. The test therefore starts every call of the rows below one after the other, without awaiting between them, and sets or deletes the variable just before each start; it then awaits them all. The rows run side by side and the case takes about 3 s, not the sum of the rows. The test timeout of the file is raised to 15 s.
+- The default of each reader is read when the call starts. The test therefore starts every call of the rows below one after the other, without awaiting between them, and sets or deletes the variable just before each start; it then awaits them all. The rows run side by side and the case takes about 3 s, not the sum of the rows. The file timeout of 30 s (`setDefaultTimeout(30_000)`) holds the case.
 - Each row records the start time of its call and its elapsed time when it settles.
 
 ## Steps

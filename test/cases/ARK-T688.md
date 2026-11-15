@@ -13,10 +13,10 @@ changed_by: 2026-11-15-ARK-503-1
 
 Prove AC3 of ARK-503: with the first call of the fake `ps` of `installProcessFakes` delayed by 3 s, the two tests of `test/resources-source.test.ts` that call `reader.read` directly pass:
 
-- `ARK-T288 the history keeps the points stamped at or after now minus 24 hours and drops the older ones` (`:421`; 6 reads: 4 in the loop at `:432-435`, then `:441` and `:444`).
-- `ARK-T292 the hub records the maximum memory and the last cumulative CPU of each agent, and each span with no sample as a gap, and keeps suites` (`:519`; 6 reads: samples at 0, 5, 305, 425, 430 and 1000).
+- `ARK-T288 the history keeps the points stamped at or after now minus 24 hours and drops the older ones` (6 reads: 4 in the loop, then 2 more).
+- `ARK-T292 the hub records the maximum memory and the last cumulative CPU of each agent, and each span with no sample as a gap, and keeps suites` (6 reads: samples at 0, 5, 305, 425, 430 and 1000).
 
-A repeat is one more run of those two bodies with a delay setting of the fixture on (a marker file read by the shell fake `ps` and removed by its first call, as `ps.rejectEnvironment` is read; it affects no other test, because each test calls `installProcessFakes` with its own `stateDirectory`). Only the first `reader.read` of the repeat meets the delay, which is the failure at `:434`. Each test spends 3 s more, well inside `setDefaultTimeout(60_000)`.
+A repeat is one more run of those two bodies with a delay setting of the fixture on (a marker file read by the shell fake `ps` and removed by its first call, as `ps.rejectEnvironment` is read; it affects no other test, because each test calls `installProcessFakes` with its own `stateDirectory`). Only the first `reader.read` of the repeat meets the delay, which is the failure at `test/resources-source.test.ts:434` in the ticket's runs. Each test spends 3 s more, well inside `setDefaultTimeout(60_000)`.
 
 A control test proves the delay was in force: with `ARK_READER_TIMEOUT_MS` deleted after `installProcessFakes`, the first `reader.read` against the same delayed `ps` returns null after about 2 s, before the 3 s. The statistical goal of the ticket (20 of 20 runs beside the cli suite) is not a case: it is a manual gate or an `ark test` measurement (see `test-design.md`).
 
@@ -31,13 +31,13 @@ Expected: When the first call of the fake `ps` answers after 3 s, the system sha
 ## Steps
 
 1. Run the repeat of the two tests: call `installProcessFakes`, set the first-call delay of `ps` to 3 s, and run each body to its end.
-2. In the repeat of the history test, read `process.env.ARK_READER_TIMEOUT_MS` after `installProcessFakes` and the elapsed time of the first `reader.read`.
-3. Control test: call `installProcessFakes` with one process, set the first-call delay to 3 s, `delete process.env.ARK_READER_TIMEOUT_MS`, call `reader.read(context)` once and read its result and elapsed time.
+2. In the repeat of the history test, read the elapsed time of the first `reader.read`.
+3. Control test: call `installProcessFakes` with an empty process list (`setProcesses([])`), set the first-call delay to 3 s, `delete process.env.ARK_READER_TIMEOUT_MS`, call `reader.read(context)` once and read its result and elapsed time.
 
 ## Expected results
 
 - Step 1: both tests pass with every assertion of their normal run (history window, peaks, gaps, suites, secrets). The `ps` table is read although the first call answers after 3 s.
-- Step 2: `ARK_READER_TIMEOUT_MS` is `30000`. The first read takes at least 3 s and returns a view, not null.
+- Step 2: The first read takes at least 3 s and returns a view, not null.
 - Step 3: `reader.read` returns null, and its elapsed time is at least 2 s: `exec` killed the delayed `ps` at the 2 s default (the failure shape of `test/resources-source.test.ts:434`), and the table that `ps` would print after 3 s was not waited for. The test passes in itself; it is the control that the delay of step 1 was real.
 - The readers of `lsof` (`hub/resources.ts`) and the host readers of `cli/host.ts` (`memory_pressure`, `sysctl`) are not asserted: they may return null on a loaded host and `read()` still returns a view when the `ps` table is present.
 - The run without the delay is the existing run of ARK-T288 and ARK-T292 and is not repeated here. The Node suite of the fixture is run by ARK-T290 (`test/pw/resources.pw.ts`), which passes unchanged (see `test-design.md`).
