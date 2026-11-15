@@ -9814,12 +9814,12 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   // A push after the jump takes the age back to about 0 (the page clock jumped, the server clock did not).
   // Append an event once the page clock has jumped and wait until the page saw that push: the wait must still end at 2 min or more.
   const pushBefore = await page.evaluate(() => (window as unknown as LiveWindow).__lastPushAt);
-  const clockBefore = await page.evaluate(() => Date.now());
+  const clockBefore = await page.evaluate(() => performance.now());
   await Promise.all([
     waitForAge(page, orcaAge, 2),
     (async () => {
       await expect
-        .poll(() => page.evaluate((from) => Date.now() - from, clockBefore))
+        .poll(() => page.evaluate((from) => performance.now() - from, clockBefore))
         .toBeGreaterThanOrEqual(170_000);
       appendRawEvent(
         runDirectory,
