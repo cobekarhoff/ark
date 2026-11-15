@@ -1,6 +1,6 @@
 ---
 id: ARK-T668
-title: ARK-T668 project-autocommit.sh dates its log lines: a failed pass after a stale index.lock ends the log with a dated "autocommit failed" line, a pass that commits logs a dated line, an idle pass logs nothing
+title: 'ARK-T668 project-autocommit.sh dates its log lines: a failed pass after a stale index.lock ends the log with a dated "autocommit failed" line, a pass that commits logs a dated line, an idle pass logs nothing'
 level: integration
 technique: state transition (committed, idle, stale lock, lock removed by hand, committed again; once and loop mode) and equivalence classes of a pass outcome (commit made, nothing to commit, commit failed)
 priority: high
