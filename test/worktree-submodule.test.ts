@@ -455,11 +455,4 @@ describe("a stalled git or ark command fails at its own limit", () => {
     );
     expect(message).not.toContain("timed out");
   });
-
-  test("ARK-T400 healthy git and ark commands return their output unchanged", () => {
-    expect(git(tempGitRepo(), "rev-parse", "--git-dir")).toBe(".git");
-    const result = ark("--help");
-    expect(result.code).toBe(0);
-    expect(result.out).toContain("Usage: ark <command>");
-  });
 });

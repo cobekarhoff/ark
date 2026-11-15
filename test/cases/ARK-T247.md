@@ -13,6 +13,8 @@ changed_by: 2026-11-11-ARK-407-1
 
 Prove that `ark merge-request open` targets the branch `origin/HEAD` names for a repo with no configured base, and the configured `repos.<repo>.base` for another repo of the same run.
 
+It also carries ARK-296-AC4 from a copy the ARK-386 campaign removed: a configured `repos.<repo>.base` reaches the host create call as `--target-branch`.
+
 ## Preconditions
 
 - Real git and a fake `gh` and `glab` that record their calls.
