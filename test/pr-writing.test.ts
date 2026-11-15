@@ -2595,7 +2595,7 @@ function expectCollapsed(body: string, ids: string[]) {
   expect(notes[0]).not.toMatch(/base \S+, head \S+ @|\.png/);
 }
 
-/** A bug run: 275 plan cases with evidence, one plan case with no evidence folder, 20 evidence folders the plan does not name, AC2 and AC3 evidence of 34,000 characters (the body at no log lines is 70,176 characters). */
+/** A bug run: 275 plan cases with evidence, one plan case with no evidence folder, 20 evidence folders the plan does not name, AC2 and AC3 evidence of 17,000 characters each (the body at no log lines is 70,176 characters with `deleted: []` and 70,193 without a `deleted` field). */
 function collapseRun(tests: Ledger["tests"]) {
   const ids = caseIds(275);
   const run = suiteRun(275, { planCases: [...ids, "ARK-T9999"], kind: "bug" });
