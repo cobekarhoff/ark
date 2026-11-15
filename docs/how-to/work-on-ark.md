@@ -32,7 +32,7 @@ The hook is opt-in. Turn it on once per clone:
 git config core.hooksPath .githooks
 ```
 
-The hook runs the full Bun suite, not only the files you changed. On a busy host that is slow.
+The hook runs the full Bun suite, not only the files you changed. On a busy host that is slow, and it waits for the test budget when the budget is full ([below](#a-whole-suite-bun-test-waits-for-the-test-budget)).
 
 ## Run one file
 
@@ -41,7 +41,22 @@ bun test test/<file>.test.ts                 # one Bun test file
 bunx playwright test test/pw/<file>.pw.ts    # one browser spec
 ```
 
-`bun test` never runs a spec: `bunfig.toml` ignores `test/pw/**`, and `playwright.config.ts` takes only `test/pw/**/*.pw.ts`. `bun test --parallel` is the `test` script of `package.json`.
+`bun test` never runs a spec: `bunfig.toml` ignores `test/pw/**`, and `playwright.config.ts` takes only `test/pw/**/*.pw.ts`. `bun test --parallel` is the `test` script of `package.json`. A run of one file never waits for the test budget.
+
+## A whole-suite `bun test` waits for the test budget
+
+A whole-suite `bun test` waits for the shared test budget. It prints one line that it waits for the test budget, and it starts its files when the cores are free.
+
+Why: a whole suite outside the budget raises the host load for every run's `ark test`. At a high load their timing tests fail, and they pass alone.
+
+- A whole suite is `bun test`, `bun test --parallel` or `bun test <directory>`, for example `bun test test --parallel=3`. It asks `N` cores for `--parallel=N`, the CPU count for a bare `--parallel`, and 1 core with no flag. It never asks for more than `test_budget_cores`.
+- It takes the cores through `openTestBudget` in `cli/test-lock.ts`, the same budget as `ark test`. `ark chief state` lists it as `bun test` under `## ark test budget`.
+- It never waits when it runs one or more test files (`bun test test/<file>.test.ts`), or when `ark test` started it. `ark test` sets `ARK_TEST_BUDGET=held` on every command it starts.
+- It never waits when it finds no project for the folder, no readable `ark.yml` or no `ps`. CI and `.githooks/pre-commit` have no project, so they never wait.
+- The project is `ARK_PROJECT`, else the project whose `workspace` or run folder holds the folder you run in.
+- With `--parallel`, a terminal shows the waiting line at once. Without a terminal, Bun shows the line of a worker only when the worker's first file ends.
+
+The wait lives in the preload of `bunfig.toml`, which calls `holdTestBudget()` from `cli/bare-test-budget.ts`. It covers this repo. Another Ark project gets the wait when its own `bunfig.toml` preload calls the same function.
 
 ## Generated reference
 
