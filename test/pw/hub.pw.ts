@@ -4717,17 +4717,37 @@ test("ARK-T670 at 1024 px the warning words of the tile stay whole", async ({ pa
   await checkpoint(page, "chief-unread-warning-1024");
   const fit = await tile.evaluate((node) => {
     const note = node.querySelector(".tile-note")!;
-    const range = document.createRange();
-    range.selectNodeContents(note);
-    const lines = new Set([...range.getClientRects()].map((box) => Math.round(box.top)));
+    // Top of every word of the note, measured word by word.
+    const wordTops: number[] = [];
+    const walker = document.createTreeWalker(note, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      for (const match of text.textContent!.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(text, match.index);
+        range.setEnd(text, match.index + match[0].length);
+        wordTops.push(Math.round(range.getBoundingClientRect().top));
+      }
+    }
+    const phraseRanges = [...note.querySelectorAll(".nb")].map((phrase) => {
+      const range = document.createRange();
+      range.selectNodeContents(phrase);
+      return range;
+    });
     return {
       tileClipped: node.scrollWidth > node.clientWidth + 1,
       noteClipped: note.scrollWidth > note.clientWidth + 1,
-      lines: lines.size,
+      wordCount: wordTops.length,
+      lineCount: new Set(wordTops).size,
+      // `95 min` and `15 min` each stay whole: one line box, never split across two lines.
+      splitPhrases: phraseRanges.filter(
+        (range) => new Set([...range.getClientRects()].map((box) => Math.round(box.top))).size > 1,
+      ).length,
     };
   });
-  // `oldest 95 min` on one line and `older than 15 min` on another: never one word per line.
-  expect(fit).toEqual({ tileClipped: false, noteClipped: false, lines: 2 });
+  // Font independent: not clipped, the two phrases unsplit, and on average at least two words per
+  // line (a host font may wrap the note onto two or three lines, never one word per line).
+  expect(fit).toMatchObject({ tileClipped: false, noteClipped: false, splitPhrases: 0 });
+  expect(fit.lineCount * 2).toBeLessThanOrEqual(fit.wordCount);
 });
 
 test("ARK-309-AC3 Runs shows only the chosen project in its lanes, heading and filter counts, graph and unblocks list, and the heading names the filter", async ({
