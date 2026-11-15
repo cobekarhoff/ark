@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setImmediate as nextTick } from "node:timers/promises";
 import { tempGitRepo } from "./helpers";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
@@ -289,5 +290,180 @@ test("ARK-T663 project-autocommit.sh makes the project folder a git repository a
     for (const holder of holders) holder.kill();
     rmSync(scratch, { recursive: true, force: true });
     rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+// ARK-T668: a stale index.lock is a file with no process behind it (git never clears it); the test writes and removes it.
+// The pass end of a loop is an event, never a wait: the loop has a `sleep` child only once its pass is over (ARK-T126).
+test("ARK-T668 project-autocommit.sh dates its log lines: a failed pass after a stale index.lock ends the log with a dated autocommit failed line, a pass that commits logs a dated line, an idle pass logs nothing", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "ark-autocommit-stale-"));
+  const home = join(scratch, "home");
+  mkdirSync(home);
+  writeFileSync(
+    join(home, ".gitconfig"),
+    "[init]\n\tdefaultBranch = main\n[user]\n\tuseConfigOnly = true\n[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /usr/bin/false\n",
+  );
+  const arkHome = join(scratch, "ark-home");
+  const project = join(arkHome, "projects", "ark");
+  const log = join(project, "services", "project-autocommit.log");
+  const lock = join(project, ".git", "index.lock");
+  const environment = (name?: string): Record<string, string> => ({
+    PATH: process.env.PATH as string,
+    HOME: home,
+    TMPDIR: scratch,
+    ARK_HOME: arkHome,
+    ...(name === undefined ? {} : { ARK_PROJECT: name }),
+  });
+  const setTicket = (status: string) =>
+    writeFileSync(join(project, "tickets", "ARK-1.md"), `---\nstatus: ${status}\n---\n# ARK-1\n`);
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", project, ...args], { env: environment() }).stdout.toString();
+  const commits = () => Number(git("rev-list", "--count", "HEAD"));
+  const lastFiles = () => git("show", "--name-only", "--format=", "HEAD").trim().split("\n").sort();
+  const readLog = () => readFileSync(log, "utf8");
+  /** The non-empty lines of a log text, the way servicesStatusText reads its last line. */
+  const linesOf = (text: string) => text.split("\n").filter((line) => line.trim() !== "");
+  const lastLine = () => linesOf(readLog()).at(-1) as string;
+  // The way launchd runs the job: stdout and stderr appended to one file.
+  const command = 'exec bash "$0" "$1" 60 $3 >> "$2" 2>&1';
+  const once = () =>
+    Bun.spawnSync(["sh", "-c", command, script, scratch, log, "--once"], {
+      env: environment("ark"),
+      timeout: 30_000,
+    }).exitCode;
+  const date = "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}";
+  const committedLine = new RegExp(`^autocommit committed at ${date} in `);
+  const failedLine = new RegExp(
+    `^autocommit failed at ${date} in ${project}, will retry on the next pass$`,
+  );
+  const staleLockIsLeft = () => {
+    expect(existsSync(lock)).toBe(true);
+    expect(readFileSync(lock, "utf8")).toBe("");
+  };
+
+  let loop: Bun.Subprocess | undefined;
+  const sleepChildren = () =>
+    Bun.spawnSync(["pgrep", "-P", String(loop?.pid), "-x", "sleep"])
+      .stdout.toString()
+      .split("\n")
+      .filter(Boolean);
+  const endLoop = async () => {
+    if (loop === undefined) return;
+    for (const child of sleepChildren()) process.kill(Number(child));
+    loop.kill();
+    await loop.exited;
+    loop = undefined;
+  };
+  /** Starts the loop, and returns once its first pass is over: the loop process has a `sleep` child. */
+  const loopFirstPass = async () => {
+    const started = Bun.spawn(["sh", "-c", command, script, scratch, log, ""], {
+      env: environment("ark"),
+    });
+    loop = started;
+    while (sleepChildren().length === 0) {
+      if (started.exitCode !== null)
+        throw new Error(`the loop ended with ${started.exitCode}:\n${readLog()}`);
+      await nextTick();
+    }
+  };
+
+  try {
+    mkdirSync(join(project, "tickets"), { recursive: true });
+    mkdirSync(join(project, "services"));
+    setTicket("todo");
+    writeFileSync(join(project, "ROADMAP.md"), "# ark roadmap\n");
+    writeFileSync(join(project, "ark.yml"), "name: ark\n");
+    writeFileSync(join(project, "learnings.md"), "# ark learnings\n");
+
+    // 1. The first pass commits and logs one dated line that is not a failure.
+    expect(once()).toBe(0);
+    expect(commits()).toBe(1);
+    const afterFirst = readLog();
+    expect(linesOf(afterFirst)).toHaveLength(1);
+    expect(lastLine()).toMatch(committedLine);
+    expect(afterFirst).not.toContain("autocommit failed");
+
+    // 2. An idle pass writes nothing: the last line is still the date of the last commit.
+    expect(once()).toBe(0);
+    expect(commits()).toBe(1);
+    expect(readLog()).toBe(afterFirst);
+
+    // 3. A stale lock: no commit, the lock stays, the git error comes first and the dated failure line is last.
+    setTicket("in_progress");
+    writeFileSync(lock, "");
+    expect(once()).toBe(1);
+    expect(commits()).toBe(1);
+    staleLockIsLeft();
+    const afterStale = readLog();
+    expect(afterStale.startsWith(afterFirst)).toBe(true);
+    const stalePass = linesOf(afterStale.slice(afterFirst.length));
+    expect(stalePass.slice(0, -1).join("\n")).toContain("index.lock");
+    expect(stalePass.at(-1)).toMatch(failedLine);
+
+    // 4. Still locked: a second failed pass adds its own error block and failure line, no success line.
+    expect(once()).toBe(1);
+    expect(commits()).toBe(1);
+    staleLockIsLeft();
+    const afterSecondStale = readLog();
+    expect(afterSecondStale.startsWith(afterStale)).toBe(true);
+    expect(lastLine()).toMatch(failedLine);
+    const secondLines = linesOf(afterSecondStale);
+    expect(secondLines.filter((line) => line.startsWith("autocommit failed at"))).toHaveLength(2);
+    expect(secondLines.filter((line) => line.startsWith("autocommit committed at"))).toHaveLength(
+      1,
+    );
+
+    // 5. The person removes the lock: the waiting change commits and the last line is a dated line that is no failure.
+    rmSync(lock);
+    expect(once()).toBe(0);
+    expect(commits()).toBe(2);
+    expect(lastFiles()).toEqual(["tickets/ARK-1.md"]);
+    const afterRemoved = readLog();
+    expect(afterRemoved.startsWith(afterSecondStale)).toBe(true);
+    const removedPass = linesOf(afterRemoved.slice(afterSecondStale.length));
+    expect(removedPass).toHaveLength(1);
+    expect(removedPass[0]).toMatch(committedLine);
+    expect(removedPass[0]).not.toContain("autocommit failed");
+
+    // 6. An idle pass again: no commit, no line.
+    expect(once()).toBe(0);
+    expect(commits()).toBe(2);
+    expect(readLog()).toBe(afterRemoved);
+
+    // 7. The loop writes the same failure line as --once, last in its pass, and survives it.
+    setTicket("done");
+    writeFileSync(lock, "");
+    await loopFirstPass();
+    expect(loop?.exitCode).toBeNull();
+    expect(commits()).toBe(2);
+    staleLockIsLeft();
+    const afterLoopStale = readLog();
+    expect(afterLoopStale.startsWith(afterRemoved)).toBe(true);
+    expect(linesOf(afterLoopStale.slice(afterRemoved.length)).slice(0, -1).join("\n")).toContain(
+      "index.lock",
+    );
+    expect(lastLine()).toMatch(failedLine);
+    await endLoop();
+
+    // 8. The lock is removed: the loop commits once and logs one dated line; a loop with no change logs nothing.
+    rmSync(lock);
+    await loopFirstPass();
+    expect(loop?.exitCode).toBeNull();
+    expect(commits()).toBe(3);
+    expect(lastFiles()).toEqual(["tickets/ARK-1.md"]);
+    const afterLoopCommit = readLog();
+    expect(afterLoopCommit.startsWith(afterLoopStale)).toBe(true);
+    const loopCommitPass = linesOf(afterLoopCommit.slice(afterLoopStale.length));
+    expect(loopCommitPass).toHaveLength(1);
+    expect(loopCommitPass[0]).toMatch(committedLine);
+    expect(loopCommitPass[0]).not.toContain("autocommit failed");
+    await endLoop();
+    await loopFirstPass();
+    expect(commits()).toBe(3);
+    expect(readLog()).toBe(afterLoopCommit);
+    await endLoop();
+  } finally {
+    await endLoop();
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
