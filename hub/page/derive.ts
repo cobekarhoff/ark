@@ -351,20 +351,24 @@ export const unreadWarnsAbove = 15;
 
 export type ChiefUnreadValue =
   | "unknown"
+  | "none"
   | { unavailable: string }
   | { count: number; minutes: number | null };
 
 /**
  * The count of unread messages to Master Chief and the whole minutes since the oldest, for the
  * projects of the (scoped) snapshot: the sum and the oldest of all. One project that could not be
- * read makes the whole value unavailable, never a partial sum.
+ * read makes the whole value unavailable, never a partial sum. A project with no Master Chief Run
+ * has no inbox: it is left out of the sum and the oldest, and `"none"` is the value only when no
+ * project has one.
  */
 export function chiefUnreadOf(snapshot: Snapshot, age: (time: string) => number): ChiefUnreadValue {
   const reads = snapshot.chief_unread;
   if (!known(reads) || reads.length === 0) return "unknown";
   const failed = reads.find((read) => "unavailable" in read);
   if (failed && "unavailable" in failed) return { unavailable: failed.unavailable };
-  const counted = reads.flatMap((read) => ("unavailable" in read ? [] : [read]));
+  const counted = reads.flatMap((read) => ("unavailable" in read || "none" in read ? [] : [read]));
+  if (counted.length === 0) return "none";
   const oldest = counted
     .flatMap((read) => (read.oldest === null ? [] : [read.oldest]))
     .toSorted()[0];

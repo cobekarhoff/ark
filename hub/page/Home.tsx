@@ -79,6 +79,8 @@ function Tile({
 function ChiefUnreadTile({ unread }: { unread: ChiefUnreadValue }) {
   if (unread === "unknown")
     return <Tile tile="chief-unread" label="Chief unread" value="?" note="unknown" />;
+  if (unread === "none")
+    return <Tile tile="chief-unread" label="Chief unread" value="-" note="no Master Chief Run" />;
   if ("unavailable" in unread)
     return (
       <Tile

@@ -333,7 +333,8 @@ export async function readChiefUnreads(): Promise<ProjectUnread[]> {
   return Promise.all(
     listProjects().map(async (project): Promise<ProjectUnread> => {
       const unread = await readChiefUnread(project, orcaTimeoutMilliseconds);
-      return unread.ok ? { project, ...unread.value } : { project, unavailable: unread.reason };
+      if (!unread.ok) return { project, unavailable: unread.reason };
+      return unread.value === null ? { project, none: true } : { project, ...unread.value };
     }),
   );
 }

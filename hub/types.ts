@@ -398,10 +398,12 @@ export type ProjectQueue = { project: string; open: number } & (
 /**
  * The unread messages to one project's Master Chief Run, every type, read without marking any read
  * (`inbox`, never `check`). `oldest` is the ISO time the oldest was created, null for none, so the
- * page ages it. `unavailable` is the reason the read failed (never a count of 0).
+ * page ages it. `none` is a project with no Master Chief Run: no inbox, so no count (not 0) and not a
+ * failure. `unavailable` is the reason the read failed (run-list or inbox; never a count of 0).
  */
 export type ProjectUnread = { project: string } & (
   | { count: number; oldest: string | null }
+  | { none: true }
   | { unavailable: string }
 );
 

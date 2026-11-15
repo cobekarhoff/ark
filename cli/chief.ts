@@ -66,8 +66,10 @@ export type ChiefUnread = { count: number; oldest: string | null };
 
 /**
  * The unread messages of one Orca Run's inbox: `orca orchestration inbox --terminal run:<id> --full`, rows with
- * `read` 0, every type. `inbox` never marks a message read; `check` does, and `check --peek` is refused for a
- * caller that is not the Run's coordinator. Prints nothing. Rows past `inboxLimit` (about nine days) are not seen.
+ * `read` 0, every type. `inbox` never marks a message read. `orca orchestration check --peek` would not either,
+ * but Orca refuses it for a caller that is not the Run's coordinator (`worker_cannot_coordinate_own_run`), so it
+ * cannot be the reader for a run lead, the hub or a watchdog; `check` without `--peek` marks messages read.
+ * Prints nothing. Rows past `inboxLimit` (about nine days) are not seen.
  */
 export async function readChiefUnreadOfRun(
   chiefRunId: string,
@@ -92,15 +94,18 @@ export async function readChiefUnreadOfRun(
   };
 }
 
-/** The same read for a project: finds its Master Chief Run first. The failure names the verb that failed. */
+/**
+ * The same read for a project: finds its Master Chief Run first. The failure names the verb that failed. A project
+ * with no Master Chief Run has no inbox to be stuck: that is `ok` with a null value, not a failure.
+ */
 export async function readChiefUnread(
   project: string,
   timeoutMilliseconds: number,
-): Promise<OrcaRead<ChiefUnread>> {
+): Promise<OrcaRead<ChiefUnread | null>> {
   const runs = await orcaPages<OrcaRunRow>("run-list", "runs", ["--full"], timeoutMilliseconds);
   if (!runs.ok) return { ok: false, reason: unavailable("run-list", runs.reason) };
   const chiefRun = findChiefRun(project, runs.value);
-  if (!chiefRun.ok) return { ok: false, reason: `unavailable: ${chiefRun.reason}` };
+  if (!chiefRun.ok) return { ok: true, value: null };
   const unread = await readChiefUnreadOfRun(chiefRun.value, timeoutMilliseconds);
   return unread.ok ? unread : { ok: false, reason: unavailable("inbox", unread.reason) };
 }
