@@ -15,20 +15,20 @@ Prove that the hub Home shows, in one tile, the count of unread messages to Mast
 
 ## Preconditions
 
-- Playwright spec in `test/pw/hub.pw.ts`, with the fixtures of the other Home specs (`test/hub-fixtures.ts`), viewport 1440 px wide, and for step 6 1024 px.
-- The fake `orca` of the hub answers `orchestration inbox --terminal run:<chief run id> --limit <n> --full --json` with rows of `read`, `created_at`, `type`; it honours `--limit` and answers 20 rows without it. The hub reader passes `--limit 10000` (`inboxLimit` of `hub/sources.ts`). A row set is chosen by an environment variable or a fixture file that the test writes before the hub starts, so each step reloads against one row set. The fake answers `inbox --limit 200` as before.
-- One project `p` is selected, with its Master Chief Run; its unread rows are the rows of each step.
-- The age unit is whole minutes, floored, as the CLI. The page ages a time as the server's `generated_at` minus the time plus the seconds since it received the snapshot (`useAge`, `hub/page/store.tsx:153-162`). The server clock is the `ARK_NOW` that `useCleanup` freezes (`test/pw/helpers.ts:266-273`; `generated_at` is `now()` of `cli/clock.ts`, `hub/snapshot.ts:553`); the page clock is `page.clock.setFixedTime(testNow())`, so the seconds since receipt are 0. Each row `created_at` is `isoAgo(<age>)` of `test/pw/helpers.ts:303`, derived from `testNow()`: a row `15 min 59 s` old reads `15 min` and shows no warning, a row `16 min` old warns.
+- Playwright spec in `test/pw/hub.pw.ts`, with the fixtures of the other Home specs (`test/hub-fixtures.ts`), viewport 1440 px wide (set in the test), and for step 6 1024 px.
+- The fake `orca` of the hub answers `orchestration inbox --terminal run:<chief run id> --limit <n> --full --json` with rows of `read`, `created_at`, `type`; it honours `--limit` and answers 20 rows without it. The hub reader passes `--limit 10000` (`inboxLimit` of `hub/sources.ts`). The hub runs with every source loop at 300 ms. The test rewrites the fake's state file while the hub runs (`writeFakeToolState`), so each step reaches the tile through the next pushed snapshot, not through a page reload; the test reads the tile with a retrying expectation until it shows the step's row set. The fake answers `inbox --limit 200` as before.
+- One project `p` exists with its Master Chief Run, and the page opens `#/?project=p`; its unread rows are the rows of each step.
+- The age unit is whole minutes, floored, as the CLI. The page ages a time as the server's `generated_at` minus the time plus the seconds since it received the snapshot (`useAge`, `hub/page/store.tsx:153-162`). The server clock is the `ARK_NOW` that `useCleanup` freezes (`test/pw/helpers.ts:270-275`; `generated_at` is `now()` of `cli/clock.ts`, `hub/snapshot.ts:553`); the page clock is `page.clock.setFixedTime(testNow())`, so the seconds since receipt are 0. Each row `created_at` is `isoAgo(<age>)` of `test/pw/helpers.ts:303`, derived from `testNow()`: a row `15 min 59 s` old reads `15 min` and shows no warning, a row `16 min` old warns.
 
 ## Steps
 
-1. Select project `p`. Rows: none unread (one `read` 1 row 300 min old). Open `#/`. Read the `chief-unread` tile.
-2. Rows: 3 `read` 0 rows (a `worker_done` 12 min old, a `status` 5 min old, a `question` 1 min old). Reload and read the tile.
-3. Rows: 3 `read` 0 rows (a `question` 95 min old, a `worker_done` 40 min old, a `status` 2 min old) and one `read` 1 `escalation` 300 min old. Reload and read the tile.
-4. Boundary: one `read` 0 row 14 min old, then 15 min 59 s old, then 16 min old, one reload each. Read the tile each time.
-5. Make the inbox read of project `p` fail. Reload. Read the tile and the other Home tiles.
-6. Repeat step 3 at 1024 px and read the words of the tile.
-7. More than 20 rows: 22 rows newest first, 20 `read` 1 `status` rows, then 2 `read` 0 rows (a `question` 30 min old and a `worker_done` 90 min old). Reload and read the tile.
+1. Rows: none unread (one `read` 1 row 300 min old). Read the `chief-unread` tile.
+2. Rows: 3 `read` 0 rows (a `worker_done` 12 min old, a `status` 5 min old, a `question` 1 min old). Wait for the tile to show them and read it.
+3. Rows: 3 `read` 0 rows (a `question` 95 min old, a `worker_done` 40 min old, a `status` 2 min old) and one `read` 1 `escalation` 300 min old. Wait for the tile and read it.
+4. Boundary: one `read` 0 row 14 min old, then 15 min 59 s old, then 16 min old, one new row set each. Read the tile each time.
+5. Make the inbox read of project `p` fail. Read the tile and the other Home tiles.
+6. At 1024 px, with 2 `read` 0 rows (a `worker_done` 40 min old and a `question` 95 min old), read the words of the tile.
+7. More than 20 rows: 22 rows newest first, 20 `read` 1 `status` rows, then 2 `read` 0 rows (a `question` 30 min old and a `worker_done` 90 min old). Wait for the tile and read it.
 
 ## Expected results
 

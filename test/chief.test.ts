@@ -523,22 +523,28 @@ const inboxRow = (
   created_at: new Date(Date.parse(frozenNow) - ageMilliseconds).toISOString(),
 });
 
-/** The line `chief state` prints under `## Master Chief inbox`, with the clock frozen at `frozenNow` for the `ark` subprocess. */
-function inboxLine(): string {
+/** The stdout of `chief state`, with the clock frozen at `frozenNow` for the `ark` subprocess. */
+function chiefStateOutput(): string {
   const previous = process.env.ARK_NOW;
   process.env.ARK_NOW = frozenNow;
   try {
     const result = ark("chief", "state", "--project", project);
     expect(result.err).toBe("");
     expect(result.code).toBe(0);
-    return section(result.out, "Master Chief inbox")
-      .replace(/^Master Chief inbox\s*/, "")
-      .trim();
+    return result.out;
   } finally {
     if (previous === undefined) delete process.env.ARK_NOW;
     else process.env.ARK_NOW = previous;
   }
 }
+
+/** The line `chief state` prints under `## Master Chief inbox`. */
+const unreadLine = (output: string) =>
+  section(output, "Master Chief inbox")
+    .replace(/^Master Chief inbox\s*/, "")
+    .trim();
+
+const inboxLine = () => unreadLine(chiefStateOutput());
 
 test("ARK-T669 chief state prints the count of unread messages of every type and the age of the oldest, and marks none read", () => {
   // Nothing unread: a read row (300 min) and an unread row of another Orca Run (500 min) do not count.
@@ -595,24 +601,32 @@ test("ARK-T669 unread messages past Orca's default 20 rows are counted", () => {
 test("ARK-T669 a failed read says unavailable with its reason, never 0, and chief state still exits 0", () => {
   const unread = [inboxRow("question", 0, 30 * minute)];
   const lines = {} as Record<string, string>;
+  const openRuns = [] as string[];
+  const read = (name: string) => {
+    const output = chiefStateOutput();
+    lines[name] = unreadLine(output);
+    openRuns.push(section(output, "Open runs"));
+  };
 
   setScenario({
     runs: [chiefOrcaRun],
     inbox: unread,
     fail: { verb: "run-list", stderr: "connection refused\n" },
   });
-  lines.runList = inboxLine();
+  read("runList");
   setScenario({
     runs: [{ id: "run_ark", objective: `Ark run ${openRun}`, coordinator_handle: "term_lead" }],
     inbox: unread,
   });
-  lines.noRun = inboxLine();
+  read("noRun");
   setScenario({
     runs: [chiefOrcaRun],
     inbox: unread,
     fail: { verb: "inbox", stderr: "inbox store locked\n" },
   });
-  lines.inbox = inboxLine();
+  read("inbox");
+  // The other sections still print, whichever way the unread read failed.
+  for (const openSection of openRuns) expect(openSection).toContain(openRun);
 
   expect(lines).toEqual({
     runList: "unavailable: orca orchestration run-list failed: connection refused",

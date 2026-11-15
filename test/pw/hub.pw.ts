@@ -4544,6 +4544,9 @@ test("ARK-T370 Home counts only the chosen project in its tiles, lists, cost and
       if (reload) await page.reload();
       await expect(unread.locator(".big")).toHaveText(count, { timeout: 20_000 });
       await expect(unread).toContainText(oldest);
+      // Every project's oldest is over 15 min: the warning shows in words and tone, for All too.
+      await expect(unread).toContainText("older than 15 min");
+      await expect(unread).toHaveClass(/\bwarn\b/);
     }
 
   // One project whose read fails: All shows unavailable, never the partial sum 2; the other project still shows its own value.
@@ -4604,7 +4607,8 @@ async function homeWithUnread(page: Page) {
   const baseUrl = await launch();
   delete process.env.ARK_HUB_INTERVAL_MS;
   await page.clock.setFixedTime(testNow());
-  await open(page, baseUrl, "");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, baseUrl, "?project=p");
   return {
     tile: page.locator('[data-testid="tile"][data-tile="chief-unread"]'),
     show: (rows: unknown[] | "fails") => writeFakeToolState(state, { chiefUnread: { p: rows } }),
@@ -4709,6 +4713,7 @@ test("ARK-T670 at 1024 px the warning words of the tile stay whole", async ({ pa
   show([unreadMessage("worker_done", 40), unreadMessage("question", 95)]);
   await expect(tile.locator(".big")).toHaveText("2");
   await expect(tile).toContainText("older than 15 min");
+  await expect(tile).toContainText("oldest 95 min");
   await checkpoint(page, "chief-unread-warning-1024");
   const fit = await tile.evaluate((node) => {
     const note = node.querySelector(".tile-note")!;
