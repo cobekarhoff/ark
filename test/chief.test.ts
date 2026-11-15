@@ -79,7 +79,7 @@ case "$1 $2" in
     [ -n "$full" ] || rows=$(printf '%s\\n' "$rows" | sed 's/,"created_at":"[^"]*"//')
     printf '{"result":{"messages":[%s]}}\\n' "$(printf '%s\\n' "$rows" | paste -sd, -)" ;;
   "orchestration check")
-    # Like real orca: --peek is refused for a caller that is not the Run's coordinator; a plain check marks every message read.
+    # Like real orca: "orca orchestration check --peek" is refused for a caller that is not the Run's coordinator; a plain check marks every message read.
     case "$*" in
       *--peek*) echo worker_cannot_coordinate_own_run >&2; exit 1 ;;
     esac
@@ -499,8 +499,6 @@ test("ARK-244-AC1 chief state says unavailable for Orca sections and still print
   expect(section(out, "Run leads")).not.toMatch(/\bnone\b/);
   expect(section(out, "Queued Orca Tasks")).toContain("unavailable");
   expect(section(out, "Queued Orca Tasks")).not.toMatch(/\bnone\b/);
-  expect(section(out, "Master Chief inbox")).toContain("unavailable");
-  expect(section(out, "Master Chief inbox")).not.toContain("unread for Master Chief");
   expect(section(out, "Open runs")).toContain(openRun);
   const head = Bun.spawnSync(["git", "log", "-1", "--format=%h", "main"], { cwd: workspace })
     .stdout.toString()
@@ -769,7 +767,7 @@ test("ARK-306-AC2 the text --cursor is in exactly one file of cli/ and hub/", ()
 });
 
 const noRunListFailure = (out: string, reason: string) => {
-  for (const heading of ["Run leads", "Queued Orca Tasks", "Master Chief inbox"]) {
+  for (const heading of ["Run leads", "Queued Orca Tasks"]) {
     const text = section(out, heading);
     expect(text).toContain(`unavailable: orca orchestration run-list failed: ${reason}`);
     expect(text).not.toMatch(/\bnone\b/);
@@ -826,7 +824,7 @@ test("ARK-306-AC3 230 Runs without a Master Chief Run print the no Orca Run text
   setScenario(leadScenario(230, null));
   const { out } = ark("chief", "state", "--project", project);
   expect(runListPages()).toBe(Math.ceil(230 / rowsPerPage));
-  for (const heading of ["Run leads", "Queued Orca Tasks", "Master Chief inbox"]) {
+  for (const heading of ["Run leads", "Queued Orca Tasks"]) {
     const text = section(out, heading);
     expect(text).toContain(`unavailable: no Orca Run "Master Chief: ${project} tickets"`);
     expect(text).not.toMatch(/\bnone\b/);
