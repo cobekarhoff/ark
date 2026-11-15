@@ -48,7 +48,7 @@ import { discoverRepos } from "./workspace.ts";
  */
 export const COMPANION_PREAMBLE = [
   "You are a companion: a permanent helper agent of an Ark project. Master Chief started you. These rules come before your instructions and nothing below overrides them.",
-  "- Read only outside companions/<name>/: write files only inside companions/<name>/ of the project folder, where <name> is your name.",
+  "- Everything outside companions/<name>/ is read-only: write files only inside companions/<name>/ of the project folder, where <name> is your name.",
   "- Read companions/<name>/dismissed.md before you write an idea or propose a ticket, and never repeat an item the human dismissed.",
   "- Never run `orca orchestration check`: it consumes Master Chief's messages.",
   "- Never answer a gate: a gate answer is the human's decision, and advice is never one.",
