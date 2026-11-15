@@ -4,6 +4,7 @@ import { now } from "../cli/clock.ts";
 import { exec } from "../cli/exec.ts";
 import { proxyPort } from "../cli/proxy.ts";
 import type { ConversationReply } from "./conversation.ts";
+import { HubRefusal, readCompanions, writeCompanion, type CompanionWrite } from "./companions.ts";
 import { resolveEvidenceImage, resolveRunFile } from "./run-detail.ts";
 import type { SnapshotReader } from "./snapshot.ts";
 
@@ -77,12 +78,17 @@ const switchTimeoutMilliseconds = 5000;
  * (ARK-344): `GET /api/run/<run>/conversation` (agents, spans, events, messages with bodies,
  * human answers, question times), `GET /api/conversation?since=&until=` (the same for every run in
  * a window, no bodies; both carry `directory: "loading"` until the handle directory is read, then
- * `"ready"`) and `GET /api/conversation/message/<id>` (one body). The one POST
- * route is `POST /api/open-in-orca` (ADR 0009): it focuses a live terminal in Orca and does nothing
- * else. Any other method gets 405, any other path 404.
+ * `"ready"`) and `GET /api/conversation/message/<id>` (one body), and `GET /api/companions` (ARK-480: the
+ * companions of each project with their state, ideas and proposed tickets). The POST routes are
+ * `POST /api/open-in-orca` (ADR 0009: it focuses a live terminal in Orca and does nothing else) and the
+ * three writes of the Companions page, `POST /api/companions/approve|dismiss|ask` (ADR 0009, amended):
+ * a proposed ticket of a companion goes to `ready`, a dismissal is appended to `dismissed.md`, and
+ * `ark companion ask` runs. All four take only a request from the hub's own page. Any other method
+ * gets 405, any other path 404.
  *
  * A handler reads memory, asks the usage worker thread for one transcript page or one tool result, or reads one small
- * run file the guard allows. It never runs a tool except `orca terminal switch`.
+ * run file the guard allows. It never runs a tool except `orca terminal switch`, the `orca` list reads of
+ * the companions route and the `ark companion ask` of the ask route.
  *
  * The hub renders no Markdown or run text on the server: run and ticket text leaves only as JSON
  * strings or `text/plain`, and the page puts it in the document as text.
@@ -92,29 +98,38 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
   const encoder = new TextEncoder();
 
   /**
-   * `POST /api/open-in-orca {"terminal": <handle>}`. 403 unless the request came from the hub's own
-   * page: a browser always sends Origin on a POST, so Origin and Host must be the same authority:
-   * the hub's `127.0.0.1:<port>`, or its `--name` with or without the proxy port (a missing Origin is refused, unlike on GET). 400 for a body that is not that
-   * JSON or a handle the current snapshot does not list as live. 502 when `orca` fails.
+   * The write routes. 403 unless the request came from the hub's own page: a browser always sends
+   * Origin on a POST, so Origin and Host must be the same authority: the hub's `127.0.0.1:<port>`, or
+   * its `--name` with or without the proxy port (a missing Origin is refused, unlike on GET).
    */
   const postAuthorities = () => [
     `127.0.0.1:${server.port}`,
     ...(name ? [name, `${name}:${proxyPort}`] : []),
   ];
   const getAuthorities = () => [`localhost:${server.port}`, ...postAuthorities()];
-
-  async function openInOrca(request: Request): Promise<Response> {
-    // One authority for both headers: a mixed pair is foreign. localhost is not allowed here.
+  // One authority for both headers: a mixed pair is foreign. localhost is not allowed here.
+  const fromOwnPage = (request: Request): boolean => {
     const host = request.headers.get("host");
-    if (
-      host === null ||
-      !postAuthorities().includes(host) ||
-      request.headers.get("origin") !== `http://${host}`
-    )
-      return text("foreign origin", 403);
+    return (
+      host !== null &&
+      postAuthorities().includes(host) &&
+      request.headers.get("origin") === `http://${host}`
+    );
+  };
+  /** The whole server takes 4096 bytes of body (a 400-character reason of 4-byte characters is 1600); a route that wants less checks it itself. */
+  const openInOrcaLimitBytes = 1024;
+
+  /**
+   * `POST /api/open-in-orca {"terminal": <handle>}`. 400 for a body that is not that
+   * JSON or a handle the current snapshot does not list as live. 413 over 1024 bytes. 502 when `orca` fails.
+   */
+  async function openInOrca(request: Request): Promise<Response> {
+    if (!fromOwnPage(request)) return text("foreign origin", 403);
     let handle: unknown;
     try {
-      handle = (await request.json())?.terminal;
+      const body = await request.text();
+      if (encoder.encode(body).length > openInOrcaLimitBytes) return text("body too large", 413);
+      handle = JSON.parse(body)?.terminal;
     } catch {
       return text('body must be JSON: {"terminal": <handle>}', 400);
     }
@@ -126,6 +141,29 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       switchTimeoutMilliseconds,
     );
     return output === null ? text("orca failed", 502) : json({ ok: true });
+  }
+
+  /**
+   * `POST /api/companions/approve|dismiss|ask`: the three writes of the Companions page. The body is
+   * a JSON object (`project`, `name`, and `id`, `reason`, `question` or `item` by action); a refusal
+   * answers `{error}` with its status, and changes no file and sends no message.
+   */
+  async function companionWrite(request: Request, action: CompanionWrite): Promise<Response> {
+    if (!fromOwnPage(request)) return text("foreign origin", 403);
+    let body: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(await request.text());
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      body = parsed;
+    } catch {
+      return json({ error: "body must be a JSON object" }, 400);
+    }
+    try {
+      return json(await writeCompanion(action, body));
+    } catch (error) {
+      if (error instanceof HubRefusal) return json({ error: error.message }, error.status);
+      throw error;
+    }
   }
 
   /** 503 until the inbox has been read once (it is read only while a page is connected to /events). A worker failure is 502. */
@@ -193,10 +231,15 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
     port,
     hostname: "127.0.0.1",
     idleTimeout: 0,
-    maxRequestBodySize: 1024,
+    maxRequestBodySize: 4096,
     async fetch(request) {
       const url = new URL(request.url);
       const { pathname } = url;
+      const write = pathname.match(/^\/api\/companions\/(approve|dismiss|ask)$/);
+      if (write)
+        return request.method === "POST"
+          ? companionWrite(request, write[1] as CompanionWrite)
+          : text("method not allowed", 405, { allow: "POST" });
       if (pathname === "/api/open-in-orca")
         return request.method === "POST"
           ? openInOrca(request)
@@ -274,6 +317,8 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         const found = messageId === undefined ? undefined : reader.conversationMessage(messageId);
         return found ? json(found) : text("no such message", 404);
       }
+
+      if (pathname === "/api/companions") return json(await readCompanions(reader.usage));
 
       if (pathname === "/api/snapshot")
         return new Response(reader.json(), {

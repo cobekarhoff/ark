@@ -125,7 +125,7 @@ The [interactive tour](docs/tour.html) steps through a run in a browser, with no
 
 ![A run in the hub](docs/img/hub-run.png)
 
-`ark ui` serves the hub on port 4317. It is a view of every project's runs: what needs you, each run's plan, decisions, files and cost, and a roadmap. Its one action is "Open in Orca", which focuses a live agent's terminal. It sends no text and changes no run state, so you steer through Master Chief. To reach it as `http://ark.localhost` and start it at login, see [Reach the hub by a local name](docs/how-to/local-names.md).
+`ark ui` serves the hub on port 4317. It is a view of every project's runs: what needs you, each run's plan, decisions, files and cost, a roadmap, and the companions of the project. Its actions are "Open in Orca", which focuses a live agent's terminal, and the three writes of the Companions page (approve a proposed ticket, dismiss, ask). It sends no text and queues no work, so you steer through Master Chief. To reach it as `http://ark.localhost` and start it at login, see [Reach the hub by a local name](docs/how-to/local-names.md).
 
 ## Requirements
 
