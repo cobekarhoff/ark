@@ -1,3 +1,4 @@
+import { now } from "./clock.ts";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { loadConfig } from "./config.ts";
@@ -8,11 +9,14 @@ import { syncCompanions } from "./companions.ts";
 import {
   findChiefRun,
   findLiveChief,
+  inboxLimit,
   orcaPages,
+  orcaRead,
   orcaTimeoutMilliseconds,
   readChiefTasks,
   readTerminals,
   runOfLead,
+  type OrcaRead,
   type OrcaRunRow,
   type WorkerRow,
 } from "./orca.ts";
@@ -55,6 +59,51 @@ function elapsed(since: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 1000));
   if (seconds < 60) return `${seconds}s`;
   return seconds < 3600 ? `${Math.floor(seconds / 60)}m` : `${Math.floor(seconds / 3600)}h`;
+}
+
+/** Count of unread messages to Master Chief's Run, and the whole minutes since the oldest was created (null when none). */
+export type ChiefUnread = { count: number; oldestMinutes: number | null };
+
+/**
+ * The unread messages of one Orca Run's inbox: `orca orchestration inbox --terminal run:<id> --full`, rows with
+ * `read` 0, every type. `inbox` never marks a message read; `check` does, and `check --peek` is refused for a
+ * caller that is not the Run's coordinator. Prints nothing. Rows past `inboxLimit` (about nine days) are not seen.
+ */
+export async function readChiefUnreadOfRun(
+  chiefRunId: string,
+  timeoutMilliseconds: number,
+): Promise<OrcaRead<ChiefUnread>> {
+  const inbox = await orcaRead<{ messages?: { read?: unknown; created_at?: unknown }[] }>(
+    ["inbox", "--terminal", `run:${chiefRunId}`, "--limit", String(inboxLimit), "--full"],
+    timeoutMilliseconds,
+  );
+  if (!inbox.ok) return inbox;
+  const unread = (inbox.value.messages ?? []).filter((message) => !message.read);
+  const created = unread.map((message) => Date.parse(String(message.created_at)));
+  if (created.some(Number.isNaN))
+    return { ok: false, reason: "an unread message has no readable created_at" };
+  const oldest = Math.min(...created);
+  return {
+    ok: true,
+    value: {
+      count: unread.length,
+      oldestMinutes:
+        unread.length === 0 ? null : Math.max(0, Math.floor((now() - oldest) / 60_000)),
+    },
+  };
+}
+
+/** The same read for a project: finds its Master Chief Run first. The failure names the verb that failed. */
+export async function readChiefUnread(
+  project: string,
+  timeoutMilliseconds: number,
+): Promise<OrcaRead<ChiefUnread>> {
+  const runs = await orcaPages<OrcaRunRow>("run-list", "runs", ["--full"], timeoutMilliseconds);
+  if (!runs.ok) return { ok: false, reason: unavailable("run-list", runs.reason) };
+  const chiefRun = findChiefRun(project, runs.value);
+  if (!chiefRun.ok) return { ok: false, reason: `unavailable: ${chiefRun.reason}` };
+  const unread = await readChiefUnreadOfRun(chiefRun.value, timeoutMilliseconds);
+  return unread.ok ? unread : { ok: false, reason: unavailable("inbox", unread.reason) };
 }
 
 /** One Markdown section per live source. A source that fails says "unavailable"; it never reads as empty. */
@@ -168,6 +217,17 @@ export async function chiefState(inProject?: string): Promise<void> {
             );
   }
   sections.push("## Run leads", leadsText, "## Queued Orca Tasks", queueText);
+
+  // `inbox` reads without marking a message read. A Run that is not found or a run-list that fails is unavailable, never 0.
+  let inboxText = orcaRuns.ok ? noChiefRun : unavailable("run-list", orcaRuns.reason);
+  if (chiefRunId) {
+    const unread = await readChiefUnreadOfRun(chiefRunId, orcaTimeoutMilliseconds);
+    if (!unread.ok) inboxText = unavailable("inbox", unread.reason);
+    else if (unread.value.oldestMinutes === null) inboxText = "unread for Master Chief: 0";
+    else
+      inboxText = `unread for Master Chief: ${unread.value.count}, oldest ${unread.value.oldestMinutes} min`;
+  }
+  sections.push("## Master Chief inbox", inboxText);
 
   // The same sync as `ark companions sync`. With no companion listed or recorded it makes no Orca call and adds no section.
   try {

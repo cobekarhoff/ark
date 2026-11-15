@@ -796,17 +796,22 @@ ark chief state [--project <name>]
 Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a
 file: open runs with phase and current step, run leads (live ones only, dispatch and terminal) from
 `orca orchestration worker-list`, which reads Master Chief's own Orca Run; `task-list` reads the
-same Run for the queue, queued Orca Tasks (`ready` and `pending`), the head of the workspace's main
-branch, `gates` and `concurrency` from ark.yml, the number of closed runs since the last interview
-(`(due)` at 10 or more) and free disk space. It reads every page of the Run list, so a Master Chief
-Run past the first page is found. A source that fails prints `unavailable: <command> failed:
-<reason>` under its heading, and the other sections still print. An empty source prints `none`. The
-`Red on main` section lists each file that an open run's last full `test.completed` recorded in
-`red_on_main`, with the run id, once; a run whose events cannot be read prints `unavailable` there.
-It also runs `ark companions sync` and prints its lines, and each failure as `unavailable:
-<reason>`, under `Companions`; with no `companions` in ark.yml and no recorded companion worker it
-adds no section and no Orca call, and a failing sync never changes the exit code. --project falls
-back to ARK_PROJECT.
+same Run for the queue, queued Orca Tasks (`ready` and `pending`), the unread messages of every type
+to Master Chief's Orca Run, the head of the workspace's main branch, `gates` and `concurrency` from
+ark.yml, the number of closed runs since the last interview (`(due)` at 10 or more) and free disk
+space. It reads every page of the Run list, so a Master Chief Run past the first page is found. A
+source that fails prints `unavailable: <command> failed: <reason>` under its heading, and the other
+sections still print. An empty source prints `none`. The `Master Chief inbox` section reads `orca
+orchestration inbox --terminal run:<id> --full` and keeps the rows with `read` 0, without marking
+any message read (`check` marks messages read, and `check --peek` is refused for a caller that is
+not the Run's coordinator); it prints `unread for Master Chief: <n>, oldest <m> min`, with the age
+of the oldest in whole minutes, or `unread for Master Chief: 0`, and a read that fails prints
+`unavailable` with the reason, never 0. The `Red on main` section lists each file that an open run's
+last full `test.completed` recorded in `red_on_main`, with the run id, once; a run whose events
+cannot be read prints `unavailable` there. It also runs `ark companions sync` and prints its lines,
+and each failure as `unavailable: <reason>`, under `Companions`; with no `companions` in ark.yml and
+no recorded companion worker it adds no section and no Orca call, and a failing sync never changes
+the exit code. --project falls back to ARK_PROJECT.
 ```
 
 ### chief handover

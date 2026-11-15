@@ -16,6 +16,7 @@ import { loadConfig } from "../cli/config.ts";
 import {
   orcaOrchestration,
   orcaPages,
+  inboxLimit,
   orcaRead,
   orcaTimeoutMilliseconds,
   readChiefQueue,
@@ -548,9 +549,6 @@ export async function readOrca(
 }
 
 // ---------------------------------------------------------------- Conversation
-
-/** Orca keeps about nine days of messages (3,592 on 2026-11-12, one third more each week); `inbox` has no default big enough, so the read names its limit. */
-export const inboxLimit = 10_000;
 
 export type InboxRead = { messages: InboxMessage[]; truncated: boolean };
 

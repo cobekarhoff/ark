@@ -93,6 +93,9 @@ export function orcaTimeout(fallbackMilliseconds: number): number {
 /** Orca can be slow to answer a list; the hub's 2 s reader limit is too short for the queue and for a one-off command. */
 export const orcaTimeoutMilliseconds = orcaTimeout(10_000);
 
+/** Orca keeps about nine days of messages (3,592 on 2026-11-12, one third more each week); `inbox` has no default big enough, so a read names its limit. */
+export const inboxLimit = 10_000;
+
 /** One `orca <words> --json` call: its `result`, or why it failed. */
 async function orcaCommand<T>(words: string[], timeoutMilliseconds: number): Promise<OrcaRead<T>> {
   if (!Bun.which("orca", { PATH: process.env.PATH }))
