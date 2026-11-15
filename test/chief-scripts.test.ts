@@ -14,8 +14,7 @@ import { join } from "node:path";
 import { tempArkHome, tempGitRepo, writeProject } from "./helpers";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
-// ARK-506: 90 s, as test-lock.test.ts: an auto-merger test makes up to 7 passes in 3 script calls, each pass starts real `ark` several times, and the cli suite runs beside it.
-setDefaultTimeout(90_000);
+setDefaultTimeout(30_000);
 
 const repositoryRoot = join(import.meta.dir, "..");
 const run = "2026-11-02-ARK-900-1";
@@ -147,15 +146,24 @@ function expectCleanPullRequestOnlyMerged(result: ScriptResult) {
   expect(change).toContain(`${run} #12 conflicting`);
 }
 
-test("ARK-T295 auto-merger --once merges the CLEAN PR only, reports the conflict and exits", () => {
-  expectCleanPullRequestOnlyMerged(runCleanPullRequestScenario());
-});
+// ARK-506: every auto-merger test runs 90 s: one test makes up to 7 passes in 3 script calls, and each pass starts real `ark` several times beside the cli suite.
+test(
+  "ARK-T295 auto-merger --once merges the CLEAN PR only, reports the conflict and exits",
+  () => {
+    expectCleanPullRequestOnlyMerged(runCleanPullRequestScenario());
+  },
+  { timeout: 90_000 },
+);
 
-test("ARK-T295 auto-merger --once with retro.md and a ready ticket file merges the CLEAN PR only, reports the conflict and holds nothing", () => {
-  const result = runCleanPullRequestScenario();
-  expectCleanPullRequestOnlyMerged(result);
-  expect(result.err).not.toContain("HELD:");
-});
+test(
+  "ARK-T295 auto-merger --once with retro.md and a ready ticket file merges the CLEAN PR only, reports the conflict and holds nothing",
+  () => {
+    const result = runCleanPullRequestScenario();
+    expectCleanPullRequestOnlyMerged(result);
+    expect(result.err).not.toContain("HELD:");
+  },
+  { timeout: 90_000 },
+);
 
 test("ARK-T190 temp-cleaner removes only ark-* directories older than 180 minutes with no owner file and prunes the worktree one held", () => {
   const workspace = tempGitRepo();
@@ -394,106 +402,126 @@ const mergeCalls = () =>
     .split("\n")
     .filter((call) => call.startsWith("pr merge"));
 
-test("ARK-T295 auto-merger merges only the run with retro.md, and the other in a later pass once retro.md exists", () => {
-  const { workspace, directories } = setUpMergerRuns([
-    { name: "2026-11-02-ARK-21-1", pr: 21, retro: true },
-    { name: "2026-11-02-ARK-22-1", pr: 22, retro: false },
-  ]);
+test(
+  "ARK-T295 auto-merger merges only the run with retro.md, and the other in a later pass once retro.md exists",
+  () => {
+    const { workspace, directories } = setUpMergerRuns([
+      { name: "2026-11-02-ARK-21-1", pr: 21, retro: true },
+      { name: "2026-11-02-ARK-22-1", pr: 22, retro: false },
+    ]);
 
-  // Pass 1 merges #21 and exits on that change; #22 has no pr merge call.
-  const first = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
-  expect(first.code).toBe(0);
-  expect(mergeCalls()).toEqual(["pr merge https://github.com/org/app/pull/21 --merge"]);
-  expect(first.out).not.toContain("#22");
+    // Pass 1 merges #21 and exits on that change; #22 has no pr merge call.
+    const first = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
+    expect(first.code).toBe(0);
+    expect(mergeCalls()).toEqual(["pr merge https://github.com/org/app/pull/21 --merge"]);
+    expect(first.out).not.toContain("#22");
 
-  // retro.md appears after 2 held passes: the PR merges in pass 3.
-  writeFileSync(
-    join(bin, "hook.sh"),
-    `[ "$1" = 2 ] && echo "# Retro" > "${join(directories["2026-11-02-ARK-22-1"]!, "retro.md")}"\nexit 0\n`,
-  );
-  fakeSleep(3);
-  // #21 is merged in the fake only: remove its retro so that it stays out of this second script run.
-  rmSync(join(directories["2026-11-02-ARK-21-1"]!, "retro.md"));
-  const second = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
-  expect(mergeCalls()).toEqual([
-    "pr merge https://github.com/org/app/pull/21 --merge",
-    "pr merge https://github.com/org/app/pull/22 --merge",
-  ]);
-  expect(second.out).toContain("2026-11-02-ARK-22-1 #22 merged");
-});
+    // retro.md appears after 2 held passes: the PR merges in pass 3.
+    writeFileSync(
+      join(bin, "hook.sh"),
+      `[ "$1" = 2 ] && echo "# Retro" > "${join(directories["2026-11-02-ARK-22-1"]!, "retro.md")}"\nexit 0\n`,
+    );
+    fakeSleep(3);
+    // #21 is merged in the fake only: remove its retro so that it stays out of this second script run.
+    rmSync(join(directories["2026-11-02-ARK-21-1"]!, "retro.md"));
+    const second = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
+    expect(mergeCalls()).toEqual([
+      "pr merge https://github.com/org/app/pull/21 --merge",
+      "pr merge https://github.com/org/app/pull/22 --merge",
+    ]);
+    expect(second.out).toContain("2026-11-02-ARK-22-1 #22 merged");
+  },
+  { timeout: 90_000 },
+);
 
-test("ARK-T295 auto-merger --once skips superseded and done tickets, merges ready and missing ticket files", () => {
-  const runs: MergerRun[] = [
-    { name: "2026-11-02-ARK-31-1", pr: 31, retro: true, ticket: "superseded" },
-    { name: "2026-11-02-ARK-32-1", pr: 32, retro: true, ticket: "done" },
-    { name: "2026-11-02-ARK-33-1", pr: 33, retro: true, ticket: "ready" },
-    { name: "2026-11-02-ARK-34-1", pr: 34, retro: true },
-  ];
-  const { workspace } = setUpMergerRuns(runs);
+test(
+  "ARK-T295 auto-merger --once skips superseded and done tickets, merges ready and missing ticket files",
+  () => {
+    const runs: MergerRun[] = [
+      { name: "2026-11-02-ARK-31-1", pr: 31, retro: true, ticket: "superseded" },
+      { name: "2026-11-02-ARK-32-1", pr: 32, retro: true, ticket: "done" },
+      { name: "2026-11-02-ARK-33-1", pr: 33, retro: true, ticket: "ready" },
+      { name: "2026-11-02-ARK-34-1", pr: 34, retro: true },
+    ];
+    const { workspace } = setUpMergerRuns(runs);
 
-  const result = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
+    const result = runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
 
-  expect(result.code).toBe(0);
-  expect(mergeCalls().sort()).toEqual([
-    "pr merge https://github.com/org/app/pull/33 --merge",
-    "pr merge https://github.com/org/app/pull/34 --merge",
-  ]);
-  expect(result.err).toContain("HELD: 2026-11-02-ARK-31-1 #31 ticket superseded");
-  expect(result.err).toContain("HELD: 2026-11-02-ARK-32-1 #32 ticket done");
-  expect(result.err).not.toMatch(/HELD: \S+ #3[34]/);
-});
+    expect(result.code).toBe(0);
+    expect(mergeCalls().sort()).toEqual([
+      "pr merge https://github.com/org/app/pull/33 --merge",
+      "pr merge https://github.com/org/app/pull/34 --merge",
+    ]);
+    expect(result.err).toContain("HELD: 2026-11-02-ARK-31-1 #31 ticket superseded");
+    expect(result.err).toContain("HELD: 2026-11-02-ARK-32-1 #32 ticket done");
+    expect(result.err).not.toMatch(/HELD: \S+ #3[34]/);
+  },
+  { timeout: 90_000 },
+);
 
-test("ARK-281-AC3 auto-merger does not merge a run that is closed when ark status is read again", () => {
-  const name = "2026-11-02-ARK-41-1";
-  const { workspace } = setUpMergerRuns([{ name, pr: 41, retro: true, ticket: "ready" }]);
-  // List call: merge_requests_open. Per-run call: closed. merge-request status stays real.
-  executable(
-    "ark",
-    `case "$*" in
+test(
+  "ARK-T689 auto-merger does not merge a run that is closed when ark status is read again",
+  () => {
+    const name = "2026-11-02-ARK-41-1";
+    const { workspace } = setUpMergerRuns([{ name, pr: 41, retro: true, ticket: "ready" }]);
+    // List call: merge_requests_open. Per-run call: closed. merge-request status stays real.
+    executable(
+      "ark",
+      `case "$*" in
   *merge-request*) exec bun "${join(repositoryRoot, "cli", "ark.ts")}" "$@" ;;
   *${name}) echo "phase: closed" ;;
   *status*) echo "${name} merge_requests_open" ;;
 esac
 `,
-  );
-  fakeSleep(2);
+    );
+    fakeSleep(2);
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
 
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
-  expect(mergeCalls()).toEqual([]);
-  expect(result.out).not.toContain("CHANGE:");
-});
+    expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
+    expect(mergeCalls()).toEqual([]);
+    expect(result.out).not.toContain("CHANGE:");
+  },
+  { timeout: 90_000 },
+);
 
-test("ARK-281-AC4 a held PR prints one HELD line over 3 passes, no CHANGE line, and the script keeps running", () => {
-  const name = "2026-11-02-ARK-51-1";
-  const { workspace } = setUpMergerRuns([{ name, pr: 51, retro: false }]);
-  fakeSleep(3);
+test(
+  "ARK-T690 auto-merger prints one HELD line for a held PR over 3 passes, no CHANGE line, and the script keeps running",
+  () => {
+    const name = "2026-11-02-ARK-51-1";
+    const { workspace } = setUpMergerRuns([{ name, pr: 51, retro: false }]);
+    fakeSleep(3);
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
 
-  // Only the fake sleep ends it: after the third pass, never by the script itself.
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
-  expect(result.err.split("\n").filter((line) => line.startsWith("HELD:"))).toEqual([
-    `HELD: ${name} #51 no final report`,
-  ]);
-  expect(result.out).not.toContain("CHANGE:");
-  expect(mergeCalls()).toEqual([]);
-});
+    // Only the fake sleep ends it: after the third pass, never by the script itself.
+    expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
+    expect(result.err.split("\n").filter((line) => line.startsWith("HELD:"))).toEqual([
+      `HELD: ${name} #51 no final report`,
+    ]);
+    expect(result.out).not.toContain("CHANGE:");
+    expect(mergeCalls()).toEqual([]);
+  },
+  { timeout: 90_000 },
+);
 
-test("ARK-281-AC4 a PR held for a superseded ticket prints HELD with the reason once over 2 passes", () => {
-  const name = "2026-11-02-ARK-52-1";
-  const { workspace } = setUpMergerRuns([{ name, pr: 52, retro: true, ticket: "superseded" }]);
-  fakeSleep(2);
+test(
+  "ARK-T690 auto-merger prints HELD with the reason once for a PR held for a superseded ticket over 2 passes",
+  () => {
+    const name = "2026-11-02-ARK-52-1";
+    const { workspace } = setUpMergerRuns([{ name, pr: 52, retro: true, ticket: "superseded" }]);
+    fakeSleep(2);
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
 
-  expect(result.err.split("\n").filter((line) => line.startsWith("HELD:"))).toEqual([
-    `HELD: ${name} #52 ticket superseded`,
-  ]);
-  expect(result.out).not.toContain("CHANGE:");
-});
+    expect(result.err.split("\n").filter((line) => line.startsWith("HELD:"))).toEqual([
+      `HELD: ${name} #52 ticket superseded`,
+    ]);
+    expect(result.out).not.toContain("CHANGE:");
+  },
+  { timeout: 90_000 },
+);
 
 // --- ARK-358: the loops send Orca messages. A fake orca, df and sleep stand in for the real ones. ---
 
@@ -568,99 +596,113 @@ function resetPasses(stopAfter: number) {
   fakeSleep(stopAfter);
 }
 
-test("ARK-T295 auto-merger sends one 'Merged: <run> !<number>' to the Master Chief Run on page 2, keeps looping, and repeats nothing after a restart", () => {
-  const first = "2026-11-02-ARK-61-1";
-  const second = "2026-11-02-ARK-62-1";
-  const { workspace, directories } = setUpMergerRuns([
-    { name: first, pr: 61, retro: true },
-    { name: second, pr: 62, retro: false },
-  ]);
+test(
+  "ARK-T295 auto-merger sends one 'Merged: <run> !<number>' to the Master Chief Run on page 2, keeps looping, and repeats nothing after a restart",
+  () => {
+    const first = "2026-11-02-ARK-61-1";
+    const second = "2026-11-02-ARK-62-1";
+    const { workspace, directories } = setUpMergerRuns([
+      { name: first, pr: 61, retro: true },
+      { name: second, pr: 62, retro: false },
+    ]);
 
-  // 1-3. Three passes: alive after the merge (only the fake sleep ends it), one send, to the right Run.
-  fakeSleep(3);
-  runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
-  expect(mergeCalls()).toEqual(["pr merge https://github.com/org/app/pull/61 --merge"]);
-  expect(orcaSends()).toHaveLength(1);
-  const [message] = orcaSends();
-  expect(flagValue(message!, "--to")).toBe("run:run_chief");
-  expect(flagValue(message!, "--type")).toBe("status");
-  expect(flagValue(message!, "--subject")).toBe(`Merged: ${first} !61`);
+    // 1-3. Three passes: alive after the merge (only the fake sleep ends it), one send, to the right Run.
+    fakeSleep(3);
+    runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("3");
+    expect(mergeCalls()).toEqual(["pr merge https://github.com/org/app/pull/61 --merge"]);
+    expect(orcaSends()).toHaveLength(1);
+    const [message] = orcaSends();
+    expect(flagValue(message!, "--to")).toBe("run:run_chief");
+    expect(flagValue(message!, "--type")).toBe("status");
+    expect(flagValue(message!, "--subject")).toBe(`Merged: ${first} !61`);
 
-  // 4. A launchd restart with the same state and the same merged run: nothing new.
-  resetPasses(2);
-  runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(mergeCalls()).toHaveLength(1);
-  expect(orcaSends()).toHaveLength(1);
+    // 4. A launchd restart with the same state and the same merged run: nothing new.
+    resetPasses(2);
+    runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    expect(mergeCalls()).toHaveLength(1);
+    expect(orcaSends()).toHaveLength(1);
 
-  // 5. The second MR becomes mergeable: one more send with its number.
-  writeFileSync(join(directories[second]!, "retro.md"), "# Retro\n");
-  resetPasses(2);
-  runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(orcaSends().map((call) => flagValue(call, "--subject"))).toEqual([
-    `Merged: ${first} !61`,
-    `Merged: ${second} !62`,
-  ]);
-});
+    // 5. The second MR becomes mergeable: one more send with its number.
+    writeFileSync(join(directories[second]!, "retro.md"), "# Retro\n");
+    resetPasses(2);
+    runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    expect(orcaSends().map((call) => flagValue(call, "--subject"))).toEqual([
+      `Merged: ${first} !61`,
+      `Merged: ${second} !62`,
+    ]);
+  },
+  { timeout: 90_000 },
+);
 
-test("ARK-T295 auto-merger logs the notice and keeps merging when there is no Master Chief Run, and sends it once orca answers", () => {
-  const name = "2026-11-02-ARK-63-1";
-  const { workspace } = setUpMergerRuns([{ name, pr: 63, retro: true }]);
-  writeFileSync(join(bin, "runs.ndjson"), `${JSON.stringify(decoyRun)}\n`);
-  fakeSleep(2);
+test(
+  "ARK-T295 auto-merger logs the notice and keeps merging when there is no Master Chief Run, and sends it once orca answers",
+  () => {
+    const name = "2026-11-02-ARK-63-1";
+    const { workspace } = setUpMergerRuns([{ name, pr: 63, retro: true }]);
+    writeFileSync(join(bin, "runs.ndjson"), `${JSON.stringify(decoyRun)}\n`);
+    fakeSleep(2);
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
 
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
-  expect(mergeCalls()).toHaveLength(1);
-  expect(orcaSends()).toEqual([]);
-  expect(result.err).toContain(
-    `no Orca Run "Master Chief: demo tickets", not sent: Merged: ${name} !63`,
-  );
+    expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
+    expect(mergeCalls()).toHaveLength(1);
+    expect(orcaSends()).toEqual([]);
+    expect(result.err).toContain(
+      `no Orca Run "Master Chief: demo tickets", not sent: Merged: ${name} !63`,
+    );
 
-  // orca is not answering: the message stays pending and goes out on a later pass.
-  const retry = "2026-11-02-ARK-64-1";
-  const second = setUpMergerRuns([{ name: retry, pr: 64, retro: true }]);
-  writeFileSync(
-    join(bin, "runs.ndjson"),
-    [decoyRun, masterChiefRun].map((row) => `${JSON.stringify(row)}\n`).join(""),
-  );
-  writeFileSync(join(bin, "fail-send"), "");
-  resetPasses(1);
-  const failed = runScript("auto-merger.sh", [second.workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(failed.err).toContain("orca send failed, will retry");
-  expect(orcaSends()).toEqual([]);
-  rmSync(join(bin, "fail-send"));
-  resetPasses(1);
-  runScript("auto-merger.sh", [second.workspace, "1"], { ARK_PROJECT: "demo" });
-  expect(orcaSends().map((call) => flagValue(call, "--subject"))).toEqual([`Merged: ${retry} !64`]);
-});
+    // orca is not answering: the message stays pending and goes out on a later pass.
+    const retry = "2026-11-02-ARK-64-1";
+    const second = setUpMergerRuns([{ name: retry, pr: 64, retro: true }]);
+    writeFileSync(
+      join(bin, "runs.ndjson"),
+      [decoyRun, masterChiefRun].map((row) => `${JSON.stringify(row)}\n`).join(""),
+    );
+    writeFileSync(join(bin, "fail-send"), "");
+    resetPasses(1);
+    const failed = runScript("auto-merger.sh", [second.workspace, "1"], { ARK_PROJECT: "demo" });
+    expect(failed.err).toContain("orca send failed, will retry");
+    expect(orcaSends()).toEqual([]);
+    rmSync(join(bin, "fail-send"));
+    resetPasses(1);
+    runScript("auto-merger.sh", [second.workspace, "1"], { ARK_PROJECT: "demo" });
+    expect(orcaSends().map((call) => flagValue(call, "--subject"))).toEqual([
+      `Merged: ${retry} !64`,
+    ]);
+  },
+  { timeout: 90_000 },
+);
 
-test("ARK-T295 auto-merger prints a conflict and a failed merge once over four passes and sends neither", () => {
-  const { workspace } = setUpMergerRuns([
-    { name: "2026-11-02-ARK-71-1", pr: 71, retro: true },
-    { name: "2026-11-02-ARK-72-1", pr: 72, retro: true },
-  ]);
-  // PR 71 is CLEAN but refuses to merge; PR 72 is DIRTY.
-  executable(
-    "gh",
-    `echo "$*" >> "${ghLog}"
+test(
+  "ARK-T295 auto-merger prints a conflict and a failed merge once over four passes and sends neither",
+  () => {
+    const { workspace } = setUpMergerRuns([
+      { name: "2026-11-02-ARK-71-1", pr: 71, retro: true },
+      { name: "2026-11-02-ARK-72-1", pr: 72, retro: true },
+    ]);
+    // PR 71 is CLEAN but refuses to merge; PR 72 is DIRTY.
+    executable(
+      "gh",
+      `echo "$*" >> "${ghLog}"
 case "$*" in
   "pr merge"*) exit 1 ;;
   *mergeStateStatus*) case "$3" in */72) echo DIRTY ;; *) echo CLEAN ;; esac ;;
   *) echo '{"state":"OPEN","statusCheckRollup":[]}' ;;
 esac
 `,
-  );
-  fakeSleep(4);
+    );
+    fakeSleep(4);
 
-  const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
+    const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
 
-  expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("4");
-  expect(result.out.match(/#71 merge failed/g)).toHaveLength(1);
-  expect(result.out.match(/#72 conflicting/g)).toHaveLength(1);
-  expect(orcaSends()).toEqual([]);
-});
+    expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("4");
+    expect(result.out.match(/#71 merge failed/g)).toHaveLength(1);
+    expect(result.out.match(/#72 conflicting/g)).toHaveLength(1);
+    expect(orcaSends()).toEqual([]);
+  },
+  { timeout: 90_000 },
+);
 
 // --- ARK-T296: the cleaner's disk message ---
 
