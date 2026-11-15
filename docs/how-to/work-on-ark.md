@@ -61,7 +61,7 @@ UPDATE_COMMAND_TABLE=1 bun test test/command-table.test.ts
 
 ## `ark test --quick` and `ark test`
 
-`ark test <run>` takes a run, so it works only inside a run. `--quick` runs at head only, with no base run, and only the changed test files of the run's own commits in each suite that `paths` selects. It records `mode: quick` and is never a gate. `ark merge-request open` refuses unless the last test at head is a full `ark test <run>`. See [`ark test`](../reference/cli.md#test). Outside a run, use the commands above.
+`ark test <run>` takes a run, so it works only inside a run. `--quick` runs at head only, with no base run, and only the changed test files of the run's own commits in each suite that `paths` selects. It records `mode: quick` and is never a gate. `ark merge-request open` refuses unless the last test at head is a full `ark test <run>`. A failed check (`format:check`, `typecheck`, `lint`, old-id, plan membership) stops either run after the last check, with no suite and exit 1; `--keep-going` runs the suites anyway. See [`ark test`](../reference/cli.md#test). Outside a run, use the commands above.
 
 ## Tests
 
