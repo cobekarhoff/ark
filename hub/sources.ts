@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { readChiefUnread } from "../cli/chief.ts";
 import { now } from "../cli/clock.ts";
 import { canonicalCriterion } from "../cli/criterion-id.ts";
 import { execJson } from "../cli/exec.ts";
@@ -16,6 +17,7 @@ import { loadConfig } from "../cli/config.ts";
 import {
   orcaOrchestration,
   orcaPages,
+  inboxLimit,
   orcaRead,
   orcaTimeoutMilliseconds,
   readChiefQueue,
@@ -40,6 +42,7 @@ import type {
   ProviderWindow,
   TicketDocument,
   TicketView,
+  ProjectUnread,
   Wait,
 } from "./types.ts";
 
@@ -322,6 +325,20 @@ export async function readQueues(): Promise<Map<string, QueueRead>> {
   return new Map(projects.map((project, index) => [project, reads[index]]));
 }
 
+/**
+ * The unread messages to each project's Master Chief Run, through the reader `ark chief state` uses.
+ * A failed read is that project's own `unavailable` entry, never a count of 0.
+ */
+export async function readChiefUnreads(): Promise<ProjectUnread[]> {
+  return Promise.all(
+    listProjects().map(async (project): Promise<ProjectUnread> => {
+      const unread = await readChiefUnread(project, orcaTimeoutMilliseconds);
+      if (!unread.ok) return { project, unavailable: unread.reason };
+      return unread.value === null ? { project, none: true } : { project, ...unread.value };
+    }),
+  );
+}
+
 // ---------------------------------------------------------------- Orca
 
 export type OrcaValue = { agents: Map<string, Agent[]>; waits: Map<string, Wait[]> };
@@ -548,9 +565,6 @@ export async function readOrca(
 }
 
 // ---------------------------------------------------------------- Conversation
-
-/** Orca keeps about nine days of messages (3,592 on 2026-11-12, one third more each week); `inbox` has no default big enough, so the read names its limit. */
-export const inboxLimit = 10_000;
 
 export type InboxRead = { messages: InboxMessage[]; truncated: boolean };
 

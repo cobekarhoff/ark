@@ -23,13 +23,13 @@ What counts as evidence in an MR or PR body, and every check `lint_body.ts` runs
 | PROV02               | fail   | No model `Co-Authored-By` and no `Generated with` line in the body or the commits of the range.                                                   |
 | TITLE01              | fail   | Title is 72 characters or less, has no trailing period, and matches `title_prefix` when set.                                                      |
 | TITLE01 (imperative) | warn   | The first word is imperative (`Fix`, not `Fixed` or `Fixes`).                                                                                     |
-| SIZE01               | fail   | Prose lines at most 3, 12, 40 or 150 for tier 0 to 3. Lines inside a `<details>` block do not count.                                              |
+| SIZE01               | fail   | Prose lines at most 3, 12, 40 or 150 for tier 0 to 3. Lines inside a `<details>` block and list items (the collapsed case lines) do not count.    |
 | SIZE02               | fail   | No headings at tier 0, unless the repo template names headings.                                                                                   |
 | REF01                | fail   | Every tracker ref of the branch or commits is in the body, and no `Closes X` names another ref.                                                   |
 | REF02                | fail   | `Depends on` and merge order lines match the ledger.                                                                                              |
 | DIFF01               | fail   | Every file path the body names is in the diff.                                                                                                    |
 | EVID01               | warn   | Bug: fail at base, pass at head. Refactor: pass at both. Perf: baseline and compare files. Skipped outside an Ark ticket.                         |
-| EVID03               | warn   | A claimed test case result matches an artifact for that case and head. Skipped outside Ark.                                                       |
+| EVID03               | warn   | A claimed test case result matches an artifact for that case and head, in a block summary or a collapsed case line. Skipped outside Ark.          |
 | EVID04               | warn   | At most 5 screenshots in Evidence. Fails with no Evidence section when the run has `results/evidence/`.                                           |
 | VAL01                | fail   | A `- [ ]` item under How to verify (or Testing).                                                                                                  |
 | VAL02                | warn   | Each verify item has a backticked command and an `Expect` clause.                                                                                 |

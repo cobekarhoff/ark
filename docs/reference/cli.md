@@ -146,8 +146,14 @@ of a validator step, without --failed and after the refusal for uncommitted chan
 `step` of `ark merge-request check` for the ACs of the step and is refused, with no event written,
 when it lists a problem: an AC string in no tracked file (counted once every implementer step that
 serves the AC has finished), a malformed evidence file, or a missing evidence file of an `analysis`
-AC. It never refuses for the MR title, a manual criterion with no answer, the last line `human: ok`
-or `reviewer:`, or an AC the step does not serve.
+AC. A `finish` of an implementer step, without --failed and after the refusal for uncommitted
+changes, runs the plan membership check of `ark test` on the run's diff for the bun suites of the
+step's repo and is refused, with no event written, when a changed test holds a case id that
+`test_cases` of plan.yml does not list: it prints each missing case id with its test file and the
+hint to add the ids to `test_cases`, run `ark plan check <run>` and finish again. `--failed`,
+`--not-started`, a step that started with --merge, a missing or invalid plan.yml and a scan that
+fails are not refused. It never refuses for the MR title, a manual criterion with no answer, the
+last line `human: ok` or `reviewer:`, or an AC the step does not serve.
 ```
 
 ### run close
@@ -504,7 +510,8 @@ prints `old id touched: <file>:<line> <title>` for each one with an old AC id. I
 ### gate record
 
 ```text
-ark gate record <run> <gate> [<criterion id>] <answer> [--note <text>] [--project <name>]
+ark gate record <run> <gate> [<criterion id>] <answer> [--criteria <file>] [--note <text>]
+    [--project <name>]
 
 Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The
 strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves
@@ -521,6 +528,16 @@ answer older than head: <AC id>` when a head has changed since. Ark refuses an a
 state does not allow, and refuses plan approve while the plan has an open decision. Both `<ticket
 id>/AC<k>` and `<ticket id>-AC<k>` name a criterion. `criteria accept` re-reads the ticket and
 refuses a new-scheme AC with `method: test` and an empty `verified_by` list, and names the AC.
+`criteria accept --criteria <file>` reads the criteria from a YAML file instead: a mapping with one
+key, `acceptance_criteria`, a list of `{id, text, method, verified_by}`; a relative path is read
+from the run folder, an absolute path as it is. It refuses, with an `ark: <reason>` line and no
+write, a file that is missing or not YAML, an unknown key at the top level or in a criterion
+(`manual: true` too: write `method: demonstration`), a duplicate id, an unknown method, an empty
+list and a `method: test` criterion with an empty `verified_by` list. Otherwise it replaces the
+`acceptance_criteria` block of the ticket file (every other line and the body stay, the table in the
+body too), then copies the ticket to the run folder and records the gate as `criteria accept` does.
+It works only with `criteria accept`, in the phase `awaiting_criteria`; with any other gate, answer
+or phase it refuses and writes nothing.
 ```
 
 ### escalate
@@ -797,17 +814,22 @@ ark chief state [--project <name>]
 Prints a Markdown snapshot of Master Chief's state, read live from its sources and never from a
 file: open runs with phase and current step, run leads (live ones only, dispatch and terminal) from
 `orca orchestration worker-list`, which reads Master Chief's own Orca Run; `task-list` reads the
-same Run for the queue, queued Orca Tasks (`ready` and `pending`), the head of the workspace's main
-branch, `gates` and `concurrency` from ark.yml, the number of closed runs since the last interview
-(`(due)` at 10 or more) and free disk space. It reads every page of the Run list, so a Master Chief
-Run past the first page is found. A source that fails prints `unavailable: <command> failed:
-<reason>` under its heading, and the other sections still print. An empty source prints `none`. The
-`Red on main` section lists each file that an open run's last full `test.completed` recorded in
-`red_on_main`, with the run id, once; a run whose events cannot be read prints `unavailable` there.
-It also runs `ark companions sync` and prints its lines, and each failure as `unavailable:
-<reason>`, under `Companions`; with no `companions` in ark.yml and no recorded companion worker it
-adds no section and no Orca call, and a failing sync never changes the exit code. --project falls
-back to ARK_PROJECT.
+same Run for the queue, queued Orca Tasks (`ready` and `pending`), the unread messages of every type
+to Master Chief's Orca Run, the head of the workspace's main branch, `gates` and `concurrency` from
+ark.yml, the number of closed runs since the last interview (`(due)` at 10 or more) and free disk
+space. It reads every page of the Run list, so a Master Chief Run past the first page is found. A
+source that fails prints `unavailable: <command> failed: <reason>` under its heading, and the other
+sections still print. An empty source prints `none`. The `Master Chief inbox` section reads `orca
+orchestration inbox --terminal run:<id> --full` and keeps the rows with `read` 0, without marking
+any message read (`check` marks messages read, and `check --peek` is refused for a caller that is
+not the Run's coordinator); it prints `unread for Master Chief: <n>, oldest <m> min`, with the age
+of the oldest in whole minutes, or `unread for Master Chief: 0`, and a read that fails prints
+`unavailable` with the reason, never 0. The `Red on main` section lists each file that an open run's
+last full `test.completed` recorded in `red_on_main`, with the run id, once; a run whose events
+cannot be read prints `unavailable` there. It also runs `ark companions sync` and prints its lines,
+and each failure as `unavailable: <reason>`, under `Companions`; with no `companions` in ark.yml and
+no recorded companion worker it adds no section and no Orca call, and a failing sync never changes
+the exit code. --project falls back to ARK_PROJECT.
 ```
 
 ### chief handover

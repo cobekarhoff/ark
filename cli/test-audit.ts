@@ -32,6 +32,8 @@ import { projectDirectory, runsDirectory } from "./paths.ts";
 import { attributesOf, criterionPattern } from "./parsers/bun.ts";
 import { caseIdsIn } from "./parsers/case.ts";
 import { frontmatter, parseCriteria } from "./ticket.ts";
+import { loadPlan } from "./plan.ts";
+import type { RunState } from "./events.ts";
 
 type Suite = ProjectConfig["suites"][number];
 type Kind = "case" | "old" | "none";
@@ -389,6 +391,48 @@ export async function caseIdsOutsidePlan(
     for (const id of declaration.cases)
       if (!planned.has(id)) lines.add(`case id not in plan test_cases: ${id} in ${path}`);
   return [...lines];
+}
+
+/** The commit the base side of `ark test` and of an implementer finish uses: the newest synced target commit, else the worktree.created base. `base` itself stays the created base for every other reader. */
+export const baseSide = (worktree?: RunState["worktrees"][number]): string | undefined =>
+  worktree?.synced ?? worktree?.base;
+
+export type PlanMembership = { suite: Suite; label: string; missing: string[] };
+
+/**
+ * ARK-431, ARK-496: the plan-membership scan of `ark test` and of an implementer finish. One entry for each bun suite
+ * that has a base commit and whose scan ran (`onlyRepo` limits the suites to one repo; `repoPath` names the checkout
+ * to read). A missing or invalid plan.yml and a failed scan print a skip line and leave the entry out.
+ */
+export async function planMembership(
+  runDirectory: string,
+  suites: Suite[],
+  worktrees: RunState["worktrees"],
+  repoPath: (repo: string) => string,
+  onlyRepo?: string,
+): Promise<PlanMembership[]> {
+  let planned: Set<string>;
+  try {
+    planned = new Set(loadPlan(runDirectory).test_cases.map((testCase) => testCase.id));
+  } catch (err) {
+    console.log(`plan-membership check  skipped  (${String(err)})`);
+    return [];
+  }
+  const results: PlanMembership[] = [];
+  for (const suite of suites) {
+    if (onlyRepo !== undefined && suite.repo !== onlyRepo) continue;
+    const label = `plan-membership suite ${suite.name} (${suite.parser})`;
+    // the newest synced target commit, not the created base: what main changed is not this run's change
+    const base = baseSide(worktrees.find((worktree) => worktree.repo === suite.repo));
+    if (suite.parser !== "bun" || base === undefined) continue;
+    try {
+      const missing = await caseIdsOutsidePlan(repoPath(suite.repo), base, suite, suites, planned);
+      results.push({ suite, label, missing });
+    } catch (err) {
+      console.log(`${label}  skipped  (scan failed: ${String(err)})`);
+    }
+  }
+  return results;
 }
 
 /** Case id -> the criteria whose `verified_by` names it, from the project's tickets and the tickets copied into its runs. */

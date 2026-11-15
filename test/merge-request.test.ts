@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import { requiredLiterals } from "../cli/merge-request.ts";
 import { buildBody } from "../skills/pr-writing/lib/body.ts";
 import { buildLedger } from "../skills/pr-writing/lib/ledger.ts";
+import { lintBody } from "../skills/pr-writing/lib/lint.ts";
 import { repoGraph } from "../cli/plan.ts";
 import {
   ark,
@@ -1448,6 +1449,168 @@ test(
   { timeout: 120_000 },
 );
 
+/** `chars` characters of AC evidence, 100 to a line, with no word that the body filter for secrets drops. */
+const acEvidenceText = (id: string, chars: number) =>
+  `${Array.from({ length: Math.ceil(chars / 100) }, (_, i) =>
+    `${id} check ${i + 1}: the unit list shows the same rows after the reload and after a second one`.padEnd(
+      99,
+      ".",
+    ),
+  ).join("\n")}\n`;
+
+test(
+  "ARK-T680 merge-request open posts a plan of 276 cases with 369 deleted tests under 65,536 characters, with one line for each case, one Deleted line and the AC evidence whole, on a new MR and on a refresh",
+  () => {
+    const shape: Shape = {
+      names: ["core"],
+      steps: [planStep("impl", "repos/core", [], ["ARK-900-AC1", "ARK-900-AC2"])],
+      repos: [{ repo: "repos/core", why: "units", depends_on: [] }],
+      noCommits: [],
+    };
+    const { runDirectory, worktrees } = scenario(
+      { core: "github", app: "github" },
+      true,
+      [],
+      {},
+      shape,
+    );
+    const worktree = worktrees.core;
+    const sha = git(worktree, "rev-parse", "HEAD");
+
+    // 276 plan cases with ids of one to four digits. The last has no evidence folder; 20 folders belong to no plan case.
+    const ids = Array.from({ length: 276 }, (_, i) => `ARK-T${i % 3 === 1 ? 1000 + i : i + 1}`);
+    const withEvidence = ids.slice(0, 275);
+    const unplanned = Array.from({ length: 20 }, (_, i) => `ARK-T${9001 + i}`);
+    const missing = ids[275]!;
+    writeFileSync(
+      join(runDirectory, "plan.yml"),
+      JSON.stringify({
+        steps: shape.steps,
+        repos: shape.repos,
+        test_cases: ids.map((id) => ({ id, action: "reuse", level: "integration" })),
+      }),
+    );
+    const evidence = join(runDirectory, "results", "evidence");
+    const writeResult = (id: string, side: string, status: string, resultSha: string) => {
+      mkdirSync(join(evidence, id, side), { recursive: true });
+      writeFileSync(
+        join(evidence, id, side, "result.json"),
+        JSON.stringify({ status, sha: resultSha }),
+      );
+    };
+    for (const id of [...withEvidence, ...unplanned]) {
+      writeResult(id, "base", "fail", sha);
+      writeResult(id, "head", "pass", sha);
+      writeFileSync(
+        join(evidence, id, "head", "command.log"),
+        `${Array.from({ length: 20 }, (_, k) => `${id} log line ${k + 1}`).join("\n")}\n`,
+      );
+    }
+    // Two AC evidence files of 11,500 characters each: the AC evidence stays whole whatever the size.
+    const acFiles = { AC1: acEvidenceText("AC1", 11_500), AC2: acEvidenceText("AC2", 11_500) };
+    for (const [id, text] of Object.entries(acFiles))
+      writeFileSync(join(evidence, `${id}.md`), text);
+
+    // The ticket is a bug: each case line has to carry `base fail, head pass` for lint EVID01.
+    rewriteEvents(runDirectory, (event) => {
+      if (event.type === "run.started") event.data.kind = "bug";
+      return event;
+    });
+    const deleted = Array.from({ length: 369 }, (_, i) => ({
+      file: `test/cases/area-${i % 37}.test.ts`,
+      name:
+        i % 5 === 0
+          ? `deleted test ${i} keeps a \`tick\` | pipe in a title of about a hundred characters, as an audit left it`
+          : `deleted test ${i} that an audit removed, with a title of about a hundred characters in all here`,
+    }));
+    recordCounts(runDirectory, { passed_count: 900, skipped: 4, base_skipped: 3, deleted });
+    const lastTestLine = () =>
+      readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+        .split("\n")
+        .findLast((line) => line.includes('"type":"test.completed"'))!;
+    const testLineBefore = lastTestLine();
+
+    const ledger = () => buildLedger({ runFolder: runDirectory, heads: { "repos/core": sha } });
+
+    /** The rules a collapsed body keeps on a new MR and on a refresh; `firstSha` is the sha of the head result of the first case. */
+    const expectCollapsedBody = (body: string, firstSha: string) => {
+      expect(body.length).toBeLessThanOrEqual(65_536);
+      for (const id of withEvidence) {
+        const lines = body
+          .split("\n")
+          .filter((line) => line.startsWith(`- \`${id}\`: base fail, head pass @ `));
+        expect(lines, id).toHaveLength(1);
+        expect(lines[0]).toContain(`results/evidence/${id}/`);
+      }
+      expect(body).toContain(`- \`${ids[0]}\`: base fail, head pass @ ${firstSha.slice(0, 7)}`);
+      expect(body).not.toMatch(/<details><summary>`ARK-T\d+`: base/);
+      expect(body).not.toContain("Log (last");
+      // A plan case with no evidence folder has no line, as before; a folder the plan does not name has none either.
+      for (const id of [missing, ...unplanned]) expect(body).not.toContain(`\`${id}\``);
+      for (const [id, text] of Object.entries(acFiles))
+        expect(body).toContain(
+          `Evidence file results/evidence/ARK-900/${id}.md:\n\n\`\`\`\n${text.trim()}\n\`\`\``,
+        );
+
+      const notes = body.split("\n").filter((line) => /collapsed/i.test(line));
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatch(/limit/i);
+      expect(notes[0]).not.toMatch(/base \S+, head \S+ @|\.png/);
+
+      expect(body).toContain("- Tests: 900 passed, 4 skipped (base 3), 369 deleted");
+      const deletedLines = body.split("\n").filter((line) => /^\s*- Deleted:/.test(line));
+      expect(deletedLines).toHaveLength(1);
+      expect(deletedLines[0]).toContain("369");
+      // The line names the run's events.ndjson, which exists, and its last test.completed holds the list.
+      const named = deletedLines[0]!.match(/[^\s`]*events\.ndjson/)?.[0];
+      expect(named).toBeDefined();
+      const file = resolve(runDirectory, named!);
+      expect(realpathSync(file)).toBe(realpathSync(join(runDirectory, "events.ndjson")));
+      expect(lastTestLine()).toBe(testLineBefore);
+      expect(JSON.parse(lastTestLine()).data.deleted).toHaveLength(369);
+
+      const results = lintBody({ body, title: "ARK-900: Show units", ledger: ledger() });
+      for (const id of ["SIZE01", "EVID01", "EVID03", "EVID04"])
+        expect(
+          results.find((check) => check.id === id),
+          id,
+        ).toMatchObject({ result: "pass" });
+    };
+
+    // A new MR.
+    const opened = ark("merge-request", "open", run);
+    expect(opened.code, opened.err).toBe(0);
+    expect(created()).toHaveLength(1);
+    const body = created()[0]!.body!;
+    expectCollapsedBody(body, sha);
+    expect(buildBody(ledger())).toBe(buildBody(ledger()));
+
+    // The gather script writes the same body for post_mr.ts, and its Deleted line names the same file.
+    const gathered = Bun.spawnSync(
+      [
+        "bun",
+        resolve(import.meta.dir, "../skills/pr-writing/scripts/gather.ts"),
+        "--run-dir",
+        runDirectory,
+      ],
+      { cwd: worktree, env: process.env, stdout: "pipe", stderr: "pipe" },
+    );
+    expect(gathered.exitCode, gathered.stderr.toString()).toBe(0);
+    expect(readFileSync(join(worktree, ".pr-writing", "body.md"), "utf8")).toBe(body);
+
+    // The refresh of the open MR, after the head result of one case moved to a new sha: one update, same rules.
+    const movedSha = "1234567".repeat(5).slice(0, 40);
+    writeResult(ids[0]!, "head", "pass", movedSha);
+    const refreshed = ark("merge-request", "open", run);
+    expect(refreshed.code, refreshed.err).toBe(0);
+    expect(created()).toHaveLength(1);
+    expect(edited()).toHaveLength(1);
+    const update = edited()[0]!.body!;
+    expect(update).not.toBe(body);
+    expectCollapsedBody(update, movedSha);
+  },
+  { timeout: 120_000 },
+);
 /**
  * A two-repo GitHub scenario with `app` after `core`. Every scenario origin is a local bare repo with the host in its
  * path, so `git fetch` and `git push` work offline.
