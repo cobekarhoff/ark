@@ -4,7 +4,7 @@ For a person or an agent that changes Ark's own code. [`AGENTS.md`](../../AGENTS
 
 ## Install
 
-Ark needs Bun 1.4.0 (the version of both CI jobs). On a Mac:
+Ark needs Bun 1.4.4 (the version of both CI jobs). On a Mac:
 
 ```sh
 bun install --frozen-lockfile

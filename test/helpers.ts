@@ -80,31 +80,35 @@ export function writeTicket(
 /** Per-command limit of the git and ark helpers; below the 60 s test timeout so a stalled command fails with its own message. */
 export const commandLimitMs = 45_000;
 
-function git(directory: string, ...args: string[]): void {
-  const result = Bun.spawnSync(["git", "-C", directory, ...args], { timeout: commandLimitMs });
+function git(directory: string, limitMs: number, ...args: string[]): void {
+  const result = Bun.spawnSync(["git", "-C", directory, ...args], { timeout: limitMs });
   const line = `git -C ${directory} ${args.join(" ")}`;
   if (result.exitedDueToTimeout)
-    throw new Error(`${line} timed out after ${commandLimitMs} ms: ${result.stderr.toString()}`);
+    throw new Error(`${line} timed out after ${limitMs} ms: ${result.stderr.toString()}`);
   if (result.exitCode !== 0) throw new Error(`${line} failed: ${result.stderr.toString()}`);
 }
 
 /** One built repo for each distinct file set in this process: repos with the same files share commit ids. */
 const repoTemplates = new Map<string, string>();
 
-export function tempGitRepo(files: Record<string, string> = { "README.md": "# test\n" }): string {
+/** `limitMs` bounds each git call that builds the template; a file under a shorter test timeout passes its own. */
+export function tempGitRepo(
+  files: Record<string, string> = { "README.md": "# test\n" },
+  limitMs = commandLimitMs,
+): string {
   const key = JSON.stringify(Object.entries(files));
   let template = repoTemplates.get(key);
   if (template === undefined) {
     template = mkdtempSync(join(tmpdir(), "ark-repo-template-"));
-    git(template, "init", "-q", "-b", "main");
-    git(template, "config", "user.name", "Ark Test");
-    git(template, "config", "user.email", "ark@example.com");
+    git(template, limitMs, "init", "-q", "-b", "main");
+    git(template, limitMs, "config", "user.name", "Ark Test");
+    git(template, limitMs, "config", "user.email", "ark@example.com");
     for (const [name, content] of Object.entries(files)) {
       mkdirSync(dirname(join(template, name)), { recursive: true });
       writeFileSync(join(template, name), content);
     }
-    git(template, "add", "-A");
-    git(template, "commit", "-q", "-m", "initial");
+    git(template, limitMs, "add", "-A");
+    git(template, limitMs, "commit", "-q", "-m", "initial");
     repoTemplates.set(key, template);
   }
   const directory = mkdtempSync(join(tmpdir(), "ark-repo-"));
@@ -208,36 +212,56 @@ export type StartedHub = {
   baseUrl: string;
 };
 
-const pages = new WeakMap<object, AbortController>();
+// The page's fetch promise stays here with its AbortController: Bun 1.4.3 and later close a dropped
+// Response when it is collected, which would end the page's `/events` stream and pause the hub.
+const pages = new WeakMap<object, { controller: AbortController; request: Promise<unknown> }>();
 
 /**
  * Starts `bun hub/main.ts --port 0` and resolves once it prints its address. The hub reads only
  * while a page is connected, so a page (an open `/events` stream) stays connected until `stopHub`.
+ * With `limitMs`, a hub that has not printed its address by then is killed and the call throws
+ * with the command line, the limit and the stderr read so far; without it the wait has no limit.
  */
-export async function startHub(): Promise<StartedHub> {
+export async function startHub(limitMs?: number): Promise<StartedHub> {
   const hub = Bun.spawn(["bun", join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
     env: process.env,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
   });
-  let output = "";
-  for await (const chunk of hub.stdout) {
-    output += new TextDecoder().decode(chunk);
-    const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
-    if (port) {
-      const baseUrl = `http://127.0.0.1:${port}`;
-      const page = new AbortController();
-      pages.set(hub, page);
-      fetch(`${baseUrl}/events`, { signal: page.signal }).catch(() => {});
-      return { process: hub, baseUrl };
+  let timedOut = false;
+  const timer =
+    limitMs === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true;
+          hub.kill("SIGKILL");
+        }, limitMs);
+  try {
+    let output = "";
+    for await (const chunk of hub.stdout) {
+      output += new TextDecoder().decode(chunk);
+      const port = output.match(/127\.0\.0\.1:(\d+)/)?.[1];
+      if (port) {
+        const baseUrl = `http://127.0.0.1:${port}`;
+        const controller = new AbortController();
+        const request = fetch(`${baseUrl}/events`, { signal: controller.signal }).catch(() => {});
+        pages.set(hub, { controller, request });
+        return { process: hub, baseUrl };
+      }
     }
+    if (timedOut)
+      throw new Error(
+        `bun hub/main.ts --port 0 timed out after ${limitMs} ms: ${await new Response(hub.stderr).text()}`,
+      );
+    throw new Error(`the hub exited before serving: ${output}`);
+  } finally {
+    clearTimeout(timer);
   }
-  throw new Error(`the hub exited before serving: ${output}`);
 }
 
 export async function stopHub(hub: { kill(): void; exited: Promise<number> }): Promise<void> {
-  pages.get(hub)?.abort();
+  pages.get(hub)?.controller.abort();
   hub.kill();
   await hub.exited;
 }
