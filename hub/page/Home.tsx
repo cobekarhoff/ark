@@ -6,6 +6,7 @@ import {
   dayOf,
   highestUsage,
   needsHuman,
+  chiefUnreadOf,
   nearLimit,
   percent,
   reviewQueue,
@@ -15,7 +16,9 @@ import {
   startsNext,
   type StartRow,
   type StartsNext,
+  type ChiefUnreadValue,
   type Stuck,
+  unreadWarnsAbove,
 } from "./derive.ts";
 import {
   Cost,
@@ -69,6 +72,48 @@ function Tile({
         <span className="tile-note">{note}</span>
       </span>
     </div>
+  );
+}
+
+/** The unread messages to Master Chief: the count, the age of the oldest, and a warning in words (and tone) past 15 min. */
+function ChiefUnreadTile({ unread }: { unread: ChiefUnreadValue }) {
+  if (unread === "unknown")
+    return <Tile tile="chief-unread" label="Chief unread" value="?" note="unknown" />;
+  if (unread === "none")
+    return <Tile tile="chief-unread" label="Chief unread" value="-" note="no Master Chief Run" />;
+  if ("unavailable" in unread)
+    return (
+      <Tile
+        tile="chief-unread"
+        label="Chief unread"
+        value="?"
+        note={<span title={unread.unavailable}>unavailable: inbox read failed</span>}
+      />
+    );
+  const { count, minutes } = unread;
+  if (minutes === null)
+    return <Tile tile="chief-unread" label="Chief unread" value={count} note="nothing unread" />;
+  const warns = minutes > unreadWarnsAbove;
+  return (
+    <Tile
+      tile="chief-unread"
+      label="Chief unread"
+      value={count}
+      tone={warns ? "warn" : undefined}
+      note={
+        <>
+          oldest <span className="nb">{minutes} min</span>
+          {warns ? (
+            <>
+              {" "}
+              <span className="why">
+                older than <span className="nb">{unreadWarnsAbove} min</span>
+              </span>
+            </>
+          ) : null}
+        </>
+      }
+    />
   );
 }
 
@@ -689,6 +734,7 @@ export function Home() {
           tone={stuck.length > 0 ? "warn" : undefined}
           note={stuck[0] ? stuck[0].run.ticket.id : "none stuck"}
         />
+        <ChiefUnreadTile unread={chiefUnreadOf(snapshot, age)} />
         <Tile
           tile="usage"
           label={top ? `${top.provider} ${top.window} limit` : "Usage limit"}

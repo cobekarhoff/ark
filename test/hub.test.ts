@@ -3900,7 +3900,12 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
   const fullReads = () =>
     readFileSync(join(state, "orca.log"), "utf8")
       .split("\n")
-      .filter((line) => line.startsWith("orchestration inbox") && !line.includes("--limit 200 "));
+      .filter(
+        (line) =>
+          line.startsWith("orchestration inbox") &&
+          !line.includes("--limit 200 ") &&
+          !line.includes("--terminal "),
+      );
 
   // A good read: below the limit, nothing stale, every field kept.
   const first = await conversationWhen<ProjectReply>(baseUrl, (reply) => !reply.stale);
