@@ -6,12 +6,14 @@ technique: equivalence classes, one defect per refusal, plus a one-repo boundary
 priority: high
 risk: a bad repos block passes `ark plan check`, so a run is built and tested before the failure shows, or a refusal omits the repo or edge and the run lead cannot fix it
 status: active
-changed_by: 2026-11-08-ARK-336-1
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
 
 Prove that `ark plan check` exits 1 for each of six defects in the `repos` block, names the repo and the edge as `<downstream> -> <upstream> (<kind>)` in each, and prints all problems when several occur.
+
+It keeps ARK-153-AC2 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 

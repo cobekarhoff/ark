@@ -6,7 +6,7 @@ technique: state transition (building to escalation)
 priority: medium
 risk: The refusal sends the run lead to `ark gate record` while the escalation gate is not open, so it is refused and the run lead loses a round trip
 status: active
-changed_by: 2026-11-07-ARK-334-1
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
@@ -14,6 +14,8 @@ changed_by: 2026-11-07-ARK-334-1
 Prove the refusal of a step start after the round budget is spent teaches the legal sequence in phase building (escalate, ask, record) and names `ark gate record` in phase escalation.
 
 Expected: When the round budget is spent, the refusal shall name the command that is legal in the current phase.
+
+It keeps ARK-152-AC4 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 

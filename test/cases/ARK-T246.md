@@ -13,6 +13,8 @@ changed_by: 2026-11-11-ARK-407-1
 
 Prove that `ark merge-request open` refuses when a repo head differs from the head recorded by the last `ark test`, names the repo, both heads and the run id, pushes and records nothing, and opens normally after `ark test` passes again.
 
+It also carries ARK-155-AC6 from a copy the ARK-386 campaign removed: a worktree head that moved after the test run is refused and names the repo.
+
 ## Preconditions
 
 - Real git; a temp bare `origin`, a run worktree on the run branch, and a fake `gh` that records its calls.

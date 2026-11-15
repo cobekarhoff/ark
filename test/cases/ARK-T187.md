@@ -23,23 +23,19 @@ Prove the admission of `ark test` (the CPU budget of ARK-390) also holds a suite
 
 1. Fake reading: 50 percent free, 2 GB swap. Run the real `ark test <run>`.
 2. Fake reading: exactly 20 percent free, 8 GB swap (at the limits). Run it.
-3. Fake reading: 19 percent free, 2 GB swap. Run it in the background; wait over three poll intervals; read its output; check the marker file.
-4. Rewrite the fake reading to 50 percent free; wait for the process to end.
-5. Fake reading: 50 percent free, 8.1 GB swap. Run in the background, wait over three poll intervals, read output and marker; then rewrite to 2 GB swap and wait for the end.
-6. Fake reading: 19 percent free and 8.1 GB swap together. Read the wait line.
-7. Fake reading fails (command exits 1 or file missing). Run it.
-8. Set `ark.yml` `test_min_free_memory_percent: 10` and `test_max_swap_gb: 12`; fake 15 percent free, 10 GB swap. Run it.
+3. Fake reading: 50 percent free, 8.04 GB swap (the swap prints as 8.0 GB). Run it in the background; wait over three poll intervals; read its output; check the marker file. Rewrite the fake reading to a healthy host and wait for the end.
+4. Fake reading: 19 percent free and 8.1 GB swap together. Run it in the background; wait over three poll intervals; read the wait line and the marker file. Rewrite the fake reading to a healthy host and wait for the end.
+5. Fake reading fails (command exits 1 or file missing). Run it.
+6. Set `ark.yml` `test_min_free_memory_percent: 10` and `test_max_swap_gb: 12`; fake 15 percent free, 10 GB swap. Run it.
 
 ## Expected results
 
 - Step 1: the suite starts at once, exit 0, marker written, no memory line.
 - Step 2: the suite starts at once (the limits are inclusive: wait only below the floor and above the ceiling).
-- Step 3: the marker is absent while waiting, and the output has exactly one line that names the memory reason and the numbers, for example `ark test: waiting for memory: free 19% is below the 20% floor`, however many polls pass.
-- Step 4: the suite starts after the recovery and the run exits 0 with the marker written.
-- Step 5: the marker is absent while waiting, with one line that names swap, for example `ark test: waiting for memory: swap 8.1 GB is above the 8 GB ceiling`; after recovery the suite starts, exit 0.
-- Step 6: one line carries the free-memory reason first, then the swap reason.
-- Step 7: the suite starts, exit 0, and the output has `memory: unchecked` once.
-- Step 8: the suite starts, exit 0: the configured limits replace the defaults.
+- Step 3: the marker is absent while waiting, with exactly one line that names swap and compares the raw reading, not the printed one (8.04 GB prints as `ark test: waiting for memory: swap 8.0 GB is above the 8 GB ceiling`), however many polls pass; after the recovery the suite starts and the run exits 0 with the marker written.
+- Step 4: the marker is absent while waiting, with exactly one line that carries the free-memory reason first, then the swap reason (`free 19% is below the 20% floor; swap 8.1 GB is above the 8 GB ceiling`); after the recovery the suite starts and the run exits 0 with the marker written.
+- Step 5: the suite starts, exit 0, and the output has `memory: unchecked` once.
+- Step 6: the suite starts, exit 0: the configured limits replace the defaults.
 - A suite that waits for memory does not mark itself `started` in its lock ticket while it waits (the budget section of `ark chief state` lists it as waiting).
 
 ## Screenshot checkpoints

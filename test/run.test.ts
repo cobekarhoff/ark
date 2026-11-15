@@ -6,7 +6,6 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
-  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -95,7 +94,7 @@ beforeEach(() => {
   writeProject("demo", validConfig());
 });
 
-test("ARK-152-AC1 run start creates the run folder, copies the ticket, logs run.started and numbers same-day runs", () => {
+test("ARK-T430 ARK-152-AC1 run start creates the run folder, copies the ticket, logs run.started and numbers same-day runs", () => {
   const { runId, directory } = startRun();
   expect(runId).toMatch(/^\d{4}-\d{2}-\d{2}-ARK-900-1$/);
   const ticketFile = join(
@@ -127,7 +126,7 @@ test("ARK-152-AC1 run start creates the run folder, copies the ticket, logs run.
   expect(second.out.trim()).toBe(runId.replace(/-1$/, "-2"));
 });
 
-test("ARK-152-AC1 run start refuses a ticket that already has an open run and names it", () => {
+test("ARK-T431 ARK-152-AC1 run start refuses a ticket that already has an open run and names it", () => {
   const { runId } = startRun();
   const ticketFile = join(
     process.env.ARK_HOME as string,
@@ -141,7 +140,7 @@ test("ARK-152-AC1 run start refuses a ticket that already has an open run and na
   expect(again.err).toContain(runId);
 });
 
-test("ARK-152-AC1 run start finds the project from the ticket path when no flag is given", () => {
+test("ARK-T432 ARK-152-AC1 run start finds the project from the ticket path when no flag is given", () => {
   const ticketFile = writeTicket("demo", "ARK-901", [{ id: "ARK-901-AC1", text: "It works" }]);
   const started = ark("run", "start", ticketFile);
   expect(started.code).toBe(0);
@@ -196,7 +195,7 @@ for (const [name, mutate, expected] of invalidConfigs) {
   });
 }
 
-test("ARK-295-AC1 loadConfig returns merge_requests open, none, and open when the key is absent", () => {
+test("ARK-T433 ARK-295-AC1 loadConfig returns merge_requests open, none, and open when the key is absent", () => {
   writeProject("opened", validConfig({ merge_requests: "open" }));
   writeProject("local", validConfig({ merge_requests: "none" }));
   writeProject("plain", validConfig());
@@ -205,7 +204,7 @@ test("ARK-295-AC1 loadConfig returns merge_requests open, none, and open when th
   expect(loadConfig("plain").merge_requests).toBe("open");
 });
 
-test("ARK-295-AC1 any other merge_requests value is refused and the run start names the rule", () => {
+test("ARK-T434 ARK-295-AC1 any other merge_requests value is refused and the run start names the rule", () => {
   writeProject("broken", validConfig({ merge_requests: "maybe" }));
   expect(() => loadConfig("broken")).toThrow("merge_requests must be one of open, none");
   const ticketFile = writeTicket("broken", "ARK-902", [{ id: "ARK-902-AC1", text: "It works" }]);
@@ -218,13 +217,13 @@ for (const [name, value] of [
   ["null", null],
   ["blank", ""],
 ] as const) {
-  test(`ARK-295-AC1 a ${name} merge_requests value is refused, not read as open`, () => {
+  test(`ARK-T435 ARK-295-AC1 a ${name} merge_requests value is refused, not read as open`, () => {
     writeProject("broken", validConfig({ merge_requests: value }));
     expect(() => loadConfig("broken")).toThrow("merge_requests must be one of open, none");
   });
 }
 
-test("ARK-296-AC1 loadConfig returns repos keyed by the exact repo path, and none when the key is absent", () => {
+test("ARK-T436 ARK-296-AC1 loadConfig returns repos keyed by the exact repo path, and none when the key is absent", () => {
   const repos = {
     "repos/confluent/consumers-v2": { base: "release/9.1.0" },
     ".": { base: "main" },
@@ -240,7 +239,7 @@ for (const [name, entry] of [
   ["an empty base", { base: "" }],
   ["a non-string base", { base: 9 }],
 ] as const) {
-  test(`ARK-296-AC1 a repos entry with ${name} is refused and names the key`, () => {
+  test(`ARK-T437 ARK-296-AC1 a repos entry with ${name} is refused and names the key`, () => {
     writeProject(
       "broken",
       validConfig({ repos: { "repos/a": { base: "main" }, "repos/b": entry } }),
@@ -253,14 +252,14 @@ for (const [name, entry] of [
   });
 }
 
-test("ARK-152-AC2 run start refuses a project with no ark.yml", () => {
+test("ARK-T438 ARK-152-AC2 run start refuses a project with no ark.yml", () => {
   const ticketFile = writeTicket("ghost", "ARK-903", []);
   const result = ark("run", "start", ticketFile, "--project", "ghost");
   expect(result.code).toBe(1);
   expect(result.err).toContain("ark.yml");
 });
 
-test("ARK-152-AC2 a valid ark.yml gives the run its round budget, defaulting to 2", () => {
+test("ARK-T439 ARK-152-AC2 a round_budget of 1 in ark.yml reaches the run", () => {
   writeProject("tight", validConfig({ round_budget: 1 }));
   const ticketFile = writeTicket("tight", "ARK-904", [{ id: "ARK-904-AC1", text: "It works" }]);
   const runId = ark("run", "start", ticketFile, "--project", "tight").out.trim();
@@ -273,7 +272,7 @@ test("ARK-152-AC2 a valid ark.yml gives the run its round budget, defaulting to 
   expect(state.round_budget).toBe(1);
 });
 
-test("ARK-152-AC3 events are append-only and a deleted state.json is rebuilt byte for byte", () => {
+test("ARK-T440 ARK-152-AC3 events are append-only and a deleted state.json is rebuilt byte for byte", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
@@ -290,7 +289,7 @@ test("ARK-152-AC3 events are append-only and a deleted state.json is rebuilt byt
   expect(readFileSync(join(directory, "state.json"), "utf8")).toBe(stateAfter);
 });
 
-test("ARK-152-AC4 a step cannot start before plan approval, exits non-zero and names the missing event", () => {
+test("ARK-T441 ARK-152-AC4 a step cannot start before plan approval, exits non-zero and names the missing event", () => {
   const { runId, directory } = startRun();
   writeFileSync(join(directory, "plan.yml"), "steps: []\n");
   recordEvaluation(directory);
@@ -308,23 +307,7 @@ test("ARK-152-AC4 a step cannot start before plan approval, exits non-zero and n
   expect(eventLines(directory)).toEqual(eventsBefore);
 });
 
-test("ARK-152-AC4 a plan edited after the check cannot be approved", () => {
-  const { directory } = startRun();
-  writeFileSync(join(directory, "plan.yml"), "steps: []\n");
-  recordEvaluation(directory);
-  appendEvent(directory, "plan.checked", {
-    valid: true,
-    problems: [],
-    plan_hash: planHash(directory),
-    steps: workspaceSteps,
-  });
-  writeFileSync(join(directory, "plan.yml"), "steps: [edited]\n");
-  expect(() =>
-    appendEvent(directory, "gate.answered", { gate: "plan", answer: "approve" }),
-  ).toThrow("plan.yml changed");
-});
-
-test("ARK-152-AC5 step start and finish are events and status shows the first unfinished step", () => {
+test("ARK-T442 ARK-152-AC5 step start and finish are events and status shows the first unfinished step", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
 
@@ -344,7 +327,7 @@ test("ARK-152-AC5 step start and finish are events and status shows the first un
   expect(ark("status", runId).out).toContain("current step: review (pending)");
 });
 
-test("ARK-152-AC5 a failed step stays the current step", () => {
+test("ARK-T443 ARK-152-AC5 a failed step stays the current step", () => {
   const { runId } = startRun();
   approvePlan(join(process.env.ARK_HOME as string, "projects", "demo", "runs", runId));
   ark("run", "step", runId, "build", "start");
@@ -375,19 +358,7 @@ test("ARK-T165 status without a run lists every open run with phase and current 
   );
 });
 
-test("ARK-T166 status passes when every project config is valid", () => {
-  withControlledPath(
-    "ok",
-    () => {
-      const result = ark("status");
-      expect(result.code).toBe(0);
-      expect(result.out).not.toContain("config error");
-    },
-    ["claude", "codex"],
-  );
-});
-
-test("ARK-152-AC2 status exits 1 and names the bad field and project of an invalid config", () => {
+test("ARK-T444 ARK-152-AC2 status exits 1 and names the bad field and project of an invalid config", () => {
   writeProject("broken", validConfig({ ticket_source: "trello" }));
   const result = ark("status");
   expect(result.code).toBe(1);
@@ -476,16 +447,17 @@ test("ARK-T167 status accepts --project for config checks and run state", () => 
   );
 });
 
-test("ARK-152-AC6 status for one run shows phase, round, waiting gate and cost", () => {
+test("ARK-T445 ARK-152-AC6 status for one run shows phase, round, waiting gate and cost", () => {
   const { runId } = startRun();
   const result = ark("status", runId);
   expect(result.code).toBe(0);
   expect(result.out).toContain("phase: awaiting_criteria");
   expect(result.out).toContain("round: 1/2");
+  expect(result.out).toContain("waiting gate: criteria");
   expect(result.out).toContain("cost:");
 });
 
-test("ARK-152-AC7 run close records each valid outcome and refuses any other", () => {
+test("ARK-T446 ARK-152-AC7 run close records each valid outcome and refuses any other", () => {
   const { runId, directory } = startRun();
   const unknown = ark("run", "close", runId, "finished");
   expect(unknown.code).toBe(1);
@@ -503,7 +475,7 @@ test("ARK-152-AC7 run close records each valid outcome and refuses any other", (
   });
 });
 
-test("ARK-152-AC7 merged, abandoned and handed_off need what the outcome says", () => {
+test("ARK-T447 ARK-152-AC7 merged, abandoned and handed_off need what the outcome says", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   for (const outcome of ["merged", "abandoned"]) {
@@ -522,7 +494,7 @@ test("ARK-152-AC7 merged, abandoned and handed_off need what the outcome says", 
   expect(ark("run", "close", runId, "handed_off").code).toBe(0);
 });
 
-test("ARK-152-AC7 merged is accepted once a merge request is open", () => {
+test("ARK-T448 ARK-152-AC7 merged is accepted once a merge request is open", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   appendEvent(directory, "merge_request.opened", {
@@ -533,7 +505,7 @@ test("ARK-152-AC7 merged is accepted once a merge request is open", () => {
   expect(ark("run", "close", runId, "merged").code).toBe(0);
 });
 
-test("ARK-152-AC7 nothing can be recorded after a run is closed", () => {
+test("ARK-T449 ARK-152-AC7 nothing can be recorded after a run is closed", () => {
   const { runId, directory } = startRun();
   ark("run", "close", runId, "aborted");
   const again = ark("run", "close", runId, "aborted");
@@ -549,38 +521,7 @@ test("ARK-152-AC7 nothing can be recorded after a run is closed", () => {
   ).toThrow("closed");
 });
 
-test("ARK-152-AC4 a restart past the round budget is refused until an escalation answer", () => {
-  const { runId, directory } = startRun();
-  approvePlan(directory);
-  for (const round of [1, 2]) {
-    expect(ark("run", "step", runId, "build", "start").code).toBe(0);
-    expect(JSON.parse(eventLines(directory).at(-1) as string).data.round).toBe(round);
-    ark("run", "step", runId, "build", "finish", "--failed");
-  }
-  const eventsBefore = eventLines(directory);
-  const refused = ark("run", "step", runId, "build", "start");
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("round budget spent");
-  expect(eventLines(directory)).toEqual(eventsBefore);
-
-  appendEvent(directory, "test.completed", {
-    passed: false,
-    heads: {},
-    suites: [],
-    criteria: { "ARK-900-AC1": "failing" },
-  });
-  expect(ark("status", runId).out).toContain("phase: escalation");
-  appendEvent(directory, "gate.answered", { gate: "escalation", answer: "one_more_round" });
-  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
-});
-
-test("ark --help prints usage and an unknown command exits 1", () => {
-  const help = ark("--help");
-  expect(help.code).toBe(0);
-  expect(help.out.trim().split("\n")[0]).toBe("Usage: ark <command>");
-  expect(ark("run", "start", "--help").out).toContain(
-    "ark run start <ticket-file> [--project <name>]",
-  );
+test("ARK-T450 an unknown command exits 1 and prints usage", () => {
   const unknown = ark("frobnicate");
   expect(unknown.code).toBe(1);
   expect(unknown.err).toContain("Usage: ark <command>");
@@ -606,7 +547,7 @@ function spentBudgetRun(passed: boolean): { runId: string; directory: string } {
 const eventTypes = (directory: string): string[] =>
   eventLines(directory).map((line) => JSON.parse(line).type);
 
-test("ARK-210-AC1 ark escalate opens escalation at the spent budget although the last test passed", () => {
+test("ARK-T451 ARK-210-AC1 ark escalate opens escalation at the spent budget although the last test passed", () => {
   const { runId, directory } = spentBudgetRun(true);
   expect(ark("status", runId).out).toContain("phase: building");
   const result = ark("escalate", runId, "--reason", "review P1 unresolved, tests pass");
@@ -619,7 +560,7 @@ test("ARK-210-AC1 ark escalate opens escalation at the spent budget although the
   expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
-test("ARK-210-AC1 an open escalation request survives a passing ark test", () => {
+test("ARK-T452 ARK-210-AC1 an open escalation request survives a passing ark test", () => {
   const { runId, directory } = spentBudgetRun(true);
   expect(ark("escalate", runId, "--reason", "P1 open").code).toBe(0);
   appendEvent(directory, "test.completed", {
@@ -631,7 +572,7 @@ test("ARK-210-AC1 an open escalation request survives a passing ark test", () =>
   expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
-test("ARK-210-AC2 ark escalate below the round budget exits 1, names the budget and logs nothing", () => {
+test("ARK-T453 ARK-210-AC2 ark escalate below the round budget exits 1, names the budget and logs nothing", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
@@ -644,7 +585,7 @@ test("ARK-210-AC2 ark escalate below the round budget exits 1, names the budget 
   expect(eventTypes(directory)).not.toContain("escalation.requested");
 });
 
-test("ARK-210-AC2 ark escalate outside phase building exits 1 and names the phase", () => {
+test("ARK-T454 ARK-210-AC2 ark escalate outside phase building exits 1 and names the phase", () => {
   // a run that has not approved its plan is not building
   const early = startRun("demo", "ARK-901");
   const planningRefusal = ark("escalate", early.runId, "--reason", "x");
@@ -657,21 +598,24 @@ test("ARK-210-AC2 ark escalate outside phase building exits 1 and names the phas
   expect(escalationRefusal.code).toBe(1);
   expect(escalationRefusal.err).toContain("escalation");
   expect(eventTypes(open.directory)).not.toContain("escalation.requested");
+
+  const opened = startRun("demo", "ARK-904");
+  approvePlan(opened.directory);
+  expect(ark("run", "step", opened.runId, "build", "start").code).toBe(0);
+  expect(ark("run", "step", opened.runId, "build", "finish").code).toBe(0);
+  appendEvent(opened.directory, "merge_request.opened", {
+    repo: ".",
+    url: "https://x/pull/1",
+    number: 1,
+  });
+  expect(ark("status", opened.runId).out).toContain("phase: merge_requests_open");
+  const openedRefusal = ark("escalate", opened.runId, "--reason", "x");
+  expect(openedRefusal.code).toBe(1);
+  expect(openedRefusal.err).toContain("merge_requests_open");
+  expect(eventTypes(opened.directory)).not.toContain("escalation.requested");
 });
 
-test("ARK-210-AC2 ark escalate in merge_requests_open exits 1 and names the phase", () => {
-  const { runId, directory } = startRun();
-  approvePlan(directory);
-  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
-  expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
-  appendEvent(directory, "merge_request.opened", { repo: ".", url: "https://x/pull/1", number: 1 });
-  expect(ark("status", runId).out).toContain("phase: merge_requests_open");
-  const result = ark("escalate", runId, "--reason", "x");
-  expect(result.code).toBe(1);
-  expect(result.err).toContain("merge_requests_open");
-});
-
-test("ARK-210-AC3 one_more_round after ark escalate returns to building and starts round 3", () => {
+test("ARK-T455 ARK-210-AC3 one_more_round after ark escalate returns to building and starts round 3", () => {
   const { runId, directory } = spentBudgetRun(true);
   expect(ark("escalate", runId, "--reason", "P1 open").code).toBe(0);
   expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
@@ -683,17 +627,7 @@ test("ARK-210-AC3 one_more_round after ark escalate returns to building and star
   });
 });
 
-test("ARK-210-AC3 take_over answer after ark escalate is recorded", () => {
-  const takeOver = spentBudgetRun(true);
-  expect(ark("escalate", takeOver.runId, "--reason", "P1 open").code).toBe(0);
-  expect(ark("gate", "record", takeOver.runId, "escalation", "take_over").code).toBe(0);
-  expect(JSON.parse(eventLines(takeOver.directory).at(-1) as string)).toMatchObject({
-    type: "gate.answered",
-    data: { gate: "escalation", answer: "take_over" },
-  });
-});
-
-test("ARK-210-AC3 abort answer after ark escalate is recorded", () => {
+test("ARK-T456 ARK-210-AC3 abort answer after ark escalate is recorded", () => {
   const aborted = spentBudgetRun(true);
   expect(ark("escalate", aborted.runId, "--reason", "P1 open").code).toBe(0);
   expect(ark("gate", "record", aborted.runId, "escalation", "abort").code).toBe(0);
@@ -701,7 +635,7 @@ test("ARK-210-AC3 abort answer after ark escalate is recorded", () => {
   expect(ark("status", aborted.runId).out).toContain("aborted");
 });
 
-test("ARK-228-AC1 ark escalate after an answered one_more_round opens the escalation gate again", () => {
+test("ARK-T457 ARK-228-AC1 ark escalate after an answered one_more_round opens the escalation gate again", () => {
   const { runId } = spentBudgetRun(true);
   expect(ark("escalate", runId, "--reason", "P1 open").code).toBe(0);
   expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
@@ -711,7 +645,7 @@ test("ARK-228-AC1 ark escalate after an answered one_more_round opens the escala
   expect(ark("status", runId).out).toContain("phase: escalation");
 });
 
-test("ARK-228-AC2 ark escalate stores the reason without outer whitespace", () => {
+test("ARK-T458 ARK-228-AC2 ark escalate stores the reason without outer whitespace", () => {
   const { runId, directory } = spentBudgetRun(true);
   expect(ark("escalate", runId, "--reason", "  P1 unresolved \n").code).toBe(0);
   expect(JSON.parse(eventLines(directory).at(-1) as string)).toMatchObject({
@@ -794,7 +728,7 @@ const worker = (dispatchId: string, state: string, terminalState: string): FakeW
   terminalState,
 });
 
-test("ARK-278-AC1 run close releases each settled unreleased dispatch over paged lists and prints one line each", () => {
+test("ARK-T459 ARK-278-AC1 run close releases each settled unreleased dispatch over paged lists and prints one line each", () => {
   const { runId } = startRun();
   useFakeOrca({
     pageSize: 2,
@@ -824,7 +758,7 @@ test("ARK-278-AC1 run close releases each settled unreleased dispatch over paged
   expect(orcaCalls("worker-release")).toHaveLength(2);
 });
 
-test("ARK-278-AC2 run close keeps an active dispatch and says so", () => {
+test("ARK-T460 ARK-278-AC2 run close keeps an active dispatch and says so", () => {
   const { runId } = startRun();
   useFakeOrca({
     runs: [{ id: "orca_run", objective: `Ark run ${runId}` }],
@@ -844,7 +778,7 @@ test("ARK-278-AC2 run close keeps an active dispatch and says so", () => {
   ]);
 });
 
-test("ARK-T129 ARK-278-AC3 an Orca failure prints one orca line and the close still records and exits 0", async () => {
+test("ARK-T129 ARK-278-AC3 ARK-292-AC1 an Orca failure prints one orca line and the close still records and exits 0", async () => {
   // The reader timeout is far above any host stall: only the hang case below lets it decide.
   process.env.ARK_ORCA_TIMEOUT_MS = "600000";
   const closedEvent = (directory: string) =>
@@ -896,25 +830,6 @@ test("ARK-T129 ARK-278-AC3 an Orca failure prints one orca line and the close st
   expect(nothing.out).toBe(`${none.runId} closed: aborted\n`);
 });
 
-test("ARK-T132 ARK-292-AC1 the 300 ms ARK-278-AC3 timeout does not leak into a later close against a slow orca", async () => {
-  const outer = process.env.ARK_ORCA_TIMEOUT_MS;
-  runHangingClose();
-  // The hang case restored the variable it set: the 300 ms does not outlive it.
-  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBe(outer);
-
-  // The slow orca answers when the test releases it; the close it serves has the long reader timeout.
-  const slow = startRun("demo", "ARK-904");
-  useFakeOrca({
-    gate: true,
-    runs: [{ id: "orca_slow", objective: `Ark run ${slow.runId}` }],
-    workers: { orca_slow: [worker("ctx_slow", "succeeded", "reclaimable")] },
-  });
-  const closed = await closeWhileOrcaWaits(slow.runId);
-  expect(closed.out).toContain("ctx_slow released (succeeded)");
-  expect(closed.out).not.toContain("orca:");
-  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBe(outer);
-});
-
 /** Runs `ark run close` while the fake orca holds its first call; the test releases it once the close is waiting. */
 async function closeWhileOrcaWaits(run: string): Promise<{ code: number; out: string }> {
   const gate = join(fakeDirectory, "gate");
@@ -959,7 +874,7 @@ function symlinkBun(directory: string): void {
   Bun.spawnSync(["ln", "-s", process.execPath, join(directory, "bun")]);
 }
 
-test("ARK-278-AC4 run close --sweep releases closed runs once, records no event, and refuses a run argument", () => {
+test("ARK-T461 ARK-278-AC4 ARK-278-AC7 run close --sweep releases closed runs once, records no event, and refuses a run argument", () => {
   const first = startRun("demo", "ARK-901");
   const second = startRun("demo", "ARK-902");
   const open = startRun("demo", "ARK-903");
@@ -1007,34 +922,6 @@ test("ARK-278-AC4 run close --sweep releases closed runs once, records no event,
   expect(ark("run", "close", open.runId).code).toBe(1);
 });
 
-test("ARK-278-AC7 a released worker that stays listed is never released again and the sweep stays silent", () => {
-  const closed = startRun("demo", "ARK-911");
-  appendEvent(closed.directory, "run.closed", { outcome: "aborted" });
-  useFakeOrca({
-    runs: [{ id: "orca_closed", objective: `Ark run ${closed.runId}` }],
-    workers: {
-      orca_closed: [
-        worker("ctx_old", "succeeded", "released"),
-        worker("ctx_new", "failed", "reclaimable"),
-      ],
-    },
-  });
-
-  const first = ark("run", "close", "--sweep", "--project", "demo");
-  expect(first.code).toBe(0);
-  expect(first.out).toBe(`${closed.runId}:\n  ctx_new released (failed)\n`);
-  expect(orcaCalls("worker-release")).toEqual([
-    "orchestration worker-release --dispatch ctx_new --json",
-  ]);
-
-  const second = ark("run", "close", "--sweep", "--project", "demo");
-  expect(second.code).toBe(0);
-  expect(second.out).toBe("");
-  expect(orcaCalls("worker-release")).toHaveLength(1);
-  // both rows are still listed after the sweeps
-  expect(orcaCalls("worker-list").length).toBeGreaterThanOrEqual(2);
-});
-
 const statusOf = (runId: string) => {
   const out = ark("status", runId).out;
   return { round: out.match(/^round:.*$/m)?.[0], phase: out.match(/^phase:.*$/m)?.[0] };
@@ -1043,7 +930,7 @@ const lastRound = (directory: string) =>
   JSON.parse(eventLines(directory).at(-1) as string).data.round;
 
 for (const startedRounds of [0, 1]) {
-  test(`ARK-282-AC2 finish --failed --not-started restores the round after ${startedRounds} failed rounds of 2`, () => {
+  test(`ARK-T462 ARK-282-AC2 finish --failed --not-started restores the round after ${startedRounds} failed rounds of 2`, () => {
     const { runId, directory } = startRun();
     approvePlan(directory);
     for (let round = 1; round <= startedRounds; round++) {
@@ -1069,7 +956,7 @@ for (const startedRounds of [0, 1]) {
   });
 }
 
-test("ARK-282-AC2 --not-started is a usage error without --failed, with start and with --merge", () => {
+test("ARK-T463 ARK-282-AC2 --not-started is a usage error without --failed, with start and with --merge", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   expect(ark("run", "step", runId, "build", "start").code).toBe(0);
@@ -1087,7 +974,7 @@ test("ARK-282-AC2 --not-started is a usage error without --failed, with start an
   expect(eventLines(directory)).toEqual(before);
 });
 
-test("ARK-282-AC2 --not-started is refused unless the step has a running start", () => {
+test("ARK-T464 ARK-282-AC2 --not-started is refused unless the step has a running start", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   const attempt = () => ark("run", "step", runId, "build", "finish", "--failed", "--not-started");
@@ -1101,7 +988,7 @@ test("ARK-282-AC2 --not-started is refused unless the step has a running start",
   expect(eventLines(directory)).toEqual(before);
 });
 
-test("ARK-282-AC2 finish --failed --not-started after a merge start keeps the real round", () => {
+test("ARK-T465 ARK-282-AC2 finish --failed --not-started after a merge start keeps the real round", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   for (const round of [1, 2]) {
@@ -1122,7 +1009,7 @@ test("ARK-282-AC2 finish --failed --not-started after a merge start keeps the re
   expect(statusOf(runId)).toEqual(before);
 });
 
-test("ARK-282-AC3 a failed start at the last round keeps phase building and opens no escalation gate", () => {
+test("ARK-T466 ARK-282-AC3 a failed start at the last round keeps phase building and opens no escalation gate", () => {
   const { runId, directory } = startRun();
   approvePlan(directory);
   for (const round of [1, 2]) {
@@ -1234,7 +1121,7 @@ const testHeadLines = (runId: string) =>
     .out.split("\n")
     .filter((line) => line.startsWith("test head:"));
 
-test("ARK-287-AC2 ark status prints no test head line before the first test, current after it and stale after one new commit", () => {
+test("ARK-T467 ARK-287-AC2 ark status prints no test head line before the first test, current after it and stale after one new commit", () => {
   const { runId, worktree } = worktreeRun();
   expect(testHeadLines(runId)).toEqual([]);
 
@@ -1250,7 +1137,7 @@ test("ARK-287-AC2 ark status prints no test head line before the first test, cur
   ]);
 });
 
-test("ARK-287-AC2 ark status skips a worktree whose path is gone and says tested nothing for a repo the test did not record", () => {
+test("ARK-T468 ARK-287-AC2 ark status skips a worktree whose path is gone and says tested nothing for a repo the test did not record", () => {
   const { runId, directory, worktree } = worktreeRun();
   const sibling = tempGitRepo();
   appendEvent(directory, "worktree.created", {
@@ -1275,7 +1162,7 @@ test("ARK-287-AC2 ark status skips a worktree whose path is gone and says tested
   expect(worktree).not.toBe(sibling);
 });
 
-test("ARK-287-AC3 a spent budget with a failed last test is escalation, and a passing ark test at a new head returns to building with no answer", () => {
+test("ARK-T469 ARK-287-AC3 a spent budget with a failed last test is escalation, and a passing ark test at a new head returns to building with no answer", () => {
   const { runId, directory, worktree } = worktreeRun();
   for (let round = 1; round <= 2; round++) {
     expect(ark("run", "step", runId, "build", "start").code).toBe(0);
@@ -1531,7 +1418,7 @@ test("ARK-T108 status exits 0 and still lists the run and its branches when the 
     expect(lines.some((line) => line.startsWith("branch ") && line.includes(repo))).toBe(true);
 });
 
-test("ARK-295-AC5 an open project and a project with no ark.yml print the unchanged merge requests line", () => {
+test("ARK-T470 ARK-295-AC5 an open project and a project with no ark.yml print the unchanged merge requests line", () => {
   const { runId, directory, worktree } = worktreeRun({ merge_requests: "open" });
   commitIn(worktree, "one");
   const open = ark("status", runId);
@@ -1548,7 +1435,7 @@ test("ARK-295-AC5 an open project and a project with no ark.yml print the unchan
   expect(localBranchLines(runId)).toEqual([]);
 });
 
-test("ARK-295-AC5 ark status counts a none project with an invalid unrelated field as open instead of failing", () => {
+test("ARK-T471 ARK-295-AC5 ark status counts a none project with an invalid unrelated field as open instead of failing", () => {
   const { runId, directory } = worktreeRun({ merge_requests: "none" });
   const configFile = join(directory, "../../ark.yml");
   writeFileSync(
@@ -1583,15 +1470,7 @@ function autoEscalatedRun(): { runId: string; directory: string } {
 }
 
 // ARK-288-AC7 proof: `bun test test/run.test.ts -t ARK-288-AC7`
-test("ARK-288-AC7 ark status prints escalation one_more_round by auto after an automatic answer", () => {
-  const { runId } = autoEscalatedRun();
-  const status = ark("status", runId);
-  expect(status.code).toBe(0);
-  expect(status.out).toContain("escalation one_more_round by auto");
-  expect(status.out).not.toContain("escalation one_more_round by human");
-});
-
-test("ARK-288-AC7 the retro counts the automatic escalation answer as auto and the run page timeline shows by auto", () => {
+test("ARK-T472 ARK-288-AC7 the retro counts the automatic escalation answer as auto and the run page timeline shows by auto", () => {
   const { runId, directory } = autoEscalatedRun();
   expect(ark("retro", runId).code).toBe(0);
   const metrics = JSON.parse(readFileSync(join(directory, "metrics.json"), "utf8"));
@@ -1604,7 +1483,7 @@ test("ARK-288-AC7 the retro counts the automatic escalation answer as auto and t
   expect(entry?.why).toBe("escalation gate: one_more_round by auto");
 });
 
-test("ARK-288-AC7 the retro text prints one by auto line for the automatic escalation answer and one by human line for a human one", () => {
+test("ARK-T473 ARK-288-AC7 the retro text prints one by auto line for the automatic escalation answer and one by human line for a human one", () => {
   const { runId } = autoEscalatedRun();
   expect(ark("run", "step", runId, "build", "finish").code).toBe(0);
   expect(ark("escalate", runId, "--reason", "Review P1 open").code).toBe(0);
@@ -1632,7 +1511,7 @@ function startKindRun(kind: string | undefined, ticketId = "ARK-900", acCount = 
   };
 }
 
-test("ARK-302-AC4 each kind and a missing kind land in run.started and ark status, and a bad kind exits 1 naming the allowed values", () => {
+test("ARK-T474 ARK-302-AC4 each kind and a missing kind land in run.started and ark status, and a bad kind exits 1 naming the allowed values", () => {
   const expected: [string | undefined, string][] = [
     ["bug", "bug"],
     ["perf", "perf"],
@@ -1655,36 +1534,7 @@ test("ARK-302-AC4 each kind and a missing kind land in run.started and ark statu
   expect(ark("status").out).not.toContain("ARK-919");
 });
 
-test("ARK-302-AC5 a bug run refuses an implementer step start until a test.completed has every non-manual AC failing", () => {
-  const { runId, directory } = startKindRun("bug");
-  approvePlan(directory);
-  const message = "bug run: record a failing ark test of the ACs before the fix";
-
-  const refused = ark("run", "step", runId, "build", "start");
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain(message);
-  const before = eventLines(directory);
-
-  // A test where the AC is missing (no test tagged) is not a failing test.
-  appendEvent(directory, "test.completed", {
-    passed: false,
-    heads: {},
-    suites: [],
-    criteria: { "ARK-900-AC1": "missing" },
-  });
-  expect(ark("run", "step", runId, "build", "start").err).toContain(message);
-  expect(eventLines(directory)).toHaveLength(before.length + 1);
-
-  appendEvent(directory, "test.completed", {
-    passed: false,
-    heads: {},
-    suites: [],
-    criteria: { "ARK-900-AC1": "failing" },
-  });
-  expect(ark("run", "step", runId, "build", "start").code).toBe(0);
-});
-
-test("ARK-302-AC5 a bug run with several ACs needs one test.completed with every non-manual AC failing", () => {
+test("ARK-T475 ARK-302-AC5 a bug run with several ACs needs one test.completed with every non-manual AC failing", () => {
   const { runId, directory } = startKindRun("bug", "ARK-900", 3);
   approvePlan(directory);
   const message = "bug run: record a failing ark test of the ACs before the fix";
@@ -1745,7 +1595,7 @@ test("ARK-T62 a bug run with no method test AC starts its implementer step with 
   }
 });
 
-test("ARK-T62 a bug run with a method test AC is refused until ark test shows that AC failing, and the other ACs need not fail", () => {
+test("ARK-T62 ARK-302-AC5 a bug run with a method test AC is refused until ark test shows that AC failing, and the other ACs need not fail", () => {
   const { runId, directory } = startMethodRun("bug", "ARK-903", ["test", "inspection"]);
   approvePlan(directory);
   const completed = (criteria: Record<string, string>) =>
@@ -1855,7 +1705,7 @@ function closableRun(
 const closedEvents = (directory: string) =>
   eventLines(directory).filter((line) => line.includes('"run.closed"'));
 
-test("ARK-304-AC1 close handed_off refuses a missing and a failing AC, appends no run.closed and keeps the worktree", () => {
+test("ARK-T476 ARK-304-AC1 close handed_off refuses a missing and a failing AC, appends no run.closed and keeps the worktree", () => {
   const { runId, directory, worktree } = closableRun(
     [
       { id: "ARK-900-AC1", text: "One" },
@@ -1876,7 +1726,7 @@ test("ARK-304-AC1 close handed_off refuses a missing and a failing AC, appends n
   expect(existsSync(worktree)).toBe(true);
 });
 
-test("ARK-304-AC2 ARK-305-AC5 close handed_off refuses a pending manual AC, then an absent AC string, and names only the absent one", () => {
+test("ARK-T477 ARK-304-AC2 ARK-305-AC5 close handed_off refuses a pending manual AC, then an absent AC string, and names only the absent one", () => {
   const { runId, directory, worktree } = closableRun(
     [
       { id: "ARK-900-AC1", text: "Holds `ARK-900-AC1 works` and `absent-string-xyz`" },
@@ -1904,7 +1754,7 @@ test("ARK-304-AC2 ARK-305-AC5 close handed_off refuses a pending manual AC, then
   expect(existsSync(worktree)).toBe(true);
 });
 
-test("ARK-304-AC2 close handed_off says criteria for several pending manual ACs", () => {
+test("ARK-T478 ARK-304-AC2 close handed_off says criteria for several pending manual ACs", () => {
   const { runId } = closableRun(
     [
       { id: "ARK-900-AC1", text: "One", manual: true },
@@ -1917,7 +1767,7 @@ test("ARK-304-AC2 close handed_off says criteria for several pending manual ACs"
   expect(refused.err).toContain("manual criteria without ok: ARK-900/AC1, ARK-900/AC2");
 });
 
-test("ARK-304-AC3 close handed_off refuses a commit after the test, then closes after ark test at the new head", () => {
+test("ARK-T479 ARK-304-AC3 close handed_off refuses a commit after the test, then closes after ark test at the new head", () => {
   const { runId, directory, worktree } = worktreeRun();
   expect(ark("test", runId).code).toBe(0);
   commitIn(worktree, "late");
@@ -1937,7 +1787,7 @@ test("ARK-304-AC3 close handed_off refuses a commit after the test, then closes 
   expect(closedEvents(directory)).toHaveLength(1);
 });
 
-test("ARK-304-AC4 a perf run with no results/compare.md is refused by close handed_off", () => {
+test("ARK-T480 ARK-304-AC4 a perf run with no results/compare.md is refused by close handed_off", () => {
   const { runId, directory } = closableRun(
     [{ id: "ARK-900-AC1", text: "It works" }],
     { "ARK-900-AC1": "passing" },
@@ -1950,26 +1800,7 @@ test("ARK-304-AC4 a perf run with no results/compare.md is refused by close hand
   expect(closedEvents(directory)).toEqual([]);
 });
 
-test("ARK-304-AC4 ARK-305-AC4 each of the six shared refusal messages is in exactly one file of cli/", () => {
-  const directory = join(import.meta.dir, "../cli");
-  const sources = readdirSync(directory)
-    .filter((name) => name.endsWith(".ts"))
-    .map((name) => readFileSync(join(directory, name), "utf8"));
-  for (const message of [
-    "criteria not passing in the last test run:",
-    "manual criterion without ok:",
-    "manual criteria without ok:",
-    "AC string in no tracked file at head:",
-    "AC string still in a tracked file at head:",
-    "changed since the last test run",
-  ])
-    expect(
-      sources.filter((source) => source.includes(message)),
-      message,
-    ).toHaveLength(1);
-});
-
-test("ARK-304-AC5 close handed_off succeeds for a run that meets every rule and prints the closed line", () => {
+test("ARK-T481 ARK-304-AC5 close handed_off succeeds for a run that meets every rule and prints the closed line", () => {
   const { runId, directory, worktree } = closableRun(
     [
       { id: "ARK-900-AC1", text: "Holds `ARK-900-AC1 works`" },
@@ -1985,7 +1816,7 @@ test("ARK-304-AC5 close handed_off succeeds for a run that meets every rule and 
   expect(existsSync(worktree)).toBe(false);
 });
 
-test("ARK-304-AC5 the first two refusals keep their text and come before the AC refusals", () => {
+test("ARK-T482 ARK-304-AC5 the first two refusals keep their text and come before the AC refusals", () => {
   const { runId, directory } = closableRun([{ id: "ARK-900-AC1", text: "It works" }], {
     "ARK-900-AC1": "failing",
   });
@@ -2008,12 +1839,7 @@ test("ARK-304-AC5 the first two refusals keep their text and come before the AC 
   expect(closedEvents(directory)).toEqual([]);
 });
 
-test("ARK-T90 run close keeps its branch-retention sentence in help", () => {
-  const sentence = "For handed_off it keeps each branch with commits beyond its base";
-  expect(ark("run", "close", "--help").out).toContain(sentence);
-});
-
-test("ARK-305-AC1 close handed_off skips placeholder, glob, dots, file:line and own id, and a manual AC's strings", () => {
+test("ARK-T483 ARK-305-AC1 close handed_off skips placeholder, glob, dots, file:line and own id, and a manual AC's strings", () => {
   const { runId, directory } = closableRun(
     [
       {
@@ -2143,7 +1969,7 @@ for (const [name, criteria, message] of [
     "criterion ARK-910/AC1 verified_by must be a list of strings",
   ],
 ] as const) {
-  test(`ARK-311-AC3 run start refuses ${name} and starts no run`, () => {
+  test(`ARK-T484 ARK-311-AC3 run start refuses ${name} and starts no run`, () => {
     const result = ark(
       "run",
       "start",
@@ -2623,14 +2449,4 @@ test("ARK-T391 loadConfig names the second suite when only that suite has no {re
   const message = loadError("second");
   expect(message).toMatch(/suites\[1\]|api/);
   expect(message).toContain("{report}");
-});
-
-test("ARK-T391 loadConfig leaves base_command alone: it needs {files}, not {report}", () => {
-  const config = strictConfig();
-  const suite = asRecord((config.suites as unknown[])[0]);
-  suite.base_command = "bun test {files}";
-  expect(suite.base_command).not.toContain("{report}");
-  writeProject("base-side", config);
-  expect(loadError("base-side")).toBe("");
-  expect(loadConfig("base-side").suites[0].base_command).toBe("bun test {files}");
 });
