@@ -6,7 +6,7 @@ technique: state transition over run phases (building, escalation, merge_request
 priority: high
 risk: a lead rewrites the proof list of a run whose MR is already open or merged, so the MR evidence and the ticket disagree; or the new form skips a refusal that the text form has
 status: active
-changed_by: 2026-11-10-ARK-361-1
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
@@ -14,6 +14,8 @@ changed_by: 2026-11-10-ARK-361-1
 Prove that the new form has the same phase, criterion and reason refusals as the text form, before ticket.md is touched. Serves ARK-361/AC2.
 
 Expected: If the run is in merge_requests_open or closed, then the system shall refuse the `--verified-by` amend, name the phase, and leave ticket.md and the event log unchanged.
+
+It keeps ARK-308-AC1 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 

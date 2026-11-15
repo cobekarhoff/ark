@@ -5,8 +5,9 @@ level: integration
 technique: "state transition (missing mockup file, then present mockup file)"
 priority: medium
 risk: "a card links a mockup file that is not in the run folder and the strategy is recorded anyway, so the human reviews a dead link"
-status: active
-changed_by: 2026-11-10-ARK-409-1
+status: retired
+retired_reason: "the only test repeated the Mockup-link-is-not-a-file refusal that ARK-T422 proves (strategy.ts 127-139, a check that does not depend on the surface); ARK-T422 is the keeper"
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective

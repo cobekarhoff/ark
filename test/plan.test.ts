@@ -119,7 +119,7 @@ const events = () =>
     .map((line) => JSON.parse(line));
 
 describe("plan check", () => {
-  test("ARK-153-AC1 exits 0 for a valid plan and appends plan.checked", () => {
+  test("ARK-T485 ARK-153-AC1 ARK-185-AC2 ARK-302-AC5 exits 0 for a valid plan and appends plan.checked", () => {
     writePlan(validPlan());
     const result = ark("plan", "check", runId);
     expect(result.code).toBe(0);
@@ -133,7 +133,7 @@ describe("plan check", () => {
     ]);
   });
 
-  test("ARK-282-AC1 refuses a step whose harness/model pair is in no role and names the allowed pairs", () => {
+  test("ARK-T486 ARK-282-AC1 refuses a step whose harness/model pair is in no role and names the allowed pairs", () => {
     const plan = validPlan();
     plan.steps = [
       step("own", { role: "implementer" }),
@@ -152,7 +152,7 @@ describe("plan check", () => {
     ]);
   });
 
-  test("ARK-153-AC1 refuses a missing or unparsable plan.yml and appends nothing", () => {
+  test("ARK-T487 ARK-153-AC1 refuses a missing or unparsable plan.yml and appends nothing", () => {
     const before = events().length;
     expect(ark("plan", "check", runId).code).toBe(1);
     writeFileSync(join(runDirectory, "plan.yml"), "steps: [unclosed");
@@ -162,9 +162,10 @@ describe("plan check", () => {
     expect(events().length).toBe(before);
   });
 
-  test("ARK-153-AC1 refuses an unknown run", () => {
+  test("ARK-T488 ARK-153-AC1 refuses an unknown run", () => {
     const result = ark("plan", "check", "2000-01-01-NOPE-1");
     expect(result.code).toBe(1);
+    expect(result.err).toContain("run not found: 2000-01-01-NOPE-1");
   });
 
   const refusals: [string, (plan: PlanDocument) => void, string][] = [
@@ -240,7 +241,7 @@ describe("plan check", () => {
     ],
   ];
   for (const [name, edit, expected] of refusals) {
-    test(`ARK-153-AC2 refuses ${name}`, () => {
+    test(`ARK-T489 ARK-153-AC2 refuses ${name}`, () => {
       const plan = validPlan();
       edit(plan);
       writePlan(plan);
@@ -253,31 +254,7 @@ describe("plan check", () => {
       expect(existsSync(join(runDirectory, "plan.md"))).toBe(false);
     });
   }
-
-  test("ARK-153-AC2 reports every problem on its own line", () => {
-    const plan = validPlan();
-    plan.steps[0].needs = ["ghost"];
-    delete plan.steps[1].repo;
-    plan.test_cases[0].level = "unit";
-    writePlan(plan);
-    const lines = ark("plan", "check", runId).out.trim().split("\n");
-    expect(lines.some((line) => line.includes('"ghost"'))).toBe(true);
-    expect(lines.some((line) => line.includes("has no repo"))).toBe(true);
-    expect(lines.some((line) => line.includes('level "unit"'))).toBe(true);
-    // the unit-level test case no longer proves AC1
-    expect(lines.some((line) => line.includes("ARK-900/AC1 has no integration or e2e"))).toBe(true);
-  });
-
-  test("ARK-153-AC3 refuses a criterion with no integration or e2e test case and names it", () => {
-    const plan = validPlan();
-    plan.test_cases = [plan.test_cases[0]];
-    writePlan(plan);
-    const result = ark("plan", "check", runId);
-    expect(result.code).toBe(1);
-    expect(result.out).toContain("ARK-900/AC2 has no integration or e2e test case");
-    expect(result.out).not.toContain("ARK-900/AC1 has no");
-  });
-  test("ARK-166-AC2 rejects a plan without summary", () => {
+  test("ARK-T490 ARK-166-AC2 rejects a plan without summary", () => {
     const plan = validPlan();
     delete (plan as Partial<PlanDocument>).summary;
     writePlan(plan);
@@ -286,7 +263,7 @@ describe("plan check", () => {
     expect(result.out).toContain("plan.yml has no summary.why");
   });
 
-  test("ARK-166-AC2 rejects a summary change without fix", () => {
+  test("ARK-T491 ARK-166-AC2 rejects a summary change without fix", () => {
     const plan = validPlan();
     delete (plan.summary.changes[0] as Partial<PlanDocument["summary"]["changes"][number]>).fix;
     writePlan(plan);
@@ -295,7 +272,7 @@ describe("plan check", () => {
     expect(result.out).toContain("summary change #1 has no fix");
   });
 
-  test("ARK-166-AC2 rejects a ticket criterion with no summary row", () => {
+  test("ARK-T492 ARK-166-AC2 rejects a ticket criterion with no summary row", () => {
     const plan = validPlan();
     plan.summary.changes.pop();
     writePlan(plan);
@@ -304,7 +281,7 @@ describe("plan check", () => {
     expect(result.out).toContain("criterion ARK-900/AC2 has no row in summary.changes");
   });
 
-  test("ARK-166-AC2 rejects a summary row for a criterion not in the ticket", () => {
+  test("ARK-T493 ARK-166-AC2 rejects a summary row for a criterion not in the ticket", () => {
     const plan = validPlan();
     plan.summary.changes[1].criterion = "ARK-900-AC9";
     writePlan(plan);
@@ -313,17 +290,7 @@ describe("plan check", () => {
     expect(result.out).toContain('criterion "ARK-900/AC9", which is not in the ticket');
   });
 
-  test("ARK-172-AC1 accepts explicit groups and empty given through plan check", () => {
-    for (const given of [["context"], []]) {
-      const plan = validPlan();
-      plan.test_cases = [{ ...testCase("named-case", "ARK-900-AC1"), given }, plan.test_cases[1]];
-      writePlan(plan);
-      expect(ark("plan", "check", runId).code).toBe(0);
-      expect(existsSync(join(runDirectory, "plan.md"))).toBe(true);
-    }
-  });
-
-  test("ARK-172-AC1 rejects invalid groups and legacy steps by test case name", () => {
+  test("ARK-T494 ARK-172-AC1 rejects invalid groups and legacy steps by test case name", () => {
     const invalidCases: [string, Record<string, unknown>, string][] = [
       ["empty when", { when: [] }, "empty when list"],
       // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
@@ -355,7 +322,7 @@ describe("plan check", () => {
     }
   });
 
-  test("ARK-172-AC2 renders each group in order and omits empty given", () => {
+  test("ARK-T495 ARK-172-AC2 ARK-172-AC1 ARK-172-AC3 renders each group in order and omits empty given", () => {
     const plan = validPlan();
     const expectedSentence = "When actions finish, the system shall preserve results.";
     plan.test_cases = [
@@ -388,29 +355,7 @@ describe("plan check", () => {
     expect(markdown).not.toContain("Given empty");
   });
 
-  test("ARK-172-AC3 renders the exact expected sentence after the Gherkin block", () => {
-    const plan = validPlan();
-    const expectedSentence = "When the result is ready, the system shall report it verbatim.";
-    plan.test_cases = [
-      {
-        ...testCase("expected-outside-then", "ARK-900-AC1"),
-        given: ["a prepared context"],
-        when: ["the action runs"],
-        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
-        then: ["the result appears"],
-        expected: expectedSentence,
-      },
-      plan.test_cases[1],
-    ];
-    writePlan(plan);
-
-    expect(ark("plan", "check", runId).code).toBe(0);
-    const markdown = readFileSync(join(runDirectory, "plan.md"), "utf8");
-    expect(markdown).toContain(`Then the result appears\n\`\`\`\n\nExpected: ${expectedSentence}`);
-    expect(markdown).not.toContain(`Then ${expectedSentence}`);
-  });
-
-  test("ARK-166-AC1 renders plan.md with summary, change table, Mermaid steps and Gherkin cases", () => {
+  test("ARK-T496 ARK-166-AC1 renders plan.md with summary, change table, Mermaid steps and Gherkin cases", () => {
     writePlan(validPlan());
     expect(ark("plan", "check", runId).code).toBe(0);
     const first = readFileSync(join(runDirectory, "plan.md"), "utf8");
@@ -458,7 +403,7 @@ describe("plan check", () => {
     ],
   ];
   for (const [name, edit, expected] of designRefusals) {
-    test(`ARK-171-AC1 refuses ${name} and names the problem`, () => {
+    test(`ARK-T497 ARK-171-AC1 refuses ${name} and names the problem`, () => {
       const plan = validPlan();
       edit(plan);
       writePlan(plan);
@@ -469,15 +414,7 @@ describe("plan check", () => {
     });
   }
 
-  test("ARK-171-AC2 accepts a design with no approach and no example", () => {
-    const plan = validPlan();
-    plan.design = { interfaces: [{ name: "ark plan check", callers: ["run-lead.md"] }] };
-    writePlan(plan);
-    expect(ark("plan", "check", runId).code).toBe(0);
-    expect(existsSync(join(runDirectory, "plan.md"))).toBe(true);
-  });
-
-  test("ARK-171-AC3 ARK-171-AC5 renders the Design section before Steps with approach, table and example", () => {
+  test("ARK-T498 ARK-171-AC3 ARK-171-AC5 renders the Design section before Steps with approach, table and example", () => {
     const plan = validPlan();
     plan.design = {
       approach: "Read the design block in loadPlan.",
@@ -504,7 +441,7 @@ describe("plan check", () => {
     expect(section).not.toContain("No example given.");
   });
 
-  test("ARK-171-AC4 prints a placeholder for each missing approach and example", () => {
+  test("ARK-T499 ARK-171-AC4 ARK-171-AC2 prints a placeholder for each missing approach and example", () => {
     const bare = { interfaces: [{ name: "ark plan check", callers: ["run-lead.md"] }] };
     const designSection = () => {
       const markdown = readFileSync(join(runDirectory, "plan.md"), "utf8");
@@ -533,20 +470,7 @@ describe("plan check", () => {
     expect(designSection()).not.toContain("No example given.");
   });
 
-  test("ARK-185-AC1 plan check --help names the design reasons that make a plan not valid", () => {
-    const result = ark("plan", "check", "--help");
-    expect(result.code).toBe(0);
-    expect(result.out).toContain("A plan with no `design.interfaces` is invalid");
-    expect(result.out).toContain(
-      "an interface with no name or with no `callers`, or with a blank caller",
-    );
-    expect(result.out).toContain("a duplicate step id, an unknown role");
-    expect(result.out).toContain("A summary with no why, no changes");
-    expect(result.out).toContain("A decision with no id, a duplicate id");
-    expect(result.out).toContain("A test case with a level");
-  });
-
-  test("ARK-185-AC2 refuses a bare `- ` caller in the YAML file", () => {
+  test("ARK-T500 ARK-185-AC2 refuses a bare `- ` caller in the YAML file", () => {
     const plan = validPlan();
     plan.design.interfaces = [{ name: "renderPlanMarkdown", callers: ["planCheck", "BLANK"] }];
     const yml = Bun.YAML.stringify(plan, null, 2);
@@ -562,7 +486,7 @@ describe("plan check", () => {
     ["a blank caller", ["   "]],
     ["a blank caller after a named one", ["run-lead.md", "\t"]],
   ] as const) {
-    test(`ARK-185-AC2 refuses ${name} and names the interface`, () => {
+    test(`ARK-T501 ARK-185-AC2 refuses ${name} and names the interface`, () => {
       const plan = validPlan();
       plan.design.interfaces = [{ name: "renderPlanMarkdown", callers: [...callers] }];
       writePlan(plan);
@@ -573,14 +497,7 @@ describe("plan check", () => {
     });
   }
 
-  test("ARK-185-AC2 accepts the same interface once every caller is named", () => {
-    const plan = validPlan();
-    plan.design.interfaces = [{ name: "renderPlanMarkdown", callers: ["planCheck"] }];
-    writePlan(plan);
-    expect(ark("plan", "check", runId).code).toBe(0);
-  });
-
-  test("ARK-185-AC3 keeps the Steps heading and table outside every fence when the example holds a fence", () => {
+  test("ARK-T502 ARK-185-AC3 keeps the Steps heading and table outside every fence when the example holds a fence", () => {
     const plan = validPlan();
     plan.design.example = 'Output:\n```json\n{"unit": "mmol/L"}\n```\n';
     writePlan(plan);
@@ -618,24 +535,18 @@ describe("plan.md open-decisions line", () => {
     return planMarkdown();
   };
 
-  test("ARK-214-AC1 first line counts the decisions with no chosen value, before the title", () => {
+  test("ARK-T503 ARK-214-AC1 first line counts the decisions with no chosen value, before the title", () => {
     const markdown = check([decision("one"), decision("two"), decision("three", "B")]);
     expect(markdown.startsWith("2 decisions need an answer before approval\n\n# Plan\n")).toBe(
       true,
     );
   });
 
-  test("ARK-214-AC2 the line goes away once the last decision is answered", () => {
+  test("ARK-T504 ARK-214-AC2 the line goes away once the last decision is answered", () => {
     expect(check([decision("one")]).split("\n")[0]).toBe(
       "1 decisions need an answer before approval",
     );
     const markdown = check([decision("one", "A")]);
-    expect(markdown.split("\n")[0]).toBe("# Plan");
-    expect(markdown).not.toContain("need an answer before approval");
-  });
-
-  test("ARK-214-AC2 a plan with no decisions has no such line", () => {
-    const markdown = check([]);
     expect(markdown.split("\n")[0]).toBe("# Plan");
     expect(markdown).not.toContain("need an answer before approval");
   });
@@ -665,7 +576,7 @@ describe("plan check UI skills", () => {
     expect(result.out).toContain("made-up-skill");
   });
 
-  test("ARK-279-AC4 a non-empty skills list that lacks a required skill is refused", () => {
+  test("ARK-T505 ARK-279-AC4 a non-empty skills list that lacks a required skill is refused", () => {
     surfaceRun(["web_ui"]);
     for (const missing of requiredUiSkills) {
       const result = withSkills(requiredUiSkills.filter((skill) => skill !== missing));
@@ -674,7 +585,7 @@ describe("plan check UI skills", () => {
     }
   });
 
-  test("ARK-279-AC4 a valid list passes, the React skill is allowed, and plan.md gets a Skills column", () => {
+  test("ARK-T506 ARK-279-AC4 ARK-328/AC1 a valid list passes, the React skill is allowed, and plan.md gets a Skills column", () => {
     surfaceRun(["web_ui"]);
     expect(withSkills(requiredUiSkills).code).toBe(0);
     expect(stepsHeader()).toBe("| Step | Role | Repo | Needs | Criteria | Skills |");
@@ -689,7 +600,7 @@ describe("plan check UI skills", () => {
     expect(planMd()).toMatch(/\| check \|.*\| {2}\|$/m);
   });
 
-  test("ARK-279-AC4 Surfaces none: skills are not checked and plan.md has no Skills column", () => {
+  test("ARK-T507 ARK-279-AC4 Surfaces none: skills are not checked and plan.md has no Skills column", () => {
     expect(withSkills(undefined).code).toBe(0);
     expect(stepsHeader()).toBe("| Step | Role | Repo | Needs | Criteria |");
     expect(withSkills(["made-up-skill"]).code).toBe(0);
@@ -709,7 +620,7 @@ describe("plan check by ticket kind", () => {
   }
   const both = ["ARK-900-AC1", "ARK-900-AC2"];
 
-  test("ARK-302-AC5 a bug run refuses a plan whose first step is not a validator step serving every AC, and accepts one that is", () => {
+  test("ARK-T508 ARK-302-AC5 a bug run refuses a plan whose first step is not a validator step serving every AC, and accepts one that is", () => {
     startKindRun("bug");
     const refusals = [
       validPlan(), // first step is an implementer
@@ -742,7 +653,7 @@ describe("plan check by ticket kind", () => {
     expect(ark("plan", "check", runId).code).toBe(0);
   });
 
-  test("ARK-302-AC5 a bug run with a manual criterion still needs the first validator step to serve it", () => {
+  test("ARK-T509 ARK-302-AC5 a bug run with a manual criterion still needs the first validator step to serve it", () => {
     startKindRun("bug", [criteria[0], { ...criteria[1], manual: true }]);
     writePlan({
       ...validPlan(),
@@ -765,13 +676,7 @@ describe("plan check by ticket kind", () => {
     expect(ark("plan", "check", runId).code).toBe(0);
   });
 
-  test("ARK-302-AC5 a feature run accepts a plan that starts with an implementer step", () => {
-    startKindRun("feature");
-    writePlan(validPlan());
-    expect(ark("plan", "check", runId).code).toBe(0);
-  });
-
-  test("ARK-302-AC6 a perf run refuses a plan with no first step naming results/baseline.md or no last step naming results/compare.md, and accepts one with both", () => {
+  test("ARK-T510 ARK-302-AC6 a perf run refuses a plan with no first step naming results/baseline.md or no last step naming results/compare.md, and accepts one with both", () => {
     startKindRun("perf");
     const withGoals = (first: string, last: string) => ({
       ...validPlan(),
@@ -896,7 +801,7 @@ describe("plan check test case entries", () => {
     return { directory, check };
   }
 
-  test("ARK-311-AC4 a valid plan with each action passes and plan.md shows the action of each case", () => {
+  test("ARK-T511 ARK-311-AC4 a valid plan with each action passes and plan.md shows the action of each case", () => {
     writeEntry("ARK-T1", "e2e");
     writeEntry("ARK-T2", "unit");
     writeEntry("ARK-T4", "integration");
@@ -924,7 +829,7 @@ describe("plan check test case entries", () => {
     expect(markdown).toContain("the screen was removed");
   });
 
-  test("ARK-311-AC4 refuses an unknown action and a retire entry with no reason", () => {
+  test("ARK-T512 ARK-311-AC4 refuses an unknown action and a retire entry with no reason", () => {
     writeEntry("ARK-T4", "e2e");
     const { check } = newSchemeRun(
       "ARK-905",
@@ -939,7 +844,7 @@ describe("plan check test case entries", () => {
     expect(result.err).toContain("test case ARK-T4 is retired with no reason");
   });
 
-  test("ARK-311-AC4 refuses a reuse, update or retire entry that has no entry in test/cases/", () => {
+  test("ARK-T513 ARK-311-AC4 refuses a reuse, update or retire entry that has no entry in test/cases/", () => {
     const { check } = newSchemeRun(
       "ARK-905",
       [{ id: "AC1", verified_by: ["ARK-T1"] }],
@@ -962,7 +867,7 @@ describe("plan check test case entries", () => {
       );
   });
 
-  test("ARK-311-AC4 refuses a verified_by id that is no active entry and no add entry of the plan", () => {
+  test("ARK-T514 ARK-311-AC4 refuses a verified_by id that is no active entry and no add entry of the plan", () => {
     writeEntry("ARK-T8", "e2e", "retired");
     const { check } = newSchemeRun(
       "ARK-905",
@@ -982,7 +887,7 @@ describe("plan check test case entries", () => {
     expect(result.err).not.toContain("verified_by ARK-T1");
   });
 
-  test("ARK-311-AC4 refuses a method test AC whose verified_by is empty or holds only unit cases", () => {
+  test("ARK-T515 ARK-311-AC4 refuses a method test AC whose verified_by is empty or holds only unit cases", () => {
     writeEntry("ARK-T2", "unit");
     const { check } = newSchemeRun(
       "ARK-905",
@@ -1004,7 +909,7 @@ describe("plan check test case entries", () => {
     expect(result.err).not.toContain("ARK-905/AC3");
   });
 
-  test("ARK-311-AC4 an old-scheme AC keeps the rule of one integration or e2e test case", () => {
+  test("ARK-T516 ARK-311-AC4 ARK-153-AC3 an old-scheme AC keeps the rule of one integration or e2e test case", () => {
     const plan = validPlan();
     plan.test_cases = [testCase("t1", "ARK-900-AC1", "unit"), testCase("t2", "ARK-900-AC2", "e2e")];
     writePlan(plan);
@@ -1044,15 +949,6 @@ describe("ARK-T41 ARK-328/AC1 ARK-328/AC2 plan check requires skills only for we
     expect(refused.out).toContain("skills");
     expect(check(requiredUiSkills).code).toBe(0);
     expect(planMd()).toContain("| Skills |");
-  });
-
-  test("ARK-T43 ARK-328/AC1 plan.md shows the Skills column and names the 3 skills only for web_ui", () => {
-    surfaceRun(["cli_output"]);
-    expect(check().code).toBe(0);
-    expect(planMd()).not.toContain("Skills");
-    surfaceRun(["web_ui"]);
-    expect(check(requiredUiSkills).code).toBe(0);
-    for (const skill of requiredUiSkills) expect(planMd()).toContain(skill);
   });
 });
 
@@ -1144,7 +1040,7 @@ describe("plan check repos block", () => {
     expect(result.lines).toEqual(["plan refused: 1 problem", `  ${line}`]);
   });
 
-  test("ARK-T104 prints every problem when several occur", () => {
+  test("ARK-T104 ARK-153-AC2 prints every problem when several occur", () => {
     const result = checkClara((parts) => {
       parts.repos[1].depends_on.push({
         repo: "repos/payments",

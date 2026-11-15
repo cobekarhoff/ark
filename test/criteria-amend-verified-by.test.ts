@@ -339,7 +339,7 @@ test("ARK-T229 --verified-by refuses a test case id with no active file at HEAD 
   expect(amendments(run)).toHaveLength(2);
 });
 
-test("ARK-T230 --verified-by is refused in merge_requests_open and closed, and with an unknown criterion or no reason", () => {
+test("ARK-T230 ARK-308-AC1 --verified-by is refused in merge_requests_open and closed, and with an unknown criterion or no reason", () => {
   const project = startProject();
   const make = (ticketId: string) => {
     const run = buildingRun(project, ticketId, [{ id: "AC1", lines: [method, listed("ARK-T1")] }]);
@@ -488,7 +488,7 @@ test("ARK-T233 a text amend of a manual criterion with no --carry-manual clears 
   });
 });
 
-test("ARK-T234 a text amend of a manual criterion with --carry-manual keeps the answer and records the old text, new text, reason and words", () => {
+test("ARK-T234 ARK-308-AC2 a text amend of a manual criterion with --carry-manual keeps the answer and records the old text, new text, reason and words", () => {
   const project = startProject();
   const run = buildingRun(project, "ARK-561", [{ id: "AC1", lines: [manual] }]);
   expect(ark("gate", "record", run.runId, "manual", "AC1", "ok").code).toBe(0);

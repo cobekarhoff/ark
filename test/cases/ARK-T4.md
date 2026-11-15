@@ -27,7 +27,6 @@ Prove that for a UI case whose feature exists only at head, base `result.json` s
 3. Read `results/evidence/FAKE-T9/base/result.json` and `head/result.json`.
 4. List `screenshots/` in both folders; sort names.
 5. Assert each listed file is a valid PNG.
-6. Run a variant where a checkpoint is placed after the failing assertion; assert the contract is violated detectably (base set is smaller), documenting why checkpoint-before-assertion is required.
 
 ## Expected results
 

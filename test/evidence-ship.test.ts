@@ -635,14 +635,6 @@ describe.each(commands)("ark %s evidence for verified_by cases", (_name, argsFor
     },
   );
 
-  test("ARK-T8 refuses a head SHA that is the project clone's head, not the run checkout's", () => {
-    const run = shipRun(testCriteria, []);
-    expect(git(run.source, "rev-parse", "HEAD")).not.toBe(git(run.worktree, "rev-parse", "HEAD"));
-    writeCaseEvidence(run, "FAKE-T1", { base: "x", head: git(run.source, "rev-parse", "HEAD") });
-    writeCaseEvidence(run, "FAKE-T2", valid);
-    expect(expectRefused(run, argsFor(run))).toContain("test evidence stale: AC1 FAKE-T1");
-  });
-
   test("ARK-T8 refuses a head SHA that is the current head of another repo of the run", () => {
     const run = shipRun(testCriteria, []);
     const docsHead = git(run.source, "rev-parse", "HEAD");

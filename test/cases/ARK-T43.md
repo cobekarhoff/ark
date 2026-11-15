@@ -5,8 +5,9 @@ level: integration
 technique: equivalence classes (web_ui, cli_output) over the other callers of `uiSkillsFor`
 priority: medium
 risk: "the MR 'UI/UX checks' block or the plan.md UI section still appears for a CLI diff, so a reviewer reviews it against UI skills (`cli/merge-request.ts:560`, `cli/plan.ts:401,613`)"
-status: active
-changed_by: 2026-11-06-ARK-328-2
+status: retired
+retired_reason: "the plan.md half repeated ARK-T506 (plan.test.ts: web_ui plan.md gets the Skills column with the skills) and the ARK-T41 tests of plan.test.ts (describe 'plan check requires skills only for web_ui': cli_output and document have no column; these are the tests that go red when every surface gets the column); the merge-request half asserted only not.toContain('UI/UX') and no production file writes that text"
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective

@@ -1,6 +1,6 @@
 ---
 id: ARK-T92
-title: ARK-T92 mockups remain outside actual worktrees and use one human review loop
+title: ARK-T92 mockups remain outside actual worktrees
 level: integration
 technique: filesystem boundary
 priority: medium
@@ -11,7 +11,7 @@ changed_by: 2026-11-07-ARK-322-1
 
 ## Objective
 
-Prove a mockup in the run folder is not copied into the worktree by `ark worktree create`. Converted on touch from ARK-173-AC13.
+Prove a mockup in the run folder is not copied into the worktree by `ark worktree create`. Converted on touch from ARK-173-AC13. The title no longer says "and use one human review loop": no assertion exercises it.
 
 Expected: Mockups shall stay in the run folder and never appear in a repo worktree.
 
@@ -21,7 +21,7 @@ Expected: Mockups shall stay in the run folder and never appear in a repo worktr
 
 ## Steps
 
-1. Run the test `ARK-T92 mockups remain outside actual worktrees and use one human review loop`.
+1. Run the test `ARK-T92 mockups remain outside actual worktrees`.
 
 ## Expected results
 
