@@ -29,4 +29,4 @@ One line for each principle that Ark already uses, with a link to the rule that 
 
 - The plan and its test cases come before code, and the run lead judges each finding. [Architecture: The plan and the proof](../../docs/explanation/architecture.md#the-plan-and-the-proof)
 - Repos compose locally in the run's worktrees, one worktree for each repo. [Architecture: Multi-repo by local composition](../../docs/explanation/architecture.md#multi-repo-by-local-composition)
-- The hub only reads. It has one action, "Open in Orca", and you steer through Master Chief. [ADR 0009](../../docs/adr/0009-hub-is-a-read-only-live-view.md#hub-is-a-read-only-live-view)
+- The hub only reads. Its actions are "Open in Orca" and the three writes of the Companions page (approve a proposed ticket to `ready`, dismiss, ask), and you steer through Master Chief. [ADR 0009](../../docs/adr/0009-hub-is-a-read-only-live-view.md#hub-is-a-read-only-live-view)

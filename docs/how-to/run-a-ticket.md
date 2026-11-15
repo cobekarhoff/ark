@@ -135,7 +135,7 @@ cost: $5.20 (17196569 tokens)
 
 `by auto` means the project's `ark.yml` answered that gate (see [Gates you can hand to Ark](#gates-you-can-hand-to-ark)). `manual pending` lists the ACs that wait for your manual gate. A run with no activity for 24 hours gets `stale` after its age.
 
-To open the hub as `http://ark.localhost` and have it start at login, see [Reach the hub by a local name](local-names.md). The hub is a read-only view with one action, "Open in Orca". You steer through Master Chief.
+To open the hub as `http://ark.localhost` and have it start at login, see [Reach the hub by a local name](local-names.md). The hub is a read-only view with one focus action, "Open in Orca", and the three writes of its Companions page. You steer through Master Chief.
 
 ## 4. Answer the gates
 
