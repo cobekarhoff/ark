@@ -588,7 +588,8 @@ test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only termin
     ticket: { id: "ARK-805", title: "Open" },
     phase: "building",
   });
-  const state = installFakeTools({ orca: orcaAnswersFor(run) });
+  // Every Orca call answers 3 s late, so the first read outlasts the old 5 s poll and the POST goes out before `term-worker` is live (ARK-504/AC1).
+  const state = installFakeTools({ orca: orcaAnswersFor(run), orcaSleepSeconds: 3 });
   const { baseUrl } = await start();
   const own = new URL(baseUrl).host;
   const post = (terminal: unknown, origin: string | null = baseUrl) =>
