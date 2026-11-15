@@ -603,7 +603,7 @@ button:not(:disabled):active {
 /* ---------- home ---------- */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -644,6 +644,14 @@ button:not(:disabled):active {
 }
 .tile.alarm .tile-note {
   color: var(--red-t);
+}
+.tile-note .why {
+  display: block;
+  font-weight: 600;
+  color: var(--amber-t);
+}
+.tile-note .nb {
+  white-space: nowrap;
 }
 .cols3 {
   display: grid;
@@ -3557,7 +3565,7 @@ pre.code-plain {
 /* Home at 1024 px: 3 tiles a row; words stay whole, ids and dates stay on one line. */
 @media (max-width: 1280px) {
   .tiles {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 .tile-label,

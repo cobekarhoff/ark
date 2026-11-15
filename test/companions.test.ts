@@ -282,8 +282,14 @@ test("ARK-T656 with no companion listed or recorded, sync makes no Orca call and
   const state = arkP("chief", "state");
   expect(state.err).toBe("");
   expect(state.code).toBe(0);
-  // Master Chief's Run list, its worker list, and the two task lists of the queue.
-  expect(fake.verbs().toSorted()).toEqual(["run-list", "task-list", "task-list", "worker-list"]);
+  // Master Chief's Run list, its worker list, the two task lists of the queue, and the unread read of its inbox (ARK-499).
+  expect(fake.verbs().toSorted()).toEqual([
+    "inbox",
+    "run-list",
+    "task-list",
+    "task-list",
+    "worker-list",
+  ]);
   expect(state.out).not.toContain("## Companions");
   expect(sectionOf(state.out, "Run leads")).toMatch(/^Run leads\s+none\s*$/);
 });
