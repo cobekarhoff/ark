@@ -7,15 +7,17 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { evalsLedger, evalsTitle } from "../skills/pr-writing/evals/ledger.ts";
 import { configKeys, loadStandaloneConfig } from "../skills/pr-writing/lib/ledger.ts";
 import { lintBody } from "../skills/pr-writing/lib/lint.ts";
+import { initProjectRepo, linkedArkHome, writeProject } from "./helpers.ts";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -774,4 +776,77 @@ test("ARK-T72 ARK-317/AC6 run_evals lints the three frozen bodies offline, print
   expect(output.rubric).toHaveLength(6);
   expect(result.stderr).toContain(readFileSync(join(evalsFolder, "rubric.md"), "utf8"));
   expect(fixtureFiles.map(hash)).toEqual(before);
+});
+
+/**
+ * `gitlabRepo` is the repo outside ARK_HOME. The project folder `demo` under a symlinked ARK_HOME is a git repo
+ * (ARK-482) with its own origin and a branch one commit ahead of main, so every rule but the project-folder guard
+ * accepts it. `worktree` is a nested worktree of the outside repo under `runs/`, as a run mirror is.
+ */
+function projectFolderWorld() {
+  const outside = gitlabRepo();
+  const outerHome = process.env.ARK_HOME;
+  const arkHome = linkedArkHome();
+  const project = writeProject("demo", { workspace: outside.repo });
+  initProjectRepo(project);
+  const projectOrigin = join(temporaryFolder("project-origin"), "gitlab.com/org/demo.git");
+  mkdirSync(projectOrigin, { recursive: true });
+  git(projectOrigin, "init", "--bare", "-b", "main");
+  git(project, "remote", "add", "origin", projectOrigin);
+  git(project, "push", "origin", "main");
+  git(project, "checkout", "-b", "fix-retry-429");
+  writeFileSync(join(project, "a.ts"), "one\n");
+  git(project, "add", ".");
+  git(project, "commit", "-m", "fix: one");
+
+  const worktree = join(project, "runs", "run-1", "workspace");
+  mkdirSync(join(project, "runs", "run-1"), { recursive: true });
+  git(outside.repo, "worktree", "add", "-q", "-b", "run-branch", worktree, "fix-retry-429");
+
+  const ghLog = join(temporaryFolder("gh"), "gh-calls.log");
+  const ghBin = join(dirname(ghLog), "bin");
+  mkdirSync(ghBin);
+  writeFileSync(join(ghBin, "gh"), `#!/bin/sh\necho "gh $*" >> "${ghLog}"\nexit 1\n`);
+  chmodSync(join(ghBin, "gh"), 0o755);
+  const environment = {
+    ...outside.environment,
+    PATH: `${ghBin}:${outside.environment.PATH}`,
+    ARK_HOME: arkHome,
+  };
+  if (outerHome === undefined) delete process.env.ARK_HOME;
+  else process.env.ARK_HOME = outerHome;
+  const scriptIn = (cwd: string, name: string, ...args: string[]) =>
+    run(["bun", scriptFile(name), ...args], { cwd, env: environment });
+  const hostCalls = () => [
+    ...outside.calls().map((call) => `glab ${call.join(" ")}`),
+    ...(existsSync(ghLog) ? readFileSync(ghLog, "utf8").split("\n").filter(Boolean) : []),
+  ];
+  return { outside, project, worktree, scriptIn, hostCalls };
+}
+
+test("ARK-T667 gather, lint_body, post_mr and review refuse a project folder and write nothing", () => {
+  const { project, scriptIn, hostCalls } = projectFolderWorld();
+  for (const [name, ...args] of [
+    ["gather"],
+    ["lint_body"],
+    ["post_mr", "--confirmed"],
+    ["review"],
+  ]) {
+    const refused = scriptIn(project, name, ...args);
+    expect([name, refused.code]).toEqual([name, 1]);
+    expect(refused.stderr, name).toContain(realpathSync(project));
+  }
+  expect(existsSync(join(project, ".pr-writing"))).toBe(false);
+  expect(git(project, "status", "--porcelain")).toBe("");
+  expect(hostCalls()).toEqual([]);
+});
+
+test("ARK-T667 gather writes its ledger in a run worktree nested in the project folder and in a repo outside ARK_HOME", () => {
+  const { outside, project, worktree, scriptIn } = projectFolderWorld();
+  for (const root of [worktree, outside.repo]) {
+    const result = scriptIn(root, "gather");
+    expect([root, result.code, result.stderr]).toEqual([root, 0, result.stderr]);
+    expect(existsSync(join(root, ".pr-writing", "ledger.json"))).toBe(true);
+  }
+  expect(existsSync(join(project, ".pr-writing"))).toBe(false);
 });
