@@ -2418,9 +2418,10 @@ const caseBlocks = (body: string) => body.match(/<details><summary>`ARK-T\d+`: b
 const keptLogLines = (body: string) => body.match(/^ARK-T\d+ log line \d+$/gm)?.length ?? 0;
 
 /** A run with an evidence folder, a screenshot and a log for each of `count` cases, and AC evidence files for AC2 and AC3. */
-function suiteRun(count: number, options: { planCases?: string[] } = {}) {
+function suiteRun(count: number, options: { planCases?: string[]; kind?: string } = {}) {
   const ids = caseIds(count);
   const run = makeRun({
+    kind: options.kind,
     criteria: [
       { id: "AC1", status: "passing", verifiedBy: [ids[0]] },
       { id: "AC2", status: "passing", verifiedBy: [] },
@@ -2550,6 +2551,265 @@ test("ARK-T364 a body over the GitHub limit from plan cases alone has its log ta
   expect(keptLogLines(hugeBody)).toBe(0);
   expect(hugeBody).not.toContain("Log (last");
   expect(hugeBody).toContain("8,000 log lines left out");
+  // The 400 cases fit once the log tails are gone, so the collapse of ARK-T680 does not start.
+  expect(caseBlocks(hugeBody)).toHaveLength(400);
+});
+
+// --- ARK-T680, ARK-T681: a body that is over the limit with no log lines, and the bodies that stay whole ---
+
+/** `chars` characters of AC evidence, 100 to a line, with no word that `secretLike` drops. */
+const acText = (id: string, chars: number) =>
+  `${Array.from({ length: Math.ceil(chars / 100) }, (_, i) =>
+    `${id} check ${i + 1}: the unit list shows the same rows after the reload and after a second one`.padEnd(
+      99,
+      ".",
+    ),
+  ).join("\n")}\n`;
+
+const deletedTests = (count: number) =>
+  Array.from({ length: count }, (_, i) => ({
+    file: `test/cases/area-${i % 37}.test.ts`,
+    name: `deleted test ${i} that an audit removed`,
+  }));
+
+const caseLines = (body: string, id: string) =>
+  body.split("\n").filter((line) => line.startsWith(`- \`${id}\`: base fail, head pass @ abc1234`));
+const deletedLines = (body: string) =>
+  body.split("\n").filter((line) => /^\s*- Deleted:/.test(line));
+
+/** The rules of a collapsed body that hold for every plan size: one list line for each case with evidence, no block, no log, one note. */
+function expectCollapsed(body: string, ids: string[]) {
+  expect(body.length).toBeLessThanOrEqual(bodyLimit);
+  for (const id of ids) {
+    const lines = caseLines(body, id);
+    expect(lines, id).toHaveLength(1);
+    expect(lines[0]).toContain(`results/evidence/${id}/`);
+  }
+  expect(caseBlocks(body)).toHaveLength(0);
+  expect(body).not.toContain("Log (last");
+  expect(keptLogLines(body)).toBe(0);
+  const notes = body.split("\n").filter((line) => /collapsed/i.test(line));
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toMatch(/limit/i);
+  // The note is no test case claim and names no screenshot.
+  expect(notes[0]).not.toMatch(/base \S+, head \S+ @|\.png/);
+}
+
+/** A bug run: 275 plan cases with evidence, one plan case with no evidence folder, 20 evidence folders the plan does not name, AC2 and AC3 evidence of 17,000 characters each (the body at no log lines is 70,176 characters with `deleted: []` and 70,193 without a `deleted` field). */
+function collapseRun(tests: Ledger["tests"]) {
+  const ids = caseIds(275);
+  const run = suiteRun(275, { planCases: [...ids, "ARK-T9999"], kind: "bug" });
+  const acFiles = { AC2: acText("AC2", 17_000), AC3: acText("AC3", 17_000) };
+  for (const [id, text] of Object.entries(acFiles))
+    writeFileSync(join(run.evidenceDirectory, `${id}.md`), text);
+  for (let i = 1; i <= 20; i++)
+    for (const side of ["base", "head"])
+      mkdirSync(join(run.evidenceDirectory, `ARK-T${7000 + i}`, side), { recursive: true });
+  const ledger = () => ({ ...run.ledger(), tests });
+  return { ids, ledger, acFiles };
+}
+
+const acBlock = (id: string, text: string) =>
+  `Evidence file results/evidence/ARK-9/${id}.md:\n\n\`\`\`\n${text.trim()}\n\`\`\``;
+
+test("ARK-T680 a plan of 276 cases whose body is over the limit with no log lines gets one list line for each case and no Deleted line when no deleted count was recorded", () => {
+  // Fixture B: the last test.completed has 0 deleted tests. Fixture C: an old or quick run with no `deleted` field.
+  const cases: [Ledger["tests"], string][] = [
+    [
+      { passed: 10, skipped: 1, baseSkipped: 0, deleted: [] },
+      "- Tests: 10 passed, 1 skipped (base 0), 0 deleted",
+    ],
+    [
+      { passed: 10, skipped: 1 },
+      "- Tests: 10 passed, 1 skipped (no base count, deleted not counted)",
+    ],
+  ];
+  for (const [tests, testsLine] of cases) {
+    const { ids, ledger, acFiles } = collapseRun(tests);
+    const full = ledger();
+    const body = buildBody(full);
+
+    expectCollapsed(body, ids);
+    expect(body).toContain(testsLine);
+    expect(deletedLines(body)).toEqual([]);
+    expect(body).not.toContain("events.ndjson");
+    // A plan case with no evidence folder gets no line, as before, and neither does a folder the plan does not name.
+    expect(body).not.toContain("ARK-T9999");
+    expect(body).not.toContain("ARK-T7001");
+    for (const [id, text] of Object.entries(acFiles)) expect(body).toContain(acBlock(id, text));
+
+    const results = lintBody({ body, title: defaultTitle, ledger: full });
+    for (const id of ["SIZE01", "EVID01", "EVID03", "EVID04"])
+      expect(result(results, id), id).toMatchObject({ result: "pass" });
+    expect(buildBody(ledger())).toBe(body);
+  }
+});
+
+/** 150 cases with 20-line logs and 4 deleted tests; the AC2 evidence is padded so the body at no log lines has a chosen length. */
+function boundaryRun() {
+  const run = suiteRun(150);
+  const bodyAt = (pad: number, withLogs = true) => {
+    writeFileSync(
+      join(run.evidenceDirectory, "AC2.md"),
+      `AC2 live check 1${"x".repeat(pad)}\nAC2 live check 2\n`,
+    );
+    const ledger = {
+      ...run.ledger(),
+      tests: { passed: 10, skipped: 1, baseSkipped: 1, deleted: deletedTests(4) },
+    };
+    if (!withLogs) for (const entry of ledger.evidence ?? []) entry.log = undefined;
+    return buildBody(ledger);
+  };
+  /** The pad that makes the body at no log lines `length` characters. The tail note adds a fixed length, so measure it once under the limit. */
+  const padFor = (length: number) => {
+    const bare = bodyAt(0, false).length;
+    const first = length - bare - 300;
+    const measured = bodyAt(first).length;
+    return first + (length - measured);
+  };
+  return { run, bodyAt, padFor };
+}
+
+test("ARK-T680 a body of exactly 65,537 characters with no log lines collapses to at most 65,536, with its AC evidence whole", () => {
+  const { bodyAt, padFor } = boundaryRun();
+  // One character more than the 65,536 that stays whole (ARK-T681): the same fixture, one character of AC2 evidence more.
+  const pad = padFor(bodyLimit) + 1;
+  const body = bodyAt(pad);
+
+  expectCollapsed(body, caseIds(150));
+  expect(body).toContain(`AC2 live check 1${"x".repeat(pad)}\nAC2 live check 2`);
+  const deleted = deletedLines(body);
+  expect(deleted).toHaveLength(1);
+  expect(deleted[0]).toContain("4");
+  expect(deleted[0]).toContain("events.ndjson");
+  expect(body).not.toMatch(/^\s+- Deleted:/m);
+});
+
+test("ARK-T681 a small body is the same body as before the collapse, byte for byte", () => {
+  const entry = (id: string) => ({
+    testCase: id,
+    base: "fail",
+    head: "pass",
+    sha: head,
+    log: [1, 2, 3].map((line) => `${id} line ${line}`),
+    screenshots: [],
+  });
+  const body = buildBody(
+    baseLedger({
+      ticket: { kind: "bug", problem: "Stale bodies.", change: "1. Fix it." },
+      evidence: [entry("ARK-T1"), entry("ARK-T2")],
+      planCases: ["ARK-T1", "ARK-T2"],
+      tests: {
+        passed: 10,
+        skipped: 1,
+        baseSkipped: 1,
+        deleted: [
+          { file: "test/b.test.ts", name: "second `b` | pipe" },
+          { file: "test/a.test.ts", name: "first" },
+          { name: "no file" },
+        ],
+      },
+    }),
+  );
+  // The text that buildBody wrote before ARK-507, pasted from test/cases/ARK-T681.md.
+  const expected =
+    [
+      "<!-- pr-writing:begin -->",
+      "> Written by an AI agent on behalf of @cobekarhoff, following their spec. @cobekarhoff has not reviewed it yet.",
+      "",
+      "Refs: ARK-316. 2 files changed, 40 insertions(+).",
+      "",
+      "## Problem",
+      "",
+      "Stale bodies.",
+      "",
+      "## What is different",
+      "",
+      "- Fix it.",
+      "",
+      "## Evidence",
+      "",
+      "<details><summary>`ARK-T1`: base fail, head pass @ abc1234</summary>",
+      "",
+      "Result: base fail, head pass @ abc1234",
+      "",
+      "Log (last 20 lines of the head command.log):",
+      "",
+      "```",
+      "ARK-T1 line 1",
+      "ARK-T1 line 2",
+      "ARK-T1 line 3",
+      "```",
+      "",
+      "</details>",
+      "",
+      "<details><summary>`ARK-T2`: base fail, head pass @ abc1234</summary>",
+      "",
+      "Result: base fail, head pass @ abc1234",
+      "",
+      "Log (last 20 lines of the head command.log):",
+      "",
+      "```",
+      "ARK-T2 line 1",
+      "ARK-T2 line 2",
+      "ARK-T2 line 3",
+      "```",
+      "",
+      "</details>",
+      "",
+      "- Tests: 10 passed, 1 skipped (base 1), 3 deleted",
+      "  - Deleted: no file",
+      "  - Deleted: `test/a.test.ts` first",
+      "  - Deleted: `test/b.test.ts` second \\`b\\` \\| pipe",
+      "",
+      "## How to verify",
+      "",
+      "- [ ] `git diff main...HEAD --stat`. Expect: 2 files changed, 40 insertions(+).",
+      "",
+      "## Not done",
+      "",
+      "- Nothing open.",
+      "",
+      "## Risk and revert",
+      "",
+      "Merge risk: low (script low, reviewer none).",
+      "",
+      "- Verification: good. All ACs pass with evidence.",
+      "- Alignment: good. Every changed file is in the plan.",
+      "- Impact: good. No sensitive path and no interface callers.",
+      "- Rollback cost: good. No one-way path and no deleted file.",
+      "",
+      "Door: two-way",
+      "",
+      "Blast radius: 1 changed files in 1 repo(s)",
+      "",
+      "Also changed, not in plan: none.",
+      "",
+      "```text",
+      "# Revert, newest merge first",
+      "git revert -m 1 <merge sha of the MR for this repo>",
+      "```",
+      "",
+      "## Acceptance criteria",
+      "",
+      "<!-- pr-writing:end -->",
+    ].join("\n") + "\n";
+  expect(body).toBe(expected);
+});
+
+test("ARK-T681 a body of exactly 65,535 or 65,536 characters with no log lines keeps one block for each case and one Deleted bullet for each deleted test", () => {
+  const { bodyAt, padFor } = boundaryRun();
+  for (const length of [bodyLimit - 1, bodyLimit]) {
+    const body = bodyAt(padFor(length));
+    expect(body).toHaveLength(length);
+    expect(caseBlocks(body)).toHaveLength(150);
+    expect(body.match(/^ {2}- Deleted: /gm)).toHaveLength(4);
+    expect(body).not.toContain("Log (last");
+    expect(body).toContain("- Tests: 10 passed, 1 skipped (base 1), 4 deleted");
+    // The log tails were cut to none and the body says so; nothing was collapsed.
+    expect(body).toContain("3,000 log lines left out");
+    expect(body).not.toMatch(/collapsed/i);
+  }
 });
 
 // --- ARK-T150, ARK-T151: one run, two repos, one branch name ----------------------------------

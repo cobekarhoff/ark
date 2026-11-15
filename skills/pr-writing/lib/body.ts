@@ -145,15 +145,23 @@ function screenshotFlows(ledger: Ledger): { shown: string[]; omitted: number } {
 const escapeTitle = (title: string) =>
   title.replace(/\s+/g, " ").replace(/[\\`*_[\]<>|~#]/g, "\\$&");
 
-/** The Tests line and one Deleted bullet for each deleted test, sorted by file then title; none for an old run. */
-function testLines({ tests }: Ledger): string[] {
+/** The Tests line and one Deleted bullet for each deleted test, sorted by file then title; none for an old run. `collapsed` writes one Deleted line with the count in place of the bullets, none when no test was deleted. */
+function testLines({ tests }: Ledger, collapsed = false): string[] {
   if (tests === null) return [];
   const { passed, skipped, baseSkipped, deleted } = tests;
   if (baseSkipped === undefined || deleted === undefined)
     return [`- Tests: ${passed} passed, ${skipped} skipped (no base count, deleted not counted)`];
   const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const testsLine = `- Tests: ${passed} passed, ${skipped} skipped (base ${baseSkipped}), ${deleted.length} deleted`;
+  if (collapsed)
+    return deleted.length === 0
+      ? [testsLine]
+      : [
+          testsLine,
+          `- Deleted: ${deleted.length} tests, listed in \`events.ndjson\` (the deleted field of the last test.completed event).`,
+        ];
   return [
-    `- Tests: ${passed} passed, ${skipped} skipped (base ${baseSkipped}), ${deleted.length} deleted`,
+    testsLine,
     ...[...deleted]
       .sort((a, b) => order(a.file ?? "", b.file ?? "") || order(a.name, b.name))
       .map(
@@ -203,8 +211,8 @@ const details = (summary: string, inner: string[]) => [
 
 const logLines = 20;
 
-/** `keep` is how many of the last log lines each case block holds. */
-function evidenceBlock(ledger: Ledger, keep = logLines): Block {
+/** `keep` is how many of the last log lines each case block holds. `collapsed` writes one list item for each case in place of its block, and no log or screenshot. */
+function evidenceBlock(ledger: Ledger, keep = logLines, collapsed = false): Block {
   const kind = ledger.ticket?.kind;
   const { shown, omitted } = screenshotFlows(ledger);
   const lines: string[] = [];
@@ -212,6 +220,11 @@ function evidenceBlock(ledger: Ledger, keep = logLines): Block {
   for (const entry of shownEvidence(ledger)) {
     const prefix = `results/evidence/${entry.testCase}/`;
     const result = `base ${entry.base}, head ${entry.head} @ ${shortSha(entry.sha) || "unknown"}`;
+    if (collapsed) {
+      // The claim text is the one of the block summary: lint EVID01 and EVID03 read it. A list item is no prose for SIZE01.
+      lines.push(`- \`${entry.testCase}\`: ${result} (\`${prefix}\`)`);
+      continue;
+    }
     const pictures = shown.filter((path) => path.startsWith(prefix));
     const allLog = entry.log ?? [];
     // `slice(-0)` keeps everything, so keep 0 is its own case.
@@ -256,11 +269,15 @@ function evidenceBlock(ledger: Ledger, keep = logLines): Block {
       ]),
     );
   }
+  if (collapsed)
+    lines.push(
+      `- Collapsed: the case blocks${ledger.tests?.deleted?.length ? " and the Deleted bullets" : ""} were left out so the body fits GitHub's ${githubBodyLimit.toLocaleString("en-US")}-character limit.`,
+    );
   if (leftOut > 0)
     lines.push(
       `- Log tails: ${leftOut.toLocaleString("en-US")} log lines left out so the body fits GitHub's ${githubBodyLimit.toLocaleString("en-US")}-character limit.`,
     );
-  if (omitted > 0)
+  if (omitted > 0 && !collapsed)
     lines.push(`- Screenshots: ${omitted} more flow(s) left out, five are shown at most.`);
   for (const { id, text } of ledger.acEvidence ?? []) {
     const body = fenced(text.split("\n"));
@@ -274,7 +291,7 @@ function evidenceBlock(ledger: Ledger, keep = logLines): Block {
     );
   if (ledger.evidence === null && kind !== "perf")
     lines.push("- No base and head evidence recorded: the run has no `results/evidence/`.");
-  lines.push(...testLines(ledger));
+  lines.push(...testLines(ledger, collapsed));
   for (const { suite, file } of ledger.flaky)
     lines.push(`- Flaky: \`${file}\` in suite \`${suite}\` failed once and passed on retry.`);
   return { key: "evidence", title: "Evidence", lines };
@@ -549,7 +566,7 @@ function renderBlocks(blocks: Block[], template: Heading[] | null, bare: boolean
 /** The body length GitHub accepts. */
 export const githubBodyLimit = 65_536;
 
-/** The body, with the log tails of the case blocks cut when it is over `githubBodyLimit`: the most lines each block keeps that fit, down to none. The AC evidence blocks and the result lines stay whole. */
+/** The body, with the log tails of the case blocks cut when it is over `githubBodyLimit`: the most lines each block keeps that fit, down to none. When it is still over the limit with no log lines, each case is one list line and the Deleted bullets are one line. The AC evidence blocks stay whole. */
 export function buildBody(ledger: Ledger): string {
   const body = buildBodyKeeping(ledger, logLines);
   if (body.length <= githubBodyLimit) return body;
@@ -557,6 +574,7 @@ export function buildBody(ledger: Ledger): string {
   let low = 0;
   let high = logLines - 1;
   let best = buildBodyKeeping(ledger, 0);
+  if (best.length > githubBodyLimit) return buildBodyKeeping(ledger, 0, true);
   while (low <= high) {
     const middle = (low + high) >> 1;
     const attempt = buildBodyKeeping(ledger, middle);
@@ -568,10 +586,10 @@ export function buildBody(ledger: Ledger): string {
   return best;
 }
 
-function buildBodyKeeping(ledger: Ledger, keep: number): string {
+function buildBodyKeeping(ledger: Ledger, keep: number, collapsed = false): string {
   const { tier } = tierOfLedger(ledger);
   const blocks: Block[] = [problemBlock(ledger), differentBlock(ledger)];
-  if (ledger.source === "run") blocks.push(evidenceBlock(ledger, keep));
+  if (ledger.source === "run") blocks.push(evidenceBlock(ledger, keep, collapsed));
   blocks.push(verifyBlock(ledger), notDoneBlock(ledger));
   if (ledger.security?.length)
     blocks.push({ key: "security", title: "Security", lines: ledger.security });
