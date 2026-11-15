@@ -282,7 +282,9 @@ test("ARK-T133 the page sends no request but its first load and one event stream
   page.on("request", (request) => requests.push(request));
   await open(page, baseUrl, "");
   await expect(page.getByTestId("run")).toHaveCount(1);
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0); // every source answered: the first load is complete
+  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+  const { waitForChipGone } = await import("./stale-wait");
+  await waitForChipGone(page); // every source answered: the first load is complete
   const firstLoad = requests.length;
 
   const firstLoadPaths = requests.map((request) => new URL(request.url()).pathname);
@@ -650,7 +652,7 @@ test("ARK-T260 Runs draws one node for each ticket and one edge for each depends
 
 // ---------------------------------------------------------------- AC11
 
-test("ARK-T315 ARK-277-AC11 a source that stops answering keeps its last good value and shows its age on the stale chip; before a first read the page says unknown", async ({
+test("ARK-T315 a source that stops answering keeps its last good value and shows its age on the stale chip; before a first read the page says unknown", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -678,6 +680,9 @@ test("ARK-T315 ARK-277-AC11 a source that stops answering keeps its last good va
   });
   const baseUrl = await launch();
   await page.clock.install(); // before the load: the chip's minute timer must be the clock's
+  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+  const { observePushes, waitForAge } = await import("./stale-wait");
+  await observePushes(page);
   await open(page, baseUrl, "");
 
   // The agents are on the run page: a second page in the same browser shows them.
@@ -715,8 +720,7 @@ test("ARK-T315 ARK-277-AC11 a source that stops answering keeps its last good va
   await expect(page.getByTestId("gate-link")).toHaveCount(1);
 
   // The age moves by whole minutes: 3 minutes on the page clock show as 2 or more.
-  await page.clock.fastForward(180_000);
-  await expect(await age("orca")).toHaveText(/^([2-9]|\d\d+) min$/);
+  await waitForAge(page, await age("orca"), 2);
 });
 
 // ---------------------------------------------------------------- Regressions of the QE review (F1, F2, F3)
@@ -3433,7 +3437,9 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
     "6 pass · 0 fail",
     { timeout: 30_000 },
   );
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0);
+  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+  const { waitForChipGone } = await import("./stale-wait");
+  await waitForChipGone(page);
   const firstLoad = requests.splice(0);
   expect(firstLoad.filter((path) => path === "/events")).toHaveLength(1);
   for (const path of firstLoad)
@@ -4158,7 +4164,7 @@ test("ARK-291-AC8 a warning shows in a notice with its ticket IDs, an error repl
   expect(requests.filter((request) => request.path === "/events")).toHaveLength(1);
 });
 
-test("ARK-T316 ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same scroll position, and text keeps 4.5:1 (3:1 large) in light and dark", async ({
+test("ARK-T316 j k / Enter and Esc work on Roadmap, Esc returns to the same scroll position, and text keeps 4.5:1 (3:1 large) in light and dark", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -4195,7 +4201,9 @@ test("ARK-T316 ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to t
   await open(page, baseUrl, "roadmap");
   const rows = page.getByTestId("ticket-row");
   await expect(rows).toHaveCount(44);
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0); // the nav stops growing once every source has answered
+  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+  const { waitForChipGone } = await import("./stale-wait");
+  await waitForChipGone(page); // the nav stops growing once every source has answered
   const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
 
   // j and k move the selection, / goes to the search box, Esc leaves it.
@@ -4934,7 +4942,7 @@ test("ARK-309-AC4 the notes button of a later project's section scrolls to that 
   await expect(notes("alpha")).not.toBeInViewport();
 });
 
-test("ARK-T136 ARK-309-AC5 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it", async ({
+test("ARK-T136 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it", async ({
   page,
 }) => {
   filterWorld(40);
@@ -4983,7 +4991,9 @@ test("ARK-T136 ARK-309-AC5 a ticket and a run of another project open by direct 
 
   // From a ticket of the filter's project, Esc returns to the same scroll position.
   await open(page, baseUrl, "roadmap?project=alpha");
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0); // the layout settles once every source has answered
+  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+  const { waitForChipGone } = await import("./stale-wait");
+  await waitForChipGone(page); // the layout settles once every source has answered
   const item = page.locator('[data-testid="review-item"][data-ticket="ARK-939"]');
   await item.evaluate((node) => node.scrollIntoView({ block: "center" }));
   // Click only on the final geometry: no animation runs and the box is equal across two frames.
@@ -5102,7 +5112,7 @@ test("ARK-309-AC7 the Project group is named, has aria-pressed buttons set with 
   }
 });
 
-test("ARK-T317 ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no request, and / and /nope answer with a p95 under 200 ms", async ({
+test("ARK-T317 a filter change on Home, Runs and Roadmap sends no request, and / and /nope answer with a p95 under 200 ms", async ({
   page,
 }) => {
   filterWorld();
@@ -5117,7 +5127,9 @@ test("ARK-T317 ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no re
   for (const [hash, ready] of views) {
     await open(page, baseUrl, hash);
     await ready();
-    await expect(page.getByTestId("stale-chip")).toHaveCount(0); // the first load is complete
+    // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+    const { waitForChipGone } = await import("./stale-wait");
+    await waitForChipGone(page); // the first load is complete
     requests.length = 0;
     for (const name of ["alpha", "beta", "All projects"]) {
       await projectButton(page, name).click();
@@ -5266,7 +5278,7 @@ test("ARK-293-AC3 a run page row shows the model of Orca or of the session witho
   await expect(page.getByTestId("agent")).toHaveCount(6);
 });
 
-test("ARK-T318 ARK-293-AC5 with session models on the run page, / and /nope answer with a p95 under 200 ms and the page sends no request but the ones ARK-285 allows", async ({
+test("ARK-T318 with session models on the run page, / and /nope answer with a p95 under 200 ms and the page sends no request but the ones ARK-285 allows", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -5277,7 +5289,9 @@ test("ARK-T318 ARK-293-AC5 with session models on the run page, / and /nope answ
 
   await open(page, baseUrl, "");
   await expect(page.getByTestId("run")).toHaveCount(1);
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0);
+  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+  const { waitForChipGone } = await import("./stale-wait");
+  await waitForChipGone(page);
   for (const path of requests.splice(0))
     expect(path === "/" || path === "/events" || path.startsWith("/assets/"), path).toBe(true);
 
@@ -9024,6 +9038,8 @@ type LiveWindow = Window & {
   /** Times the banner went missing after it showed, and when the last snapshot arrived (T310). */
   __gaps: number;
   __lastSnapshotAt: number;
+  /** The value the page's push observer (test/pw/stale-wait.ts) sets at each /events message (T310). */
+  __lastPushAt?: number;
   /** Script animations started per element since `resetSlides`: their durations. */
   __slides: Map<Element, number[]>;
 };
@@ -9723,7 +9739,7 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   test.slow();
   isolate();
   const run = runId("ARK-111");
-  writeRun({
+  const runDirectory = writeRun({
     project: "p",
     run,
     ticket: { id: "ARK-111", title: "Run with live agents" },
@@ -9760,6 +9776,9 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
       }
     };
   });
+  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
+  const { observePushes, waitForAge } = await import("./stale-wait");
+  await observePushes(page);
   await open(page, proxy.url, "");
   // The chip is absent until the first snapshot: wait for it, or the count-0 wait below passes at once.
   await expect(page.getByTestId("stale-chip")).toBeVisible({ timeout: 60_000 });
@@ -9792,8 +9811,27 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   await chip.click();
   const orcaAge = list.locator('[data-source="orca"] span').first();
   await expect(orcaAge).toHaveText(/^\d+ min$/, { timeout: 60_000 });
-  await page.clock.fastForward(180_000);
-  await expect(orcaAge).toHaveText(/^([2-9]|\d\d+) min$/);
+  // A push after the jump takes the age back to about 0 (the page clock jumped, the server clock did not).
+  // Append an event once the page clock has jumped and wait until the page saw that push: the wait must still end at 2 min or more.
+  const pushBefore = await page.evaluate(() => (window as unknown as LiveWindow).__lastPushAt);
+  const clockBefore = await page.evaluate(() => Date.now());
+  await Promise.all([
+    waitForAge(page, orcaAge, 2),
+    (async () => {
+      await expect
+        .poll(() => page.evaluate((from) => Date.now() - from, clockBefore))
+        .toBeGreaterThanOrEqual(170_000);
+      appendRawEvent(
+        runDirectory,
+        "merge_request.opened",
+        { repo: ".", url: "https://github.com/example/repo/pull/78", number: 78 },
+        99,
+      );
+      await expect
+        .poll(() => page.evaluate(() => (window as unknown as LiveWindow).__lastPushAt))
+        .not.toBe(pushBefore);
+    })(),
+  ]);
 
   // The list names what each stale source affects, opens and closes from the keyboard, and does not move the header.
   await expect(list.locator('[data-source="orca"]')).toContainText("Agents");

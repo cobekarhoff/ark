@@ -1,12 +1,12 @@
 ---
 id: ARK-T133
-title: ARK-T133 ARK-277-AC4 the page sends no request but its first load and one event stream, and an appended event shows on Home within 5 s, while 30 s of silence on each view passes on a controlled clock
+title: ARK-T133 the page sends no request but its first load and one event stream, and an appended event shows on Home within 5 s, while 30 s of silence on each view passes on a controlled clock
 level: e2e
 technique: state transition (first load, then each view); controlled page clock instead of a 30-second wait
 priority: high
 risk: "a view polls the hub after the first load, or opens a second event stream, or an appended event does not reach Home without a page request; or the 30-second silence check waits in real time"
 status: active
-changed_by: 2026-11-12-ARK-335-1
+changed_by: 2026-11-15-ARK-493-1
 ---
 
 ## Objective
