@@ -107,9 +107,12 @@ worker-start` in the step's worktree, as the run lead (`--from` names the run le
 with the harness and model that `roles` of ark.yml gives the step's role (the pair of plan.yml when
 `roles` has none), and a spec it builds: the role and step id in words, the `Risks` of
 evaluation.md, each line of the `# Learnings applied` comment of plan.yml, each backticked string of
-the ACs the step serves, the `UI skills:` line, the rules in `rules.md` of the run folder when it
-exists and, for a reviewer, `Last reviewed head: <sha>`. It refuses before any Orca call when the
-start is not allowed, so a refused start launches no worker. It records step.started, then
+the ACs the step serves, the `UI skills:` line, for a validator the `Validator rules:` block (no
+bare `bun test`, no kill by name, stop only a PID it started, and for an analysis AC that names `bun
+test` the run's full `ark test <run>`, which runs the `cli` suite command of `ark.yml` inside the
+shared test budget, never that suite command by hand), the rules in `rules.md` of the run folder
+when it exists and, for a reviewer, `Last reviewed head: <sha>`. It refuses before any Orca call
+when the start is not allowed, so a refused start launches no worker. It records step.started, then
 worker.started with the dispatch, the terminal, the harness and the session file (the new session
 file whose cwd is the worktree; `unknown` when none shows in 60 s). When worker-start fails it
 records step.finished with not_started (the round goes back), prints `ark: <step> not started: orca

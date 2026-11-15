@@ -113,6 +113,15 @@ const planOf = () => ({
       needs: [],
       criteria: [`${ticketId}/AC2`, `${ticketId}/AC3`],
     },
+    {
+      id: "reviewer",
+      role: "reviewer",
+      repo: ".",
+      harness: "omp",
+      model,
+      needs: [],
+      criteria: [`${ticketId}/AC1`],
+    },
   ],
   test_cases: [1, 2, 3].map((number) => ({
     id: `ARK-T90${number}`,
@@ -683,6 +692,66 @@ test("ARK-T214 the rules file of the run folder is held verbatim", () => {
   writeFileSync(join(run.directory, "rules.md"), `${rules.join("\n")}\n`);
   started(run, "c");
   for (const rule of rules) expect(specOf().split("\n")).toContain(rule);
+});
+
+// ARK-T682
+/** The four host-safety rules of a validator spec, each in words. */
+function expectValidatorRules(spec: string): void {
+  expect(spec).toContain("Validator rules:");
+  const block = spec.slice(spec.indexOf("Validator rules:"));
+  expect(block).toMatch(/never run a bare `bun test`/i);
+  expect(block).toContain("`bun run test`");
+  expect(block).toMatch(/never kill a process by name/i);
+  expect(block).toContain("`pkill`");
+  expect(block).toContain("`killall`");
+  expect(block).toMatch(/stop only a process you started, by its PID/i);
+  expect(block).toContain("run's full `ark test <run>`");
+  expect(block).toContain("`cli` suite command of `ark.yml`");
+  expect(block).toMatch(/never run that suite command by hand/i);
+}
+const hostRules = [
+  "- Rule one: never edit `events.ndjson`",
+  "- Rule two: run format before a commit",
+];
+
+test("ARK-T682 a validator start puts the validator rules in the spec and keeps the first line", () => {
+  const run = buildRun();
+  started(run, "v");
+  expect(specOf().split("\n")[0]).toBe(`/skill:ark-validator ${run.runId} v`);
+  expectValidatorRules(specOf());
+});
+
+test("ARK-T682 a validator start with a rules file holds the validator rules and each rules line", () => {
+  const run = buildRun();
+  writeFileSync(join(run.directory, "rules.md"), `${hostRules.join("\n")}\n`);
+  started(run, "v");
+  const spec = specOf();
+  expectValidatorRules(spec);
+  for (const rule of hostRules) expect(spec.split("\n")).toContain(rule);
+  expect(spec.indexOf("Validator rules:")).toBeLessThan(spec.indexOf(hostRules[0]));
+});
+
+test("ARK-T682 a validator started again after an interrupt still gets the validator rules and the interrupt brief", () => {
+  const run = buildRun();
+  interruptedStep(run, "v", { session: true });
+  started(run, "v");
+  const fresh = orca.workers().at(-1)!;
+  expect(fresh.kind).toBe("agent");
+  interruptedBrief(fresh.spec);
+  expectValidatorRules(fresh.spec);
+});
+
+test("ARK-T682 an implementer and a reviewer start hold the rules file and none of the validator rules", () => {
+  const run = buildRun();
+  writeFileSync(join(run.directory, "rules.md"), `${hostRules.join("\n")}\n`);
+  started(run, "a");
+  started(run, "reviewer");
+  expect(specOf(1)).toMatch(/reviewer/i);
+  for (const spec of [specOf(0), specOf(1)]) {
+    for (const rule of hostRules) expect(spec.split("\n")).toContain(rule);
+    expect(spec).not.toContain("Validator rules:");
+    expect(spec).not.toMatch(/pkill|killall|\bPID\b|bare `bun test`|`cli` suite command/i);
+  }
 });
 
 test("ARK-T215 a refused start makes no worker-start call and appends no event", () => {

@@ -6,7 +6,7 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-14-ARK-488-1
+changed_by: 2026-11-14-ARK-508-1
 ---
 
 ## Objective
@@ -24,6 +24,8 @@ ARK-494 changed the `test-case new` description in the snapshot, together with `
 ARK-496 changed the `run step` description in the snapshot, together with `cli/commands/run.ts` (a `finish` of an implementer step runs the plan membership check of `ark test` and is refused when a changed test holds a case id that `test_cases` of plan.yml does not list). ARK-496 changed no other record.
 
 ARK-488 changes the `gate record` record: its usage gains `[--criteria <file>]`, `--criteria` is a value flag (the probe of step 3b must report `--criteria needs a value`), and its description names the criteria file (the mapping with `acceptance_criteria`, the run-folder-relative or absolute path, the refusals that write nothing). Minimum 3 and maximum 4 stay. Serves ARK-488/AC1.
+
+ARK-508 changes the `run step` description in the snapshot, together with `cli/commands/run.ts` and `docs/reference/cli.md`: it adds the validator rules to what the spec of `ark run step <run> <step> start` holds. No other record changes.
 
 ## Preconditions
 
