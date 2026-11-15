@@ -22,7 +22,7 @@ The write itself is ARK-T677; accept without the flag is ARK-T679. Existing proo
 - Criteria files in the run folder, each a mapping with `acceptance_criteria` unless said:
   - `unknown-key.yml`: valid entries and one entry with the extra key `owner: me`.
   - `top-key.yml`: valid, plus a top-level key `note: x`.
-  - `manual.yml`: one entry with `manual: true` and no `method`.
+  - `manual.yml`: one entry with `manual: true` and `method: inspection`.
   - `dup.yml`: `AC1` and `ARK-901-AC1` (the same criterion in two forms); and `dup-same.yml`: `AC1` twice.
   - `method.yml`: one entry with `method: review`.
   - `empty-list.yml`: `acceptance_criteria: []`; `no-key.yml`: a mapping without the key; `empty.yml`: an empty file; `bare-list.yml`: a top-level list; `syntax.yml`: text that is not valid YAML.
@@ -42,8 +42,8 @@ The write itself is ARK-T677; accept without the flag is ARK-T679. Existing proo
 ## Expected results
 
 - Every refusing run (steps 1 to 4, and the last accept of step 5): exit 1; stderr holds one `ark: ` line with the reason; stdout shows no success line; `ticket_file`, `ticket.md` and `events.ndjson` are byte for byte the snapshot taken before that run; no new file in the run folder or the tickets folder.
-- Step 1: the line names the cause: `unknown-key.yml` the key `owner`; `top-key.yml` the key `note`; `manual.yml` the key `manual`; `dup.yml` and `dup-same.yml` the duplicate criterion id (both forms count as the same id); `method.yml` the criterion and `review`, and lists the legal methods; `empty-list.yml`, `no-key.yml`, `empty.yml` that the file holds no criteria; `bare-list.yml` and `syntax.yml` that the file is not a mapping with `acceptance_criteria`; `no-text.yml` the entry that needs `id` and `text`; `bad-verified.yml` that `verified_by` must be a list. `test-empty.yml` (both variants) names `AC2` and the empty `verified_by` of a `method: test` criterion, and the text `new-first` of its valid first entry is not in `ticket_file` (the whole file is validated before the first byte is written); `ticket_file` still holds `AC1` with `old`.
-- Step 2: both lines name the path that was not found, and say it is looked up in the run folder; the file that exists only in the cwd is not read.
+- Step 1: the line names the cause: `unknown-key.yml` the key `owner`; `top-key.yml` the key `note`; `manual.yml` the key `manual`; `dup.yml` and `dup-same.yml` the duplicate criterion id (both forms count as the same id); `method.yml` the criterion and `review`, and lists the legal methods; `empty-list.yml` and `no-key.yml` that the file holds no criteria; `empty.yml` and `bare-list.yml` that the file is not a mapping with `acceptance_criteria`; `syntax.yml` that it is not valid YAML; `no-text.yml` the entry that needs `id` and `text`; `bad-verified.yml` that `verified_by` must be a list. `test-empty.yml` (both variants) names `AC2` and the empty `verified_by` of a `method: test` criterion, and the text `new-first` of its valid first entry is not in `ticket_file` (the whole file is validated before the first byte is written); `ticket_file` still holds `AC1` with `old`.
+- Step 2: both lines name the path as given and say `not found` (`does-not-exist.yml: not found`, `cwd-only.yml: not found`); the file that exists only in the cwd is not read.
 - Step 3: `edit` and `abort` with `--criteria` exit 1 and the line names `--criteria` as valid only for `criteria accept`; the phase stays `awaiting_criteria` (`abort` does not close the run, `edit` is not silently accepted with the flag ignored).
 - Step 4: exit 1 and the line names `--criteria`; the plan gate is not answered.
 - Step 5: the accept without the flag exits 0, appends `criteria.updated` and `gate.answered`, and moves to `planning`; the snapshot for the refusal is taken after it. The accept with `--criteria good.yml` in `planning` exits 1 and the ticket, the run folder copy and the events are as after the first accept.

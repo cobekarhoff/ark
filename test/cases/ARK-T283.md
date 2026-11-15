@@ -21,13 +21,15 @@ ARK-380 changed three descriptions in the snapshot, together with `cli/commands/
 
 ARK-494 changed the `test-case new` description in the snapshot, together with `cli/commands/test-case.ts` (it now says the command also refuses in a project folder, `ARK_HOME/projects/<project>`, and names the `--run` form). ARK-494 changed no other record.
 
+ARK-496 changed the `run step` description in the snapshot, together with `cli/commands/run.ts` (a `finish` of an implementer step runs the plan membership check of `ark test` and is refused when a changed test holds a case id that `test_cases` of plan.yml does not list). ARK-496 changed no other record.
+
 ARK-488 changes the `gate record` record: its usage gains `[--criteria <file>]`, `--criteria` is a value flag (the probe of step 3b must report `--criteria needs a value`), and its description names the criteria file (the mapping with `acceptance_criteria`, the run-folder-relative or absolute path, the refusals that write nothing). Minimum 3 and maximum 4 stay. Serves ARK-488/AC1.
 
 ## Preconditions
 
 - The worktree on the latest commit of the branch, with dependencies installed.
 - Every probe of steps 2 to 6 runs in an empty temporary directory used as `HOME`, `ARK_HOME` and the working directory, with `ARK_PROJECT` cleared, addressing the CLI by absolute path (`bun <worktree>/cli/ark.ts`), so no handler that does run can touch real projects. The directory is removed afterwards.
-- A snapshot file committed in `test/`, made by running the probe below. It was first captured at the ARK-372 base (27 commands, before any move); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs changed records in it when they changed a command (ARK-480, ARK-380, ARK-494, ARK-488; see the Objective). The snapshot holds, for each command in table order: usage, description, each usage-advertised flag with arity, probed minimum, probed maximum or unbounded.
+- A snapshot file committed in `test/`, made by running the probe below. It was first captured at the ARK-372 base (27 commands, before any move); the three `services` commands were added to it when ARK-372 merged main (`fe7b2dd`), and later runs changed records in it when they changed a command (ARK-480, ARK-380, ARK-494, ARK-496, ARK-488; see the Objective). The snapshot holds, for each command in table order: usage, description, each usage-advertised flag with arity, probed minimum, probed maximum or unbounded.
 
 ## Steps
 

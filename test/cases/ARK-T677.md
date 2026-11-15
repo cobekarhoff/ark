@@ -22,7 +22,7 @@ The refusals are ARK-T678; accept without the flag is ARK-T679. Existing proof m
   a. `acceptance_criteria: []`;
   b. the key absent;
   c. a block list with a trailing comment on one line and a `verified_by: [ARK-T1]` flow list;
-  d. a block list that is the last front matter key, and the same block followed by another key (`milestone: M5`).
+  d. a block list followed by another key (`milestone: M5`); the block of form c is the last front matter key.
 - A criteria file `<run folder>/criteria.yml`: a mapping with `acceptance_criteria` of three entries: `AC1` with `method: test` and `verified_by: [ARK-T10, ARK-T11]`; `ARK-901-AC2` with `method: inspection`, no `verified_by`, and a text that holds a colon, a double quote and a `#`; `ARK-901/AC3` with `method: demonstration` and `verified_by: []`. The three ids are in the three forms the ticket loader accepts (`AC<k>`, `<ticket>-AC<k>`, `<ticket>/AC<k>`).
 - The cwd of the `ark` process is `<run folder>/workspace`, as the run lead's is.
 
@@ -31,7 +31,7 @@ The refusals are ARK-T678; accept without the flag is ARK-T679. Existing proof m
 1. For each ticket form a to d, reset the run to `awaiting_criteria` (a fresh run for each form) and run `ark gate record <run> criteria accept --criteria criteria.yml --note "looks right"` (a bare name, from the cwd above). Keep the criteria file bytes and the ticket file bytes from before.
 2. Read `ticket_file`, `<run folder>/ticket.md`, the criteria file, `events.ndjson` and `state.json`. List the files in the tickets folder and the run folder.
 3. Parse the new `ticket_file` with the front matter reader that `ark run start` uses (`frontmatter` and `parseCriteria` of `cli/ticket.ts`) and compare the list with the criteria file.
-4. In a fresh run, with form c, run the same command with the absolute path of `criteria.yml`.
+4. In a fresh run, with form b (the key absent), run the same command with the absolute path of `criteria.yml`.
 
 ## Expected results
 
