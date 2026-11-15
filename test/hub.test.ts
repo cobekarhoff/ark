@@ -588,8 +588,7 @@ test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only termin
     ticket: { id: "ARK-805", title: "Open" },
     phase: "building",
   });
-  // The first Orca call answers 2.5 s late, past the hub's 2 s reader timeout: the first read fails as under load and a later one has to make `term-worker` live (ARK-504/AC1).
-  const state = installFakeTools({ orca: orcaAnswersFor(run), orcaFirstCallSleepSeconds: 2.5 });
+  const state = installFakeTools({ orca: orcaAnswersFor(run) });
   const { baseUrl } = await start();
   const own = new URL(baseUrl).host;
   const post = (terminal: unknown, origin: string | null = baseUrl) =>

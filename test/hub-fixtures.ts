@@ -369,8 +369,6 @@ export type FakeToolOptions = {
   };
   /** Seconds each Orca call sleeps before it answers. */
   orcaSleepSeconds?: number;
-  /** Seconds only the first Orca call sleeps, so a test can make the first hub read time out and the next one answer at once. */
-  orcaFirstCallSleepSeconds?: number;
   /** `orca terminal switch` exits 1. Every call is logged in `orca.log` either way. */
   orcaSwitchFails?: boolean;
   /** `up` answers, `down` fails every call, `twice` answers each command twice and then fails. */
@@ -446,7 +444,6 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   for (const [orcaRun, workers] of Object.entries(options.orca?.workersByRun ?? {}))
     put(`orca.workers.${orcaRun}`, wrap(workers, "workers"));
   put("orca.sleep", String(options.orcaSleepSeconds ?? 0));
-  put("orca.firstsleep", String(options.orcaFirstCallSleepSeconds ?? 0));
   put("orca.switchfails", options.orcaSwitchFails ? "1" : "0");
   put("orca.mode", options.orcaMode ?? "up");
   put("plannotator.mode", options.plannotatorMode ?? "up");
@@ -516,8 +513,6 @@ export function fakeToolScripts(state: string): {
     orca: `echo "$*" >> '${state}/orca.log'
 ${gateWaitFor("orca")}
 sleep "$(cat '${state}/orca.sleep')"
-# mkdir is atomic: of the parallel first calls exactly one takes the delay.
-[ "$(cat '${state}/orca.firstsleep')" != 0 ] && mkdir '${state}/orca.first' 2>/dev/null && sleep "$(cat '${state}/orca.firstsleep')"
 cmd=$(printf '%s %s' "$1" "$2" | tr -c 'a-z' '_')
 # The hub's queue source reads task-list with --ready or --status: its own count, so it never uses up the agents' two answers.
 case " $* " in *" --ready "*|*" --status "*) cmd="\${cmd}_queue" ;; esac
