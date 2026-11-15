@@ -11,7 +11,7 @@ changed_by: 2026-11-14-ARK-508-1
 
 ## Objective
 
-Prove that the spec the fake dispatched worker receives from `ark run step <run> <step> start` for a validator step holds four rules, and that neither the implementer nor the reviewer gets them: never run a bare `bun test`, never kill by name (`pkill`, `killall`), stop only a PID the validator started, and prove an analysis AC that names `bun test` with the `cli` suite command of `ark.yml` (with its `<cores>` and `{report}` placeholders filled in, not a bare `bun test` and not `bun run test`). The case reads the spec the fake Orca received through `worker-start`, not the output of `buildSpec` called directly (`ARK-T214` owns the spec of an implementer step, `ARK-T409` reads lines 0 and 1 of a validator spec, `ARK-T302` reads the `Last reviewed head` line of a reviewer spec; none starts a validator and reads its rules).
+Prove that the spec the fake dispatched worker receives from `ark run step <run> <step> start` for a validator step holds four rules, and that neither the implementer nor the reviewer gets them: never run a bare `bun test`, never kill by name (`pkill`, `killall`), stop only a PID the validator started, and prove an analysis AC that names `bun test` with the run's full `ark test <run>`, which runs the `cli` suite command of `ark.yml` inside the shared test budget, never by running that suite command by hand (and not a bare `bun test`, not `bun run test`). The case reads the spec the fake Orca received through `worker-start`, not the output of `buildSpec` called directly (`ARK-T214` owns the spec of an implementer step, `ARK-T409` reads lines 0 and 1 of a validator spec, `ARK-T302` reads the `Last reviewed head` line of a reviewer spec; none starts a validator and reads its rules).
 
 Serves ARK-508/AC3.
 
@@ -33,7 +33,7 @@ Expected: When `ark run step <run> <step> start` starts a validator step, the sy
 ## Expected results
 
 - Each `start` exits 0. The spec read is the one of the `worker-start` call that this start made.
-- Class 1: the spec states, in words, that the validator never runs a bare `bun test`, never kills a process by name (it names both `pkill` and `killall`), stops only a process it started and only by its PID, and proves an analysis AC that names `bun test` with the `cli` suite command of `ark.yml` and says to fill in its `<cores>` and `{report}` placeholders. The spec still holds the first line `/skill:ark-validator <run> v` and the role sentence.
+- Class 1: the spec states, in words, that the validator never runs a bare `bun test`, never kills a process by name (it names both `pkill` and `killall`), stops only a process it started and only by its PID, and proves an analysis AC that names `bun test` with the run's full `ark test <run>`, which runs the `cli` suite command of `ark.yml` inside the shared test budget, and never runs that suite command by hand. The spec still holds the first line `/skill:ark-validator <run> v` and the role sentence.
 - Class 2: the spec holds the four validator rules and both `rules.md` lines, each line verbatim, and neither text replaces the other.
 - Class 3: the spec of the second start holds the four validator rules and the interrupt brief.
 - Class 4: the implementer spec and the reviewer spec each hold both `rules.md` lines and none of the four validator rules (no `pkill`, no `killall`, no `PID`, no `cli` suite instruction).

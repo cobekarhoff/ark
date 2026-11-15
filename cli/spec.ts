@@ -118,7 +118,7 @@ export function buildSpec(options: {
       "Validator rules:",
       "- Never run a bare `bun test`, and never `bun run test`: other runs' tests share the host.",
       "- Never kill a process by name or pattern (`pkill`, `killall`, `kill` on a `ps` grep). Stop only a process you started, by its PID.",
-      "- Prove an analysis AC that names `bun test` with the `cli` suite command of `ark.yml`, with its `<cores>` and `{report}` placeholders filled in (a temp file for `{report}`).",
+      "- Prove an analysis AC that names `bun test` with the run's full `ark test <run>`, which runs the `cli` suite command of `ark.yml` inside the shared test budget. Never run that suite command by hand.",
     );
   const rules = join(directory, "rules.md");
   if (existsSync(rules)) lines.push("Rules:", readFileSync(rules, "utf8").trimEnd());
