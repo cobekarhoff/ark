@@ -26,6 +26,7 @@ import type { Socket } from "node:net";
 import { dirname, join } from "node:path";
 import type { Gate, ProjectQueue, RunView, Snapshot, TicketView } from "../../hub/types.ts";
 import type { ArkEvent } from "../../cli/events.ts";
+import { observePushes, waitForAge, waitForChipGone } from "./stale-wait.ts";
 import type {
   ConversationAgent,
   ConversationMessage,
@@ -282,8 +283,6 @@ test("ARK-T133 the page sends no request but its first load and one event stream
   page.on("request", (request) => requests.push(request));
   await open(page, baseUrl, "");
   await expect(page.getByTestId("run")).toHaveCount(1);
-  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-  const { waitForChipGone } = await import("./stale-wait");
   await waitForChipGone(page); // every source answered: the first load is complete
   const firstLoad = requests.length;
 
@@ -680,8 +679,6 @@ test("ARK-T315 a source that stops answering keeps its last good value and shows
   });
   const baseUrl = await launch();
   await page.clock.install(); // before the load: the chip's minute timer must be the clock's
-  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-  const { observePushes, waitForAge } = await import("./stale-wait");
   await observePushes(page);
   await open(page, baseUrl, "");
 
@@ -702,7 +699,7 @@ test("ARK-T315 a source that stops answering keeps its last good value and shows
   writeFileSync(join(state, "orca.mode"), "up");
   writeFileSync(join(state, "plannotator.mode"), "up");
   await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 20_000 });
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 30_000 });
+  await waitForChipGone(page);
   writeFileSync(join(state, "orca.mode"), "down");
   writeFileSync(join(state, "plannotator.mode"), "down");
   await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 20_000 });
@@ -3437,8 +3434,6 @@ test("ARK-T27 Home, Runs and Roadmap send no request after the first load, and a
     "6 pass · 0 fail",
     { timeout: 30_000 },
   );
-  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-  const { waitForChipGone } = await import("./stale-wait");
   await waitForChipGone(page);
   const firstLoad = requests.splice(0);
   expect(firstLoad.filter((path) => path === "/events")).toHaveLength(1);
@@ -4201,8 +4196,6 @@ test("ARK-T316 j k / Enter and Esc work on Roadmap, Esc returns to the same scro
   await open(page, baseUrl, "roadmap");
   const rows = page.getByTestId("ticket-row");
   await expect(rows).toHaveCount(44);
-  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-  const { waitForChipGone } = await import("./stale-wait");
   await waitForChipGone(page); // the nav stops growing once every source has answered
   const selected = page.locator('[data-testid="ticket-row"][aria-current="true"]');
 
@@ -4712,7 +4705,7 @@ test("ARK-T670 a failed unread read shows ? and unavailable on the tile, keeps t
   // The read recovers: the value returns and the stale chip goes.
   show([unreadMessage("question", 95)]);
   await expect(tile.locator(".big")).toHaveText("1");
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 30_000 });
+  await waitForChipGone(page);
 });
 
 test("ARK-T670 at 1024 px the warning words of the tile stay whole", async ({ page }) => {
@@ -4991,8 +4984,6 @@ test("ARK-T136 a ticket and a run of another project open by direct link with th
 
   // From a ticket of the filter's project, Esc returns to the same scroll position.
   await open(page, baseUrl, "roadmap?project=alpha");
-  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-  const { waitForChipGone } = await import("./stale-wait");
   await waitForChipGone(page); // the layout settles once every source has answered
   const item = page.locator('[data-testid="review-item"][data-ticket="ARK-939"]');
   await item.evaluate((node) => node.scrollIntoView({ block: "center" }));
@@ -5127,8 +5118,6 @@ test("ARK-T317 a filter change on Home, Runs and Roadmap sends no request, and /
   for (const [hash, ready] of views) {
     await open(page, baseUrl, hash);
     await ready();
-    // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-    const { waitForChipGone } = await import("./stale-wait");
     await waitForChipGone(page); // the first load is complete
     requests.length = 0;
     for (const name of ["alpha", "beta", "All projects"]) {
@@ -5289,8 +5278,6 @@ test("ARK-T318 with session models on the run page, / and /nope answer with a p9
 
   await open(page, baseUrl, "");
   await expect(page.getByTestId("run")).toHaveCount(1);
-  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-  const { waitForChipGone } = await import("./stale-wait");
   await waitForChipGone(page);
   for (const path of requests.splice(0))
     expect(path === "/" || path === "/events" || path.startsWith("/assets/"), path).toBe(true);
@@ -9776,8 +9763,6 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
       }
     };
   });
-  // Dynamic import: the helper file is created after this test, and a static import would fail the load of every test in this file.
-  const { observePushes, waitForAge } = await import("./stale-wait");
   await observePushes(page);
   await open(page, proxy.url, "");
   // The chip is absent until the first snapshot: wait for it, or the count-0 wait below passes at once.
@@ -9786,7 +9771,7 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   // read and so an age, never "unknown", however slow the runner is.
   writeFileSync(join(state, "orca.mode"), "up");
   writeFileSync(join(state, "plannotator.mode"), "up");
-  await expect(page.getByTestId("stale-chip")).toHaveCount(0, { timeout: 60_000 });
+  await waitForChipGone(page);
   writeFileSync(join(state, "orca.mode"), "down");
   writeFileSync(join(state, "plannotator.mode"), "down");
 
@@ -9896,7 +9881,7 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   // No stale source: dropping the stream shows the banner with no chip.
   writeFileSync(join(state, "orca.mode"), "up");
   writeFileSync(join(state, "plannotator.mode"), "up");
-  await expect(chip).toHaveCount(0, { timeout: 60_000 });
+  await waitForChipGone(page);
   proxy.cut();
   await expect(banner).toHaveText(/^Disconnected: data frozen at /);
   expect(await heightOf()).toBe(height);
