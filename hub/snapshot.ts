@@ -16,6 +16,7 @@ import {
   readPlannotator,
   readProviderLimits,
   readQueues,
+  readChiefUnreads,
   signatureOf,
   type InboxRead,
   type RunWorkers,
@@ -45,6 +46,7 @@ import type {
   GateKind,
   MergeRequestView,
   ProviderWindow,
+  ProjectUnread,
   RoleTimes,
   RunDetail,
   RunEvidence,
@@ -80,6 +82,7 @@ export const intervalMilliseconds: Record<SourceName, number> = {
   agentWait: allIntervalMilliseconds || 3000,
   evidence: allIntervalMilliseconds || 5000,
   queue: allIntervalMilliseconds || 3000, // its own source: a slow Orca queue never delays another source
+  chiefUnread: allIntervalMilliseconds || 15_000, // the whole inbox is read (about 2 MB): as slow as the conversation read
   resources: allIntervalMilliseconds || 5000, // one ps and one lsof: about 0.2 s of CPU, so slower than Orca
 };
 /** The git facts of a run's repo graph: its own loop, like the inbox read, so no git runs in `viewOf`. */
@@ -162,6 +165,7 @@ export function createSnapshotReader() {
     agentWait: emptySlot<Map<string, PsAgent[]>>(),
     evidence: emptySlot<EvidenceValue>(),
     queue: emptySlot<true>(),
+    chiefUnread: emptySlot<true>(),
     resources: emptySlot<ResourcesView>(),
   };
   const resourcesReader = createResourcesReader();
@@ -169,6 +173,8 @@ export function createSnapshotReader() {
   let githubFacts = new Map<string, MergeRequestFacts>();
   // The latest queue read of each project, failures included: the reason is data (AC4), so it lives beside the slot, not in it.
   let queueReads: Map<string, QueueRead> | null = null;
+  // The latest unread read of each project, failures included: like `queueReads`, so a failing inbox is an `unavailable` entry and never a 0.
+  let chiefUnreadReads: ProjectUnread[] | null = null;
   const costs = new Map<string, { key: string; cost: RunCost }>();
   // Git facts of multi-repo runs (branch commits ahead, submodule pointers), by run directory. Read by `repoFactsLoop`, never in `viewOf`.
   // `key` is the event count: a closed run is read once; an open run's branches move without an event, so its entry is read again each tick.
@@ -460,6 +466,7 @@ export function createSnapshotReader() {
         provider_limits: slots.providerLimits.value ?? "unknown",
         role_times: {},
         queues: "unknown",
+        chief_unread: "unknown",
       };
 
     const openRuns = ark.runs.filter((run) => run.state.phase !== "closed");
@@ -538,6 +545,7 @@ export function createSnapshotReader() {
               open: openRuns.filter((run) => run.state.project === project).length,
               ...queueRead,
             })),
+      chief_unread: chiefUnreadReads ?? "unknown",
     };
   }
 
@@ -664,6 +672,14 @@ export function createSnapshotReader() {
         return [...reads.values()].every((queueRead) => !("unavailable" in queueRead))
           ? true
           : null;
+      }),
+    // Failed (stale chip) when any project's inbox could not be read; the reason is in `chiefUnreadReads`.
+    chiefUnread: () =>
+      read("chiefUnread", async () => {
+        const started = generation;
+        const reads = await readChiefUnreads();
+        if (started === generation) chiefUnreadReads = reads;
+        return reads.every((unread) => !("unavailable" in unread)) ? true : null;
       }),
   };
 
@@ -796,6 +812,7 @@ export function createSnapshotReader() {
       "agentWait",
       "evidence",
       "queue",
+      "chiefUnread",
       "resources",
     ] as const)
       loop(() => readers[name](), intervalMilliseconds[name], started);

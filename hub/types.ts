@@ -29,6 +29,7 @@ export type SourceName =
   | "agentWait"
   | "evidence"
   | "queue"
+  | "chiefUnread"
   | "resources";
 /** What a stale source leaves wrong on the page: the stale chip lists it. Exhaustive over SourceName. */
 export const sourceAffects: Record<SourceName, string> = {
@@ -41,6 +42,7 @@ export const sourceAffects: Record<SourceName, string> = {
   agentWait: "Time agents waited on you",
   evidence: "Test evidence of a run",
   queue: "Orca task queue and merge order",
+  chiefUnread: "Unread messages to Master Chief",
   resources: "CPU, memory, swap and process attribution",
 };
 export type SourceStatus = { ok: boolean; read_at: string | null };
@@ -393,6 +395,18 @@ export type ProjectQueue = { project: string; open: number } & (
   | { unavailable: string }
 );
 
+/**
+ * The unread messages to one project's Master Chief Run, every type, read without marking any read
+ * (`inbox`, never `check`). `oldest` is the ISO time the oldest was created, null for none, so the
+ * page ages it. `none` is a project with no Master Chief Run: no inbox, so no count (not 0) and not a
+ * failure. `unavailable` is the reason the read failed (run-list or inbox; never a count of 0).
+ */
+export type ProjectUnread = { project: string } & (
+  | { count: number; oldest: string | null }
+  | { none: true }
+  | { unavailable: string }
+);
+
 export type HostLevel = "normal" | "amber" | "red" | "unchecked";
 
 /** Every number is null when it could not be read, and its level is then `unchecked`. */
@@ -462,6 +476,8 @@ export type Snapshot = {
   role_times: RoleTimes;
   /** One entry for each project, `"unknown"` until the queue source has answered once. */
   queues: ProjectQueue[] | "unknown";
+  /** One entry for each project, `"unknown"` until the chiefUnread source has answered once. */
+  chief_unread: ProjectUnread[] | "unknown";
   /** The latest host and process reading, or "unknown" until the resources source has answered once. History is not here: `GET /api/resources/history`. */
   resources: ResourcesView | "unknown";
 };

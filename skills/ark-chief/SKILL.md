@@ -306,7 +306,7 @@ When the human gives you a bug ticket and it traces back to an earlier run, or y
 
 ## 10. Take over from live state
 
-When you take over a Master Chief Run (section 2, step 5) or start as a replacement from `ark chief handover`, run `ark chief state --project <project>` and work from its output. It reads the open runs, run leads, queued Orca Tasks, the main head, gates, concurrency, the closed runs since the last interview and the host (memory, swap, load, CPU, free disk) live. A section that says `unavailable` is unknown, not empty: check it yourself before you act.
+When you take over a Master Chief Run (section 2, step 5) or start as a replacement from `ark chief handover`, run `ark chief state --project <project>` and work from its output. It reads the open runs, run leads, queued Orca Tasks, the unread messages to your Orca Run (`## Master Chief inbox`: `unread for Master Chief: <n>, oldest <m> min`, read without marking any read), the main head, gates, concurrency, the closed runs since the last interview and the host (memory, swap, load, CPU, free disk) live. A section that says `unavailable` is unknown, not empty: check it yourself before you act. An oldest unread message older than 15 minutes means a `check --wait` returned only the first message: run `orca orchestration check --json` now.
 
 `handoff.md` keeps only standing rules: decisions of the human that stay true, and how the human wants Master Chief to work. Do not write a State section in it. State goes stale in minutes, and `ark chief state` replaces it.
 
@@ -331,7 +331,7 @@ Keep the supervise loop (section 7) in its own terminal: the services send their
 
 ## 13. Catch the human up
 
-When the human asks to be caught up ("catch me up", "what's waiting"), give one reply. Build it from two reads: `ark chief state --project <project>`, and your Orca inbox read without a wait (`orca orchestration check --json`; do not ack a message you did not handle). A state section that says `unavailable` is unknown: say so in the reply, never call it empty.
+When the human asks to be caught up ("catch me up", "what's waiting"), give one reply. Build it from two reads: `ark chief state --project <project>` (its `## Master Chief inbox` line says how many messages wait and how old the oldest is, without consuming them), and your Orca inbox read without a wait (`orca orchestration check --json`; do not ack a message you did not handle). A state section that says `unavailable` is unknown: say so in the reply, never call it empty.
 
 The reply has three parts, in this order:
 
