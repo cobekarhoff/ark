@@ -46,9 +46,36 @@ git -C ~/.ark/projects/<project> restore --source=<revision> -- ROADMAP.md
 
 Right after a bad write, before the next pass, `git -C ~/.ark/projects/<project> restore ROADMAP.md` is enough: it takes the file from the last commit.
 
+## Check that commits run
+
+Compare two dates. The first is the last line of `~/.ark/projects/<project>/services/project-autocommit.log`. The second is the date of the last commit, from `git log -1`:
+
+```sh
+tail -n 1 ~/.ark/projects/<project>/services/project-autocommit.log
+git -C ~/.ark/projects/<project> log -1 --format=%cd
+```
+
+A pass that made a commit writes `autocommit committed at <date> in <folder>`. A pass that failed writes `autocommit failed at <date> in <folder>, will retry on the next pass`. A pass with no change writes nothing. The last line of the log should be about as new as the last commit.
+
+If the log shows `autocommit failed` every two minutes and the last commit is old, a stale `.git/index.lock` is the usual cause. A git process that died left that file, and git never clears it. The service never removes it either. Check that no git process runs in the folder:
+
+```sh
+ps aux | grep '[g]it'
+lsof ~/.ark/projects/<project>/.git/index.lock
+```
+
+If both show nothing for this folder, remove the lock:
+
+```sh
+rm ~/.ark/projects/<project>/.git/index.lock
+```
+
+The next pass, within 120 seconds, makes the commit and logs a new dated line.
+
 ## Limits
 
 - Nothing from before the first commit can be restored. A file that was lost before `ark services install` ran is not in the history.
 - Two changes between two passes make one commit, and a change that is undone between two passes is not recorded.
 - The repository has no remote, and the service never pushes. A copy of the folder is a backup only if you make one.
 - `ark services uninstall` stops the commits and leaves the repository and its history in place.
+- When your own `.gitignore` has no `services/` line, the log is a tracked file. Each `autocommit committed` line then changes it, so the next pass commits again. Add `services/` to your `.gitignore` to stop that.

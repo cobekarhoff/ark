@@ -6,8 +6,11 @@
 # qe/, audit/ and prototypes/; an existing .gitignore is left alone. A pass runs `git add -A` and commits only when
 # `git status --porcelain` is not empty, with the message "autocommit: <count> changed files". The commit sets
 # its own identity and turns off signing and hooks, so launchd (no global identity) cannot make it fail. It never
-# pushes, and it never deletes an index.lock: a failed commit (a held lock, for example) is written to stderr, which
-# launchd keeps in services/project-autocommit.log, and the next pass tries again.
+# pushes. Every line it logs goes to stderr, which launchd keeps in services/project-autocommit.log, and starts with
+# a date: "autocommit committed at <YYYY-MM-DD HH:MM:SS> in <folder>" for a pass that made a commit, and
+# "autocommit failed at <YYYY-MM-DD HH:MM:SS> in <folder>, will retry ..." for a failed one. A pass with no change
+# logs nothing. It never deletes an index.lock: a stale lock (left by a git process that died) fails every pass until
+# a person removes it by hand, and the next pass then commits.
 # Usage: project-autocommit.sh <workspace> <interval seconds> [--once]
 # The workspace is the project workspace; the script does not use it. --once makes one pass and exits 1 when the
 # commit failed. Exits 1 at once when ARK_PROJECT is empty, unset or not a plain folder name, or has no folder.
@@ -30,12 +33,13 @@ commitPass() {
   local changedFileCount
   changedFileCount=$(projectGit diff --cached --name-only | wc -l | tr -d ' ')
   projectGit -c user.name="Ark autocommit" -c user.email="autocommit@ark.invalid" -c commit.gpgsign=false \
-    -c core.hooksPath=/dev/null commit -q -m "autocommit: $changedFileCount changed files"
+    -c core.hooksPath=/dev/null commit -q -m "autocommit: $changedFileCount changed files" || return 1
+  echo "autocommit committed at $(date '+%Y-%m-%d %H:%M:%S') in $project" >&2
 }
 
 while true; do
   if ! commitPass; then
-    echo "autocommit failed at $(date +%H:%M:%S) in $project, will retry on the next pass" >&2
+    echo "autocommit failed at $(date '+%Y-%m-%d %H:%M:%S') in $project, will retry on the next pass" >&2
     [ "${3:-}" = --once ] && exit 1
   fi
   [ "${3:-}" = --once ] && break

@@ -1,0 +1,48 @@
+---
+id: ARK-T668
+title: 'ARK-T668 project-autocommit.sh dates its log lines: a failed pass after a stale index.lock ends the log with a dated "autocommit failed" line, a pass that commits logs a dated line, an idle pass logs nothing'
+level: integration
+technique: state transition (committed, idle, stale lock, lock removed by hand, committed again; once and loop mode) and equivalence classes of a pass outcome (commit made, nothing to commit, commit failed)
+priority: high
+risk: after a stale index.lock (a file with no process behind it, which git never clears) the commits stop and the last line of services/project-autocommit.log has no date or is not the failure, so a person cannot tell when they stopped; the failure line carries only a time of day (HH:MM:SS, no day) so a stop of a week looks like one of a minute; a good pass after the lock is removed logs nothing or logs text that contains "autocommit failed", so the last line still reads as a failure and the date of the last good commit is lost; an idle pass logs a line every interval, so the log grows 720 lines a day with no rotation and the last line stops showing the last commit; a stray line is written after the failure line or the success line, so the last line of the log is not the pass result; the loop that launchd runs logs a different (undated or non-final) line than the --once pass; the script deletes the stale lock itself
+status: active
+changed_by: 2026-11-14-ARK-495-1
+---
+
+## Objective
+
+`scripts/project-autocommit.sh <workspace> <interval>`, run as launchd runs it (without `--once`, a loop) with stdout and stderr appended to the same file, `$ARK_HOME/projects/$ARK_PROJECT/services/project-autocommit.log` (`cli/agent.ts` sets `StandardOutPath` and `StandardErrorPath` to one `agent.log`), writes into that log a line with a date (`YYYY-MM-DD HH:MM:SS`) for each pass that makes a commit and for each pass that fails, and nothing for a pass with no change. `--once` makes one pass of the same loop body and is the way the case drives single passes. After a stale `.git/index.lock` (a lock file with no git process, left by a crashed commit) a pass makes no commit, leaves the lock, and the last line of the log says `autocommit failed at <date>`; it comes after the git error block of that pass, and `--once` exits 1. When a person removes the lock by hand, the next pass commits the waiting change (`--once` exits 0) and its dated line is the last line of the log; that line does not contain `autocommit failed`. This is the AC1 case: the last log line carries the date of the failure and a later good pass logs its date, so the date of the last log line can be compared with `git log -1` as `docs/how-to/restore-project-files.md` says. A live lock holder (a process that owns the lock) and the loop surviving a failed pass are owned by ARK-T663 steps 7 and 8; what the status commands print from the last line is owned by ARK-T297.
+
+## Preconditions
+
+- A scratch `ARK_HOME` and a project `ark` with `tickets/ARK-1.md` (front matter `status: todo`), `ROADMAP.md`, `ark.yml` and `learnings.md`, and no `.git`. `HOME` is a scratch directory with a global git config that has no `user.name` or `user.email` (the script sets its own identity), as in ARK-T663.
+- `<project>/services/project-autocommit.log` does not exist yet. Each run of the script, in `--once` and in loop mode, has both its stdout and its stderr appended to that one file (`>> log 2>&1`), the way launchd does with `StandardOutPath` and `StandardErrorPath`. The case reads the last non-empty line of that file with the same rule as `servicesStatusText`.
+- Real `git`, real `date`, real `sleep`, no fake command. The case reads no clock: a date is matched by the pattern `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`, never compared with the time of the run.
+- The stale lock is a file that the case writes by hand. No process holds it: the case starts none, and the file holds no pid of a live process.
+- Loop steps use interval 60. The loop runs one pass at once and then sleeps 60 seconds, so the log is stable while the case reads it. The end of a pass is an event, never a fixed wait: the loop process has a `sleep` child only after the pass (the commit, the `echo` of its line) is complete, so the case waits until the loop process has a `sleep` child and only then reads the log or counts commits. The case ends the loop process and its `sleep` child itself.
+
+## Steps
+
+1. Run the script with `--once`. Record the exit code and the content of the log. Count the commits.
+2. Run it again with `--once` with no change. Record the exit code, and compare the log byte for byte with its content after step 1. Count the commits.
+3. Change the ticket to `status: in_progress`. Write `<project>/.git/index.lock` by hand (empty file, no process). Run the script with `--once`. Record the exit code, count the commits, check that the lock file still exists, and read the log.
+4. Run the script with `--once` again with the lock still in place, and read the log after each run. Record the exit code and read the last line of the log.
+5. Remove `<project>/.git/index.lock` as the person would, by hand (the case removes it, never the script). Run the script with `--once`. Record the exit code, count the commits, show the files of the last commit, and read the log.
+6. Run it once more with `--once` and no change. Compare the log with its content after step 5, and count the commits.
+7. Loop, stale lock. Change the ticket to `status: done` and write `<project>/.git/index.lock` by hand again. Start the script without `--once` (interval 60). Wait until the last non-empty line of the log is a line that starts with `autocommit failed at`. Check that the loop process is alive, count the commits, check the lock file, and read the log. End the loop process and its `sleep` child.
+8. Loop, lock removed by hand. Remove the lock (the case removes it). Start the script without `--once` (interval 60). Wait until the loop process has a `sleep` child: the commit pass is over and its line is written. Check that the loop process is alive, count the commits, show the files of the last commit, and read the log. End the loop process and its `sleep` child. Start the loop once more with no change. Wait until the new loop process has a `sleep` child: its idle pass is over. Read the log, then end that loop process and its `sleep` child.
+
+## Expected results
+
+- Step 1: exit code 0, one commit. The log has exactly one line. It is the commit-pass line (`autocommit committed at`) and matches `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`. It does not contain `autocommit failed`.
+- Step 2: exit code 0, still one commit, and the log is byte for byte the same as after step 1: an idle pass writes nothing, so the last line is still the date of the last commit.
+- Step 3: exit code 1, still one commit, and the lock file still exists and is still empty: the script did not remove it. The log keeps the step 1 line as its first line and has new lines after it. A line above the failure line in this pass names `index.lock` (the git error block of the failed `git add`). The last non-empty line starts with `autocommit failed at`, matches the date pattern and names the project folder: it is the last line of the pass, after the git error block.
+- Step 4: exit code 1 again, still one commit, the lock still there, and the last line of the log is again a dated `autocommit failed at` line. The log has exactly two lines that start with `autocommit failed at` (one for each failed pass), and no new line that starts with `autocommit committed at`. The log keeps the step 3 content as its prefix; each failed pass added its git error block and its failure line, and nothing after the failure line.
+- Step 5: exit code 0. Exactly one new commit, and its files are only `tickets/ARK-1.md`: the change that waited behind the stale lock. The log keeps its step 4 content as its prefix and has exactly one new line after it: the commit-pass line, with a date that matches the pattern. That line is the last line, and it does not contain `autocommit failed`, so the last line no longer reads as a failure.
+- Step 6: exit code 0, still two commits, and the log is byte for byte the same as after step 5.
+- Step 7: the loop process is alive after the failed pass. Still two commits, the lock file still exists and is still empty. The last non-empty line of the log is a new dated line that starts with `autocommit failed at` and names the project folder, after a git error block that names `index.lock`: the loop writes the same failure line as `--once`, as the last line of the pass. The log keeps its step 6 content as its prefix.
+- Step 8: after the lock is removed the loop process is alive once its `sleep` child exists and has made exactly one new commit (three commits), and its files are only `tickets/ARK-1.md`. The log keeps its step 7 content as its prefix and has exactly one new line after it: a dated commit-pass line that does not contain `autocommit failed`, and it is the last line. The loop with no change adds nothing: once the new loop process has its `sleep` child, the idle pass has run, and the log is byte for byte the same as after the commit pass above, so a script that logs every idle pass fails here.
+
+## Screenshot checkpoints
+
+none: script, git and log output only, no UI.
