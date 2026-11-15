@@ -5,8 +5,9 @@ level: integration
 technique: equivalence classes (all projects valid)
 priority: medium
 risk: a valid config makes status print a config error or exit non-zero
-status: active
-changed_by: 2026-11-09-ARK-340-1
+status: retired
+retired_reason: "the only test repeated ARK-T165, which runs ark status on valid configs and asserts exit 0; not.toContain config error adds nothing because a config error exits 1"
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective

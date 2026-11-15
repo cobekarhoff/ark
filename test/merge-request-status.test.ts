@@ -115,7 +115,7 @@ const merge = (repo: string, url: string, number: number) => ({
   number,
 });
 
-test("ARK-200-AC1 status prints ci passed, failed, running and none, and --json lists each failed check with its URL", () => {
+test("ARK-T628 ARK-200-AC1 status prints ci passed, failed, running and none, and --json lists each failed check with its URL", () => {
   const runId = openRun([
     merge("running", "https://github.com/example/run/pull/2", 2),
     merge("none", "https://github.com/example/none/pull/3", 3),
@@ -188,7 +188,7 @@ test("ARK-200-AC1 status prints ci passed, failed, running and none, and --json 
   expect(json[0].failedChecks).toEqual([]);
 });
 
-test("ARK-200-AC2 --since lists only human comments after the time, from GitHub and GitLab, and without --since lists none", () => {
+test("ARK-T629 ARK-200-AC2 --since lists only human comments after the time, from GitHub and GitLab, and without --since lists none", () => {
   const runId = openRun([merge("gitlab", `${GL}/5`, 5)]);
   const user = (login: string, type = "User") => ({ login, type });
   fakeHosts({
@@ -319,7 +319,7 @@ test("ARK-200-AC2 --since lists only human comments after the time, from GitHub 
   expect(JSON.parse(ark("merge-request", "status", runId, "--json").out)[0].comments).toEqual([]);
 });
 
-test("ARK-200-AC2 --since with an unparseable time is refused", () => {
+test("ARK-T630 ARK-200-AC2 --since with an unparseable time is refused", () => {
   const runId = openRun([]);
   fakeHosts({});
   const result = ark("merge-request", "status", runId, "--since", "yesterday-ish");
@@ -327,7 +327,7 @@ test("ARK-200-AC2 --since with an unparseable time is refused", () => {
   expect(result.err).toContain("--since");
 });
 
-test("ARK-200-AC3 status prints conflict for a conflicting GitHub MR and a GitLab MR with conflicts, and not for a clean MR", () => {
+test("ARK-T631 ARK-200-AC3 status prints conflict for a conflicting GitHub MR and a GitLab MR with conflicts, and not for a clean MR", () => {
   const runId = openRun([
     merge("gh-conflict", "https://github.com/example/c/pull/2", 2),
     merge("gl-conflict", `${GL}/3`, 3),
@@ -351,7 +351,7 @@ test("ARK-200-AC3 status prints conflict for a conflicting GitHub MR and a GitLa
   expect(json.map((entry: { conflict: boolean }) => entry.conflict)).toEqual([false, true, true]);
 });
 
-test("ARK-200-AC4 a failed gh call prints unknown for that value, a failed glab jobs call on a failed pipeline still prints ci failed, and the other MRs print normally", () => {
+test("ARK-T632 ARK-200-AC4 a failed gh call prints unknown for that value, a failed glab jobs call on a failed pipeline still prints ci failed, and the other MRs print normally", () => {
   const runId = openRun([
     merge("gh-down", "https://github.com/example/d/pull/2", 2),
     merge("gl-jobs-down", `${GL}/3`, 3),
@@ -416,11 +416,6 @@ const statusLines = (runId: string) => {
 };
 const packageBump = (state: string) =>
   `  bump bump-lib  package core  pin ${PACKAGE_PIN}  ${state}`;
-
-test("ARK-T137 status prints the live state of each upstream MR under the MR that waits for it", () => {
-  const runId = bumpRun("package", PACKAGE_PIN, { state: "merged" });
-  expect(statusLines(runId)).toContain("  waits for !2 (merged)");
-});
 
 test("ARK-T137 status prints unknown for an upstream MR when the host call fails", () => {
   const runId = bumpRun("package", PACKAGE_PIN, { state: "merged" });

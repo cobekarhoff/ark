@@ -6,12 +6,14 @@ technique: "boundary values (cap-1, cap, cap+1) and state transition"
 priority: high
 risk: "The cap is still the constant 2, the count line still reads `of 2`, or the start past the cap records an answer instead of waiting for the human"
 status: active
-changed_by: "2026-11-13-ARK-432-1"
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
 
 Prove that `ark run step <run> <step> start` takes the cap from `escalation_rounds` instead of a constant, and asks the human past it.
+
+It keeps ARK-288-AC2 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 

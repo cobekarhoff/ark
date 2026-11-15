@@ -26,7 +26,7 @@ setDefaultTimeout(30_000);
 const arkEntry = join(import.meta.dir, "..", "cli", "ark.ts");
 
 describe("ark test-case new", () => {
-  test("ARK-311-AC6 eight concurrent processes print eight different consecutive ids and write eight entries", async () => {
+  test("ARK-T650 ARK-311-AC6 eight concurrent processes print eight different consecutive ids and write eight entries", async () => {
     // Eight `ark test-case new ARK` processes at once in one repo.
     const repo = tempGitRepo();
     // An existing entry sets the floor: the next id is one above the highest, not one above the count.
@@ -188,7 +188,7 @@ describe("test case entry format", () => {
     tempArkHome();
   });
 
-  test("ARK-311-AC7 a valid entry passes ark plan check, and so does a workspace with no test/cases/ folder", () => {
+  test("ARK-T651 ARK-311-AC7 a valid entry passes ark plan check, and so does a workspace with no test/cases/ folder", () => {
     startRun({ "test/cases/ARK-T1.md": entryText(validFront("ARK-T1")) });
     expect(problemsOfCheck()).toEqual({ code: 0, problems: "" });
     tempArkHome();
@@ -235,7 +235,7 @@ describe("test case entry format", () => {
     ],
   ];
   for (const [name, content, message] of invalid) {
-    test(`ARK-311-AC7 ark plan check refuses ${name} and names the file`, () => {
+    test(`ARK-T652 ARK-311-AC7 ark plan check refuses ${name} and names the file`, () => {
       startRun({ "test/cases/ARK-T1.md": content });
       const result = problemsOfCheck();
       expect(result.code).toBe(1);
@@ -243,7 +243,7 @@ describe("test case entry format", () => {
     });
   }
 
-  test("ARK-311-AC7 ark test refuses a bad entry in the worktree before it runs a suite, and names the file", () => {
+  test("ARK-T653 ARK-311-AC7 ark test refuses a bad entry in the worktree before it runs a suite, and names the file", () => {
     startRun({ "test/cases/ARK-T1.md": entryText(validFront("ARK-T1")) });
     for (const args of [
       ["plan", "check", runId],
@@ -262,7 +262,7 @@ describe("test case entry format", () => {
     expect(refused.err).toContain('test case entry test/cases/ARK-T1.md has status "draft"');
   });
 
-  test("ARK-311-AC7 test_case_source accepts local and the default, and refuses any other value with a message that lists local", () => {
+  test("ARK-T654 ARK-311-AC7 test_case_source accepts local and the default, and refuses any other value with a message that lists local", () => {
     expect(startRun({}, { test_case_source: "local" }).code).toBe(0);
     tempArkHome();
     expect(startRun({}).code).toBe(0);

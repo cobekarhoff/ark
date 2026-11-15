@@ -16,7 +16,7 @@ changed_by: 2026-11-13-ARK-332-1
 ## Preconditions
 
 - A temp `ARK_HOME` with a project `demo` and a valid `ark.yml`.
-- The harnesses of the roles in that `ark.yml` are on PATH (a stub `PATH` that holds each one), as in ARK-T166. Without them `ark status` exits 1 on `role ...: harness ... not installed`, so steps 1 and 4 would not show a valid config.
+- The harnesses of the roles in that `ark.yml` are on PATH (a stub `PATH` that holds each one), as in ARK-T165. Without them `ark status` exits 1 on `role ...: harness ... not installed`, so steps 1 and 4 would not show a valid config.
 - The `ark` CLI run as a child process (`bun cli/ark.ts status`), with `ARK_PROJECT=demo`.
 
 ## Steps

@@ -6,12 +6,14 @@ technique: "state transition (plan approved to step running)"
 priority: medium
 risk: "A step starts before the plan gate is open, or after approval records no worker; the old assertions (refusal naming the plan gate, building phase, current step) regress when start calls Orca"
 status: active
-changed_by: "2026-11-10-ARK-359-1"
+changed_by: 2026-11-14-ARK-386-1
 ---
 
 ## Objective
 
 Prove that a step starts only after plan approval, and that the start now also records its worker. The case converts the legacy test ARK-153-AC6 of test/gate.test.ts: since ARK-359 a start of a step in plan.yml calls Orca, so the test runs against a fake `orca` on PATH and its title carries this case id.
+
+It keeps ARK-234-AC4 too: the ARK-386 campaign removed the copy test of that criterion (CAMPAIGN.md section 3, Carry).
 
 ## Preconditions
 
