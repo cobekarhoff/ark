@@ -14,7 +14,8 @@ import { join } from "node:path";
 import { tempArkHome, tempGitRepo, writeProject } from "./helpers";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
-setDefaultTimeout(30_000);
+// ARK-506: 90 s, as test-lock.test.ts: an auto-merger test makes up to 7 passes in 3 script calls, each pass starts real `ark` several times, and the cli suite runs beside it.
+setDefaultTimeout(90_000);
 
 const repositoryRoot = join(import.meta.dir, "..");
 const run = "2026-11-02-ARK-900-1";
@@ -55,7 +56,7 @@ function runScript(
 ): ScriptResult {
   const result = Bun.spawnSync(["bash", join(repositoryRoot, "scripts", script), ...args], {
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, ...environment },
-    timeout: 30_000,
+    timeout: 90_000,
   });
   return { code: result.exitCode, out: result.stdout.toString(), err: result.stderr.toString() };
 }
