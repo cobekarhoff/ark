@@ -1,6 +1,6 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { ArkError } from "./errors.ts";
 
 export function arkHome(): string {
@@ -9,6 +9,15 @@ export function arkHome(): string {
 
 export function projectDirectory(project: string): string {
   return join(arkHome(), "projects", project);
+}
+
+/** True when `root` is a project folder, `ARK_HOME/projects/<project>`, listed or not. Reads no `ark.yml`. */
+export function isProjectFolder(root: string): boolean {
+  try {
+    return dirname(realpathSync(root)) === realpathSync(join(arkHome(), "projects"));
+  } catch {
+    return false;
+  }
 }
 
 export function runsDirectory(project: string): string {
