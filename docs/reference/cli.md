@@ -513,7 +513,8 @@ prints `old id touched: <file>:<line> <title>` for each one with an old AC id. I
 ### gate record
 
 ```text
-ark gate record <run> <gate> [<criterion id>] <answer> [--note <text>] [--project <name>]
+ark gate record <run> <gate> [<criterion id>] <answer> [--criteria <file>] [--note <text>]
+    [--project <name>]
 
 Records your answer to a gate. The gates are criteria, strategy, plan, escalation and manual. The
 strategy gate takes the ID of a card in the latest strategy record, or abort. The manual gate proves
@@ -530,6 +531,16 @@ answer older than head: <AC id>` when a head has changed since. Ark refuses an a
 state does not allow, and refuses plan approve while the plan has an open decision. Both `<ticket
 id>/AC<k>` and `<ticket id>-AC<k>` name a criterion. `criteria accept` re-reads the ticket and
 refuses a new-scheme AC with `method: test` and an empty `verified_by` list, and names the AC.
+`criteria accept --criteria <file>` reads the criteria from a YAML file instead: a mapping with one
+key, `acceptance_criteria`, a list of `{id, text, method, verified_by}`; a relative path is read
+from the run folder, an absolute path as it is. It refuses, with an `ark: <reason>` line and no
+write, a file that is missing or not YAML, an unknown key at the top level or in a criterion
+(`manual: true` too: write `method: demonstration`), a duplicate id, an unknown method, an empty
+list and a `method: test` criterion with an empty `verified_by` list. Otherwise it replaces the
+`acceptance_criteria` block of the ticket file (every other line and the body stay, the table in the
+body too), then copies the ticket to the run folder and records the gate as `criteria accept` does.
+It works only with `criteria accept`, in the phase `awaiting_criteria`; with any other gate, answer
+or phase it refuses and writes nothing.
 ```
 
 ### escalate
