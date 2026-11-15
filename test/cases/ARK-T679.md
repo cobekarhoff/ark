@@ -2,9 +2,9 @@
 id: ARK-T679
 title: ARK-T679 `criteria accept` without `--criteria` still re-reads the hand-edited ticket, accepts old-shape criteria and writes nothing to it
 level: integration
-technique: characterization of today's behavior with boundary values (the old `manual: true`, an unknown criterion key) and state transition (awaiting_criteria to planning)
+technique: "characterization of today's behavior with boundary values (the old `manual: true`, an unknown criterion key) and state transition (awaiting_criteria to planning)"
 priority: high
-risk: The strict reader of the new file leaks into `parseCriteria` or into the no-flag path, so a ticket with `manual: true` or an extra criterion key is refused at accept, or the no-flag accept starts to write `ticket_file`
+risk: "The strict reader of the new file leaks into `parseCriteria` or into the no-flag path, so a ticket with `manual: true` or an extra criterion key is refused at accept, or the no-flag accept starts to write `ticket_file`"
 status: active
 changed_by: 2026-11-14-ARK-488-1
 ---

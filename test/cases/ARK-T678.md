@@ -4,7 +4,7 @@ title: ARK-T678 `criteria accept --criteria` refuses an unknown key, a duplicate
 level: integration
 technique: equivalence classes of invalid files and of invalid gate states, boundary values (empty list, one bad entry among valid ones, the same id in two forms), state transition (phase and answer)
 priority: high
-risk: The writer replaces the `acceptance_criteria` block before it validates, so a refused file still leaves a changed ticket (a valid first entry lands, or the block is emptied); the strict reader is missing, so an unknown key or `manual: true` passes silently and the criterion becomes `method: test`; a duplicate is missed because `AC1` and `ARK-901-AC1` differ as strings; `--criteria` with `edit` or `abort` is ignored or closes the run; a file name that exists only in the cwd is read instead of the run folder
+risk: "The writer replaces the `acceptance_criteria` block before it validates, so a refused file still leaves a changed ticket (a valid first entry lands, or the block is emptied); the strict reader is missing, so an unknown key or `manual: true` passes silently and the criterion becomes `method: test`; a duplicate is missed because `AC1` and `ARK-901-AC1` differ as strings; `--criteria` with `edit` or `abort` is ignored or closes the run; a file name that exists only in the cwd is read instead of the run folder"
 status: active
 changed_by: 2026-11-14-ARK-488-1
 ---
