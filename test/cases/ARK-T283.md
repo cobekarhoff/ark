@@ -6,7 +6,7 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-14-ARK-494-1
+changed_by: 2026-11-14-ARK-508-1
 ---
 
 ## Objective
@@ -20,6 +20,8 @@ The test reads the table only through the `ark` process, so it does not depend o
 ARK-380 changed three descriptions in the snapshot, together with `cli/commands/run.ts` and `cli/commands/merge-request.ts`: `run close` (it now names the security scan as a refusal for `handed_off`), `merge-request open` (the security scan: gitleaks and osv-scanner refusals, the `security.accepted` block of ark.yml, the `Security` section of the body) and `status` (the `scanner: <tool> is not installed: brew install <tool>` line, exit 0). The test compares the process output with the snapshot, so it fails if a description and the snapshot drift apart.
 
 ARK-494 changed the `test-case new` description in the snapshot, together with `cli/commands/test-case.ts` (it now says the command also refuses in a project folder, `ARK_HOME/projects/<project>`, and names the `--run` form). No other record changes.
+
+ARK-508 changes the `run step` description in the snapshot, together with `cli/commands/run.ts` and `docs/reference/cli.md`: it adds the validator rules to what the spec of `ark run step <run> <step> start` holds. No other record changes.
 
 ## Preconditions
 

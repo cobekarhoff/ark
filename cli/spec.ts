@@ -113,6 +113,13 @@ export function buildSpec(options: {
     const head = reviewRangeStart(directory, state, step, true);
     if (head) lines.push(`Last reviewed head: ${head}`);
   }
+  if (step.role === "validator")
+    lines.push(
+      "Validator rules:",
+      "- Never run a bare `bun test`, and never `bun run test`: other runs' tests share the host.",
+      "- Never kill a process by name or pattern (`pkill`, `killall`, `kill` on a `ps` grep). Stop only a process you started, by its PID.",
+      "- Prove an analysis AC that names `bun test` with the `cli` suite command of `ark.yml`, with its `<cores>` and `{report}` placeholders filled in (a temp file for `{report}`).",
+    );
   const rules = join(directory, "rules.md");
   if (existsSync(rules)) lines.push("Rules:", readFileSync(rules, "utf8").trimEnd());
   return lines.join("\n");
