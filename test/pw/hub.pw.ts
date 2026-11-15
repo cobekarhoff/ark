@@ -4556,6 +4556,35 @@ test("ARK-T370 Home counts only the chosen project in its tiles, lists, cost and
   await open(page, baseUrl, "?project=alpha");
   await expect(unread.locator(".big")).toHaveText("2");
   await expect(unread).toContainText("oldest 40 min");
+
+  // beta has no Master Chief Run (its rows stay in the fake): it is left out of the sum and the oldest, it is no failure, and the chip never names the source.
+  const staleSources = async () => {
+    const chip = page.getByTestId("stale-chip");
+    if ((await chip.count()) === 0) return [];
+    if ((await chip.getAttribute("aria-expanded")) !== "true") await chip.click();
+    return page
+      .locator('[data-testid="stale-list"] [data-source]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-source")));
+  };
+  writeFakeToolState(state, { ...options, noChiefRun: ["beta"] });
+  await open(page, baseUrl, "");
+  await expect(unread.locator(".big")).toHaveText("2", { timeout: 30_000 });
+  await expect(unread).toContainText("oldest 40 min");
+  await expect.poll(staleSources, { timeout: 30_000 }).not.toContain("chiefUnread");
+  await open(page, baseUrl, "?project=beta");
+  await expect(unread.locator(".big")).toHaveText("-");
+  await expect(unread).toContainText("no Master Chief Run");
+  await expect(unread).not.toHaveClass(/\bwarn\b/);
+  await open(page, baseUrl, "?project=alpha");
+  await expect(unread.locator(".big")).toHaveText("2");
+
+  // No project has one: All shows the words, not 0 and not unavailable.
+  writeFakeToolState(state, { ...options, noChiefRun: ["alpha", "beta"] });
+  await open(page, baseUrl, "");
+  await expect(unread.locator(".big")).toHaveText("-", { timeout: 30_000 });
+  await expect(unread).toContainText("no Master Chief Run");
+  await expect(unread).not.toContainText("unavailable");
+  await expect.poll(staleSources, { timeout: 30_000 }).not.toContain("chiefUnread");
 });
 
 /**

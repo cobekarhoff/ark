@@ -387,6 +387,8 @@ export type FakeToolOptions = {
   orcaInboxFails?: boolean;
   /** The unread messages of each project's Master Chief Run, by project: the `inbox --terminal run:<id> --full` rows, or `"fails"` to make that read exit 1. A project not listed has none. */
   chiefUnread?: Record<string, unknown[] | "fails">;
+  /** Projects with no Master Chief Run in `run-list` (every other project of the fixture has one). */
+  noChiefRun?: string[];
   /** `up` answers `omp usage --json`, `down` fails, `once` answers once and then exits 1. */
   ompMode?: "up" | "down" | "once";
   /** The JSON `omp usage --json` prints. */
@@ -414,7 +416,11 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
       [
         ...runs,
         ...[...projects]
-          .filter((project) => !objectives.has(`Master Chief: ${project} tickets`))
+          .filter(
+            (project) =>
+              !objectives.has(`Master Chief: ${project} tickets`) &&
+              !options.noChiefRun?.includes(project),
+          )
           .map((project) => ({
             id: `orca-chief-${project}`,
             objective: `Master Chief: ${project} tickets`,
