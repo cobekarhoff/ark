@@ -55,10 +55,14 @@ export type ProcessFakes = {
   rejectEnvironment(rejecting: boolean): void;
   /** Every argument list the fake `ps` was called with, one per line. */
   psCalls(): string;
+  /** The next call of the fake `ps` waits this many seconds before it prints; the call after it does not wait. */
+  delayNextPs(seconds: number): void;
 };
 
 /** Writes the fake `ps` and `lsof` into `stateDirectory` and points ARK_PS and ARK_LSOF at them. */
 export function installProcessFakes(stateDirectory: string): ProcessFakes {
+  // A loaded host can hold a fake past the 2 s default of the readers.
+  process.env.ARK_READER_TIMEOUT_MS = "30000";
   mkdirSync(stateDirectory, { recursive: true });
   const marker = (name: string) => join(stateDirectory, name);
   const script = (name: string, body: string) => {
@@ -73,6 +77,11 @@ export function installProcessFakes(stateDirectory: string): ProcessFakes {
   process.env.ARK_PS = script(
     "fake-ps",
     `echo "$*" >> '${marker("ps.log")}'
+if [ -e '${marker("ps.delay")}' ]; then
+  seconds=$(cat '${marker("ps.delay")}')
+  rm -f '${marker("ps.delay")}'
+  sleep "$seconds"
+fi
 for argument in "$@"; do
   [ "$argument" = "-E" ] && [ -e '${marker("ps.rejectEnvironment")}' ] && exit 1
 done
@@ -101,6 +110,7 @@ cat '${marker("lsof.out")}'`,
     failLsof: (failing) => toggle("lsof.fail", failing),
     rejectEnvironment: (rejecting) => toggle("ps.rejectEnvironment", rejecting),
     psCalls: () => (existsSync(marker("ps.log")) ? readFileSync(marker("ps.log"), "utf8") : ""),
+    delayNextPs: (seconds) => writeFileSync(marker("ps.delay"), String(seconds)),
   };
 }
 
