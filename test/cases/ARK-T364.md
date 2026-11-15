@@ -6,7 +6,7 @@ technique: boundary values (uncut body of 65,535, exactly 65,536 and 65,537 char
 priority: high
 risk: a body made only of plan cases is still over the limit, so open refuses on length; or the cut removes AC evidence blocks or result lines instead of log tails; or the body is cut silently, so a reader thinks the logs are whole; or a body under the limit loses its tails
 status: active
-changed_by: 2026-11-13-ARK-446-1
+changed_by: 2026-11-14-ARK-507-1
 ---
 
 ## Objective
@@ -37,6 +37,7 @@ Prove that when the evidence of the plan's own cases makes the body longer than 
 - The note about the cut shall not read as a test case claim and shall add no screenshot path.
 - A body whose uncut length is 65,535 or 65,536 characters shall be left whole with no note; one of 65,537 characters shall be cut to at most 65,536 characters and shall carry the note. A cut at a margin below the limit, or at `>=`, fails this.
 - When the body is under the limit, the system shall cut no line and shall show no note about a cut.
+- When the body is still over the limit with no log lines left, the cut order ends there and the collapse of ARK-T680 starts; a body of exactly 65,536 characters at no log lines is not collapsed (ARK-T681). The AC evidence blocks stay whole in both.
 
 ## Screenshot checkpoints
 
