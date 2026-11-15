@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "./errors.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
+import { writeCriteriaFile } from "./criteria.ts";
 import {
   evidenceFile,
   evidenceProblem,
@@ -16,12 +17,14 @@ import { findRun } from "./paths.ts";
 import { type Gate, gateAnswers, gates } from "./lifecycle.ts";
 
 // Reads the ticket file named in run.started, so edits made at the criteria gate are picked up.
-function acceptCriteria(runDirectory: string): void {
+// With a criteria file, the file's criteria are checked and written into the ticket file first.
+function acceptCriteria(runDirectory: string, criteriaFile?: string): void {
   const started = readEvents(runDirectory).find((event) => event.type === "run.started");
   const ticketFile = (started?.data as { ticket_file?: string } | undefined)?.ticket_file;
   if (!ticketFile || !existsSync(ticketFile)) {
     throw new ArkError(`ticket file not found: ${ticketFile ?? "(none recorded)"}`);
   }
+  if (criteriaFile !== undefined) writeCriteriaFile(runDirectory, ticketFile, criteriaFile);
   const fields = frontmatter(readFileSync(ticketFile, "utf8")).fields ?? {};
   const parsed = parseCriteria(fields, ticketFile);
   const ids = parsed.map((criterion) => criterion.id);
@@ -49,6 +52,7 @@ export function gateRecord(
   args: string[],
   note?: string,
   inProject?: string,
+  criteriaFile?: string,
 ): void {
   // The manual gate is answered for one criterion: `<criterion id> <answer>`; the others take `<answer>`.
   const [criterionArgument, answer] = gate === "manual" ? args : [undefined, args[0]];
@@ -67,6 +71,8 @@ export function gateRecord(
   if (answers && !answers.includes(answer)) {
     throw new ArkError(`unknown answer "${answer}" for gate ${gate}: use ${answers.join(", ")}`);
   }
+  if (criteriaFile !== undefined && (gate !== "criteria" || answer !== "accept"))
+    throw new ArkError("--criteria works only with: ark gate record <run> criteria accept");
   const { directory } = findRun(runId, inProject);
   const criterion =
     criterionArgument === undefined
@@ -80,8 +86,10 @@ export function gateRecord(
   }
   const accepting = gate === "criteria" && answer === "accept";
   // Only the awaiting_criteria phase refreshes criteria; in any other phase the transition table refuses the answer.
-  if (accepting && deriveState(readEvents(directory)).phase === "awaiting_criteria")
-    acceptCriteria(directory);
+  const phase = deriveState(readEvents(directory)).phase;
+  if (criteriaFile !== undefined && phase !== "awaiting_criteria")
+    throw new ArkError(`--criteria needs the phase awaiting_criteria; the run is in ${phase}`);
+  if (accepting && phase === "awaiting_criteria") acceptCriteria(directory, criteriaFile);
   // A demonstration file ends with the human's `human: ok`, once. The other methods' files are the reviewer's or a command's.
   // The file as it will be after the answer is checked first, so a malformed file writes neither event nor file.
   const file = criterion === undefined ? undefined : evidenceFile(directory, criterion);

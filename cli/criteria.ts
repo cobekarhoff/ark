@@ -1,13 +1,143 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 import { isCaseId } from "./criterion-id.ts";
-import { frontmatter, manualCriteria, parseCriteria, runCriteria } from "./ticket.ts";
+import { frontmatter, manualCriteria, methods, parseCriteria, runCriteria } from "./ticket.ts";
 import { discoverRepos, mirrorRoot } from "./workspace.ts";
+
+const criteriaFileKeys = ["id", "text", "method", "verified_by"];
+
+/** A YAML scalar for a flow list or a key: plain when it is a word, else a JSON string. */
+const scalar = (value: string): string =>
+  /^(?!(?:true|false|null|yes|no|on|off)$)[A-Za-z][A-Za-z0-9._/-]*$/i.test(value)
+    ? value
+    : JSON.stringify(value);
+
+type FileCriterion = { id: string; method: string; verified_by: string[]; text: string };
+
+/**
+ * Reads and checks a criteria file: a YAML mapping whose only key is `acceptance_criteria`, a list of
+ * `{id, text, method, verified_by}`. Refuses an unknown key (`manual` too), a duplicate id, an unknown
+ * method, an empty list and a `method: test` criterion with an empty `verified_by`. Writes nothing.
+ */
+function readCriteriaFile(file: string, path: string, ticketId: string): FileCriterion[] {
+  const source = `criteria file ${file}`;
+  if (!existsSync(path)) throw new ArkError(`${source}: not found`);
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new ArkError(`${source} is not valid YAML (${(error as Error).message})`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new ArkError(`${source}: expected a mapping with an acceptance_criteria list`);
+  const top = parsed as Record<string, unknown>;
+  const unknownKey = Object.keys(top).find((key) => key !== "acceptance_criteria");
+  if (unknownKey !== undefined) throw new ArkError(`${source}: unknown key "${unknownKey}"`);
+  const list = top.acceptance_criteria;
+  if (!Array.isArray(list) || list.length === 0)
+    throw new ArkError(`${source}: acceptance_criteria must be a list with at least one criterion`);
+  list.forEach((entry, i) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry))
+      throw new ArkError(`${source}: acceptance_criteria[${i}] must be a mapping`);
+    const written = typeof entry.id === "string" ? entry.id : `acceptance_criteria[${i}]`;
+    for (const key of Object.keys(entry))
+      if (!criteriaFileKeys.includes(key))
+        throw new ArkError(`${source}: unknown key "${key}" in criterion ${written}`);
+  });
+  // The ticket loader checks id, text, duplicate ids, method and verified_by.
+  const criteria = parseCriteria({ id: ticketId, acceptance_criteria: list }, source);
+  return criteria.map((criterion, i) => {
+    const entry = list[i] as { id: string; text: string };
+    if (entry.text.trim() === "")
+      throw new ArkError(`${source}: criterion ${entry.id} has no text`);
+    if (criterion.method === "test" && criterion.verified_by.length === 0)
+      throw new ArkError(
+        `${source}: criterion ${entry.id} has method "test" and an empty verified_by list: add an integration or e2e test case id, or set method to ${methods.filter((method) => method !== "test").join(", ")}`,
+      );
+    return {
+      id: entry.id,
+      method: criterion.method,
+      verified_by: criterion.verified_by,
+      text: entry.text,
+    };
+  });
+}
+
+/** The ticket with its `acceptance_criteria:` block replaced; every other line and the body stay. */
+function replaceCriteriaBlock(ticket: string, criteria: FileCriterion[]): string {
+  const eol = ticket.includes("\r\n") ? "\r\n" : "\n";
+  const lines = ticket.split(eol);
+  const end = lines.indexOf("---", 1);
+  if (lines[0] !== "---" || end === -1)
+    throw new ArkError("the ticket file has no frontmatter between --- lines");
+  const block = [
+    "acceptance_criteria:",
+    ...criteria.flatMap((criterion) => [
+      `  - id: ${scalar(criterion.id)}`,
+      `    method: ${criterion.method}`,
+      `    verified_by: [${criterion.verified_by.map(scalar).join(", ")}]`,
+      `    text: ${JSON.stringify(criterion.text)}`,
+    ]),
+  ];
+  const start = lines.findIndex((line, i) => i < end && /^acceptance_criteria\s*:/.test(line));
+  if (start === -1) {
+    lines.splice(end, 0, ...block);
+    return lines.join(eol);
+  }
+  // The old block runs to the next top-level key; trailing comments and blank lines belong to what follows.
+  let stop = start + 1;
+  while (stop < end && !/^[A-Za-z_][\w-]*\s*:/.test(lines[stop])) stop++;
+  while (
+    stop > start + 1 &&
+    (lines[stop - 1].trim() === "" || lines[stop - 1].trim().startsWith("#"))
+  )
+    stop--;
+  lines.splice(start, stop - start, ...block);
+  return lines.join(eol);
+}
+
+/**
+ * Writes the criteria of a criteria file into the ticket file: checks the whole file first, replaces
+ * only the `acceptance_criteria:` block, and checks that the result parses back to the file's criteria
+ * with every other frontmatter field unchanged. A relative path is read from the run folder.
+ * Nothing is written when any check fails.
+ */
+export function writeCriteriaFile(runDirectory: string, ticketFile: string, file: string): void {
+  const before = readFileSync(ticketFile, "utf8");
+  const beforeFields = frontmatter(before).fields;
+  if (!beforeFields) throw new ArkError(`${ticketFile}: the ticket needs YAML frontmatter`);
+  const ticketId = typeof beforeFields.id === "string" ? beforeFields.id : "";
+  const criteria = readCriteriaFile(
+    file,
+    isAbsolute(file) ? file : join(runDirectory, file),
+    ticketId,
+  );
+  const after = replaceCriteriaBlock(before, criteria);
+  let afterFields: Record<string, unknown> | undefined;
+  try {
+    afterFields = frontmatter(after).fields;
+  } catch (error) {
+    throw new ArkError(
+      `the rewritten ticket file does not parse (${(error as Error).message}); nothing changed`,
+    );
+  }
+  // JSON.stringify drops an undefined value, so setting the list to undefined compares the other fields.
+  const withoutList = (fields: object | undefined) =>
+    JSON.stringify({ ...fields, acceptance_criteria: undefined });
+  if (
+    JSON.stringify(afterFields?.acceptance_criteria) !== JSON.stringify(criteria) ||
+    withoutList(afterFields) !== withoutList(beforeFields)
+  )
+    throw new ArkError(
+      "the rewritten ticket file does not hold the criteria file's criteria and its other fields; nothing changed",
+    );
+  writeFileSync(ticketFile, after);
+}
 
 /** Replaces the `text:` line of one criterion in the frontmatter and its `| ID | ... |` table row.
  * YAML has no round trip in Bun, so only that one line and that one row change; a ticket with no
