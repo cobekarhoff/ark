@@ -28,11 +28,18 @@ export async function observePushes(page: Page): Promise<void> {
  * Moves the page clock 180000 ms, then waits until the row reads `minutes` min or more. A push after
  * the last jump takes the age back to 0, so a row that reads less than `minutes` after such a push gets
  * another jump. A row under `minutes` with no push after the jump is a miscount: the wait fails at 60 s.
+ * `afterJump` runs after the first jump and before the first read: a test uses it to land a push there.
  */
-export async function waitForAge(page: Page, row: Locator, minutes: number): Promise<void> {
+export async function waitForAge(
+  page: Page,
+  row: Locator,
+  minutes: number,
+  afterJump?: () => Promise<void>,
+): Promise<void> {
   // The mark is read before the jump: a push at or after it may have reset the age after the jump.
   let mark = await page.evaluate(() => performance.now());
   await page.clock.fastForward(JUMP);
+  await afterJump?.();
   await expect
     .poll(
       async () => {

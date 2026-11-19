@@ -4935,7 +4935,7 @@ test("ARK-309-AC4 the notes button of a later project's section scrolls to that 
   await expect(notes("alpha")).not.toBeInViewport();
 });
 
-test("ARK-T136 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it", async ({
+test("ARK-T136 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it and with the scroll", async ({
   page,
 }) => {
   filterWorld(40);
@@ -9797,26 +9797,20 @@ test("ARK-T310 A dropped event stream shows the frozen-data banner, dims the pag
   const orcaAge = list.locator('[data-source="orca"] span').first();
   await expect(orcaAge).toHaveText(/^\d+ min$/, { timeout: 60_000 });
   // A push after the jump takes the age back to about 0 (the page clock jumped, the server clock did not).
-  // Append an event once the page clock has jumped and wait until the page saw that push: the wait must still end at 2 min or more.
-  const pushBefore = await page.evaluate(() => (window as unknown as LiveWindow).__lastPushAt);
-  const clockBefore = await page.evaluate(() => performance.now());
-  await Promise.all([
-    waitForAge(page, orcaAge, 2),
-    (async () => {
-      await expect
-        .poll(() => page.evaluate((from) => performance.now() - from, clockBefore))
-        .toBeGreaterThanOrEqual(170_000);
-      appendRawEvent(
-        runDirectory,
-        "merge_request.opened",
-        { repo: ".", url: "https://github.com/example/repo/pull/78", number: 78 },
-        99,
-      );
-      await expect
-        .poll(() => page.evaluate(() => (window as unknown as LiveWindow).__lastPushAt))
-        .not.toBe(pushBefore);
-    })(),
-  ]);
+  // The test appends an event right after the first jump, waits until the page saw that push, and only
+  // then lets the wait read the row: it reads under 2 min, jumps again, and must end at 2 min or more.
+  await waitForAge(page, orcaAge, 2, async () => {
+    const pushBefore = await page.evaluate(() => (window as unknown as LiveWindow).__lastPushAt);
+    appendRawEvent(
+      runDirectory,
+      "merge_request.opened",
+      { repo: ".", url: "https://github.com/example/repo/pull/78", number: 78 },
+      99,
+    );
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as LiveWindow).__lastPushAt))
+      .not.toBe(pushBefore);
+  });
 
   // The list names what each stale source affects, opens and closes from the keyboard, and does not move the header.
   await expect(list.locator('[data-source="orca"]')).toContainText("Agents");

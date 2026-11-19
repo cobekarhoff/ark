@@ -24,10 +24,10 @@ Prove the request limits of the hub pages: the first load makes only the documen
 1. Open Home. Wait until the stuck count and the `6 pass · 0 fail` review tests show and the stale chip is gone (a wait of up to 60 s, not the 15 s default: the fake tools answer once per poll and a loaded runner is slow). Take the recorded requests as the first load.
 2. Assert the first load holds exactly one `/events` request and otherwise only `/` and `/assets/*`.
 3. Click Runs, Roadmap, Home in the navigation; wait 2 s. Assert no request was sent.
-4. Open `#/ticket/ARK-521`. Assert the ticket page shows. `checkpoint(page, "ticket-page-requests")`. Wait 1 s. Assert the `/api/ticket` requests are exactly `["/api/ticket/p/ARK-521", "/api/ticket/p/ARK-521/cases"]`, in any order.
+4. Open `#/ticket/ARK-521`. Assert the ticket page shows. `checkpoint(page, "ticket-page-requests")`. Wait 1 s. Assert the `/api/ticket` requests are exactly `["/api/ticket/p/ARK-521", "/api/ticket/p/ARK-521/cases"]`, in this order: the document first, then its cases.
 5. Open the stuck run page (timeline visible), then the older run page. Assert its evidence block shows. `checkpoint(page, "run-evidence-requests")`. Wait 2 s.
 6. Assert that every request other than `/`, `/events`, `/assets/*` and `/api/ticket/*` starts with `/api/run/`, that there is at least one, that exactly two requests end in `/evidence` (one for each run page) and that none ends in `/image`.
-7. Write an omp session file of 200 entries (195 tool calls with results) for the stuck run's step, wait until the run page lists it, open the step's transcript, wait for 200 rows, wait 1 s. Assert the `/api/` requests since the click are exactly `["/api/run/<stuck run>/transcript"]`: no `transcript/result` read, no per-row read and no run file read.
+7. Write an omp session file of 200 entries (195 tool calls with results) for the stuck run's step, wait until the run page lists it, open the step's transcript, wait for 200 rows, then wait two animation frames. Assert the `/api/` requests since the click are exactly `["/api/run/<stuck run>/transcript"]`: no `transcript/result` read, no per-row read and no run file read.
 
 ## Expected results
 
