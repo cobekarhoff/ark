@@ -418,9 +418,12 @@ test("ARK-T288 a child of the ark test runner reaches the admission through its 
   }
 });
 
-test("ARK-T288 the history keeps the points stamped at or after now minus 24 hours and drops the older ones", async () => {
+/** The body of the history test; `firstPsDelaySeconds` makes the first call of the fake `ps` answer late. Returns the seconds the first read took. */
+async function historyBody(firstPsDelaySeconds?: number): Promise<number> {
   isolatedEnvironment();
-  installProcessFakes(join(process.env.ARK_HOME as string, "fakes")).setProcesses([]);
+  const fakes = installProcessFakes(join(process.env.ARK_HOME as string, "fakes"));
+  fakes.setProcesses([]);
+  if (firstPsDelaySeconds !== undefined) fakes.delayNextPs(firstPsDelaySeconds);
   const reader = createResourcesReader();
   const context = { runs: [], agents: new Map<string, Agent[]>() };
   const base = Date.parse("2026-11-12T12:00:00Z");
@@ -429,9 +432,12 @@ test("ARK-T288 the history keeps the points stamped at or after now minus 24 hou
   };
   const stamps = async () => reader.history().load.map((point) => Date.parse(point.ts) - base);
   // C: 24 h 00 m 01 s old at T, B: exactly 24 h old, A: 23 h 59 m 59 s old, D: one hour old.
+  let firstReadSeconds = 0;
   for (const offset of [-86_401, -86_400, -86_399, -3600]) {
     clockAt(offset);
+    const readStart = performance.now();
     expect(await reader.read(context)).not.toBeNull();
+    if (offset === -86_401) firstReadSeconds = (performance.now() - readStart) / 1000;
   }
   clockAt(0);
   expect((await stamps()).map((milliseconds) => milliseconds / 1000)).toEqual([
@@ -443,6 +449,29 @@ test("ARK-T288 the history keeps the points stamped at or after now minus 24 hou
   clockAt(3602);
   await reader.read(context);
   expect((await stamps()).map((milliseconds) => milliseconds / 1000)).toEqual([-3600, 2, 3602]);
+  return firstReadSeconds;
+}
+
+test("ARK-T288 the history keeps the points stamped at or after now minus 24 hours and drops the older ones", async () => {
+  await historyBody();
+});
+
+test("ARK-T688 the history test of ARK-T288 passes when the first fake ps call answers after 3 s", async () => {
+  delete process.env.ARK_READER_TIMEOUT_MS;
+  const firstReadSeconds = await historyBody(3);
+  expect(firstReadSeconds).toBeGreaterThanOrEqual(2.9);
+});
+
+test("ARK-T688 a read with the reader limit unset returns null after about 2 s when the first fake ps call answers after 3 s", async () => {
+  isolatedEnvironment();
+  const fakes = installProcessFakes(join(process.env.ARK_HOME as string, "fakes"));
+  fakes.setProcesses([]);
+  fakes.delayNextPs(3);
+  delete process.env.ARK_READER_TIMEOUT_MS;
+  const readStart = performance.now();
+  const view = await createResourcesReader().read({ runs: [], agents: new Map<string, Agent[]>() });
+  expect(view).toBeNull();
+  expect((performance.now() - readStart) / 1000).toBeGreaterThanOrEqual(1.9);
 });
 
 test("ARK-T288 GET /api/resources/history serves a foreign Host nothing", async () => {
@@ -516,9 +545,11 @@ function agentOf(handle: string): Agent {
   };
 }
 
-test("ARK-T292 the hub records the maximum memory and the last cumulative CPU of each agent, and each span with no sample as a gap, and keeps suites", async () => {
+/** The body of the hub-records test; `firstPsDelaySeconds` makes the first call of the fake `ps` answer late. */
+async function hubRecordsBody(firstPsDelaySeconds?: number): Promise<void> {
   const home = isolatedEnvironment();
   const fakes = installProcessFakes(join(home, "fakes"));
+  if (firstPsDelaySeconds !== undefined) fakes.delayNextPs(firstPsDelaySeconds);
   const directory = join(home, "projects", "p", "runs", "RUN-A");
   const results = join(directory, "results");
   mkdirSync(results, { recursive: true });
@@ -596,6 +627,15 @@ test("ARK-T292 the hub records the maximum memory and the last cumulative CPU of
   expect(crashGap.to).toBe(new Date(start + 1_000_000).toISOString());
   expect(Date.parse(crashGap.from)).toBeGreaterThanOrEqual(start + 430_000 - 60_000);
   expect(Date.parse(crashGap.from)).toBeLessThanOrEqual(start + 430_000);
+}
+
+test("ARK-T292 the hub records the maximum memory and the last cumulative CPU of each agent, and each span with no sample as a gap, and keeps suites", async () => {
+  await hubRecordsBody();
+});
+
+test("ARK-T688 the hub-records test of ARK-T292 passes when the first fake ps call answers after 3 s", async () => {
+  delete process.env.ARK_READER_TIMEOUT_MS;
+  await hubRecordsBody(3);
 });
 
 test("ARK-T292 closing the last hub page writes the time of the last sample, so the next sample records the gap", async () => {
