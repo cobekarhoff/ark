@@ -41,6 +41,11 @@ if [ -f "$d/fail" ]; then
     exit "$code"
   fi
 fi
+# A delayed verb answers after its sleep: $d/delay holds "<seconds> <first word> <second word>".
+if [ -f "$d/delay" ]; then
+  read -r seconds verb < "$d/delay"
+  [ "$verb" = "$1 $2" ] && sleep "$seconds"
+fi
 case "$1 $2" in
   "orchestration run-list")
     limit=10; offset=0
@@ -98,6 +103,8 @@ const originalPath = process.env.PATH;
 type Scenario = {
   /** Makes `verb` (default every verb) exit `code` (default 1) after writing `stderr`; `hang` sleeps instead. */
   fail?: { verb?: string; code?: number; stderr?: string; hang?: boolean } | true;
+  /** Makes `verb` (two words, as in `terminal list`) answer after `seconds`; the other verbs answer at once. */
+  delay?: { verb: string; seconds: number };
   runs?: unknown[];
   /** Workers by Orca Run id. */
   workers?: Record<string, unknown[]>;
@@ -111,7 +118,8 @@ type Scenario = {
 
 function setScenario(scenario: Scenario) {
   // One scenario's failure never leaks into the next one in the same test.
-  for (const name of ["fail", "stderr", "hang"]) rmSync(join(fakeDirectory, name), { force: true });
+  for (const name of ["fail", "stderr", "hang", "delay"])
+    rmSync(join(fakeDirectory, name), { force: true });
   const reply = (name: string, result: unknown) =>
     writeFileSync(join(fakeDirectory, name), JSON.stringify({ result }));
   if (scenario.fail) {
@@ -120,6 +128,11 @@ function setScenario(scenario: Scenario) {
     if (fail.stderr) writeFileSync(join(fakeDirectory, "stderr"), fail.stderr);
     if (fail.hang) writeFileSync(join(fakeDirectory, "hang"), "");
   }
+  if (scenario.delay)
+    writeFileSync(
+      join(fakeDirectory, "delay"),
+      `${scenario.delay.seconds} ${scenario.delay.verb}\n`,
+    );
   writeFileSync(
     join(fakeDirectory, "runs.ndjson"),
     (scenario.runs ?? []).map((row) => `${JSON.stringify(row)}\n`).join(""),
@@ -199,6 +212,7 @@ beforeEach(() => {
 afterEach(() => {
   process.env.PATH = originalPath;
   delete process.env.ARK_ORCA_TIMEOUT_MS;
+  delete process.env.ARK_READER_TIMEOUT_MS;
 });
 
 const chiefOrcaRun = {
@@ -686,6 +700,32 @@ test("ARK-244-AC2 chief handover refuses and starts nothing when no Master Chief
   expect(result.code).not.toBe(0);
   expect(result.err).toMatch(/no live Master Chief/i);
   expect(callsTo("agent", "launch")).toHaveLength(0);
+});
+
+test("ARK-T687 chief handover through spawnArk starts the new Master Chief when terminal list answers after 2.5 s, and fails with Orca did not answer when the test holds the limit at 2 s", () => {
+  setScenario({
+    runs: [chiefOrcaRun],
+    terminals: [{ handle: "term_chief", worktreePath: workspace, connected: true }],
+    launch: { kind: "terminal", handle: "term_new" },
+    delay: { verb: "terminal list", seconds: 2.5 },
+  });
+  expect(process.env.ARK_READER_TIMEOUT_MS).toBeUndefined();
+
+  const start = performance.now();
+  const late = ark("chief", "handover", "--project", project);
+  const seconds = (performance.now() - start) / 1000;
+  expect(late.err).toBe("");
+  expect(late.code).toBe(0);
+  expect(late.out.trim()).toBe("term_new");
+  expect(seconds).toBeGreaterThanOrEqual(2.4);
+  expect(callsTo("agent", "launch")).toHaveLength(1);
+
+  // The test's own value wins over the one spawnArk sets, and the delay is real: 2 s cuts the read.
+  process.env.ARK_READER_TIMEOUT_MS = "2000";
+  const cut = ark("chief", "handover", "--project", project);
+  expect(cut.code).not.toBe(0);
+  expect(cut.err).toContain("Orca did not answer");
+  expect(callsTo("agent", "launch")).toHaveLength(1);
 });
 
 const rowsPerPage = 100;

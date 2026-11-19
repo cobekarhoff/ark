@@ -144,9 +144,10 @@ export function tempGitRepo(
   return directory;
 }
 
-function spawnArk(args: string[], timeout?: number) {
-  return Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...args], {
-    env: process.env,
+/** An ark process gets a reader limit of 30 s, so a loaded host does not decide a reader; a test can hold it lower in `process.env`. */
+function spawnArk(arkArguments: string[], timeout?: number) {
+  return Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...arkArguments], {
+    env: { ARK_READER_TIMEOUT_MS: "30000", ...process.env },
     timeout,
   });
 }
