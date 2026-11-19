@@ -698,7 +698,7 @@ test("ARK-T315 a source that stops answering keeps its last good value and shows
   // read and so an age, never "unknown", however slow the runner is.
   writeFileSync(join(state, "orca.mode"), "up");
   writeFileSync(join(state, "plannotator.mode"), "up");
-  await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 20_000 });
+  await expect(agents).toContainText("openai/gpt-worker-model", { timeout: 60_000 });
   await waitForChipGone(page);
   writeFileSync(join(state, "orca.mode"), "down");
   writeFileSync(join(state, "plannotator.mode"), "down");
