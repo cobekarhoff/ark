@@ -433,20 +433,28 @@ test("ARK-T695 a whole-suite bun test holds on the load of test_max_load below t
     ARK_FAKE_LOAD_ONE: String(load),
   });
 
-  mkdirSync(fixture.storeDirectory(), { recursive: true }); // waitFor watches it, and no holder made it
-  // A --parallel run: its output reaches the pipe only when a file ends, so the wait is read from the ticket store.
-  const parallel = bunTest(fixture.directory, ["--parallel=3"], environmentOfLoad);
-  await bareTicketWritten(fixture);
-  // A negative result needs a deadline: over one cache lifetime of the host reading and three polls.
-  await Bun.sleep(1_500);
+  mkdirSync(fixture.storeDirectory(), { recursive: true }); // the store the lock reads; no holder made it
+  // A --parallel worker opens /dev/tty, so its load line shows on a terminal of its own while the run waits. The line is
+  // printed only after a reading found the load above the limit, so it is the event that a file has not started past it;
+  // that the hold lasts over later readings is ARK-T694 at the budget.
+  const output = new Output();
+  const parallel = Bun.spawn([process.execPath, "test", "--parallel=3"], {
+    cwd: fixture.directory,
+    env: environmentOfLoad,
+    terminal: {
+      cols: 120,
+      rows: 24,
+      data: (_terminal: unknown, data: Uint8Array) => output.feed(new TextDecoder().decode(data)),
+    },
+  });
+  started.push({ pid: parallel.pid, group: true });
+  await output.until("waiting for load");
   expect(fixture.ran()).toEqual([]);
-  expect(parallel.child.exitCode).toBeNull();
-  expect(readTestLock().waiting).toMatchObject([
-    { run: "bun test", pid: parallel.child.pid, cores: 3 },
-  ]);
-  expect(chiefState()).toContain(`- waiting: bun test (pid ${parallel.child.pid}), 3 cores`);
-  stopRun(parallel.child);
-  await parallel.child.exited;
+  expect(parallel.exitCode).toBeNull();
+  expect(readTestLock().waiting).toMatchObject([{ run: "bun test", pid: parallel.pid, cores: 3 }]);
+  expect(chiefState()).toContain(`- waiting: bun test (pid ${parallel.pid}), 3 cores`);
+  stopRun(parallel);
+  await parallel.exited;
 
   // A serial run prints live: the one line names the load and the limit, under the wrapper of the bare caller.
   const serial = bunTest(fixture.directory, [], environmentOfLoad);

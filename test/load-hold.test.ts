@@ -14,6 +14,7 @@ import { timelineOf } from "../hub/run-detail.ts";
 import { readEvents } from "../cli/events.ts";
 import { openTestBudget } from "../cli/test-lock.ts";
 import {
+  afterHostReads,
   ark,
   healthyHost,
   recordEvaluation,
@@ -39,8 +40,6 @@ const roles = {
 const junit = (file: string) => `bun test --reporter=junit --reporter-outfile={report} ./${file}`;
 const passingFile = `import { test } from "bun:test";\ntest("FAKE-1-AC1 works", () => {});\n`;
 const failingFile = `import { expect, test } from "bun:test";\ntest("a failing test", () => { expect(1).toBe(2); });\n`;
-/** Over one cache lifetime of the host reading (1,000 ms) and three polls (100 ms each), so a fresh reading has happened. */
-const heldMilliseconds = 1_500;
 
 afterEach(() => {
   stopStartedRuns();
@@ -251,7 +250,7 @@ async function whileHeld(
   const run = startTest(fixture.runId, load);
   try {
     await run.output.until("waiting for load");
-    await Bun.sleep(heldMilliseconds); // nothing happens while held: only a deadline can show that
+    await afterHostReads(2); // two fresh readings while held: a start or a second line would show by now
     await inspect(run);
   } finally {
     ark("test", fixture.runId, "--stop", "--project", "demo");
@@ -525,7 +524,7 @@ describe("ARK-T694", () => {
       let resolved = false;
       const taking = budget.take(1).then((taken) => ((resolved = true), taken));
       await line("waiting for load");
-      await Bun.sleep(heldMilliseconds);
+      await afterHostReads(2); // two fresh readings while the load is above the limit
       expect(resolved).toBe(false);
       expect(lines.filter((entry) => entry.includes("waiting for load"))).toEqual([
         loadLine("12.5", 10),
@@ -562,7 +561,7 @@ describe("ARK-T694", () => {
         expect(lines.filter((entry) => entry.includes("waiting for memory"))).toHaveLength(1);
 
         withLoad("3"); // only memory holds now
-        await Bun.sleep(heldMilliseconds);
+        await afterHostReads(2); // two fresh readings with the load recovered and memory short
         expect(resolved, "a recovered load released a memory hold").toBe(false);
         expect(lines.filter((entry) => entry.includes("waiting for load"))).toHaveLength(1);
         expect(lines.filter((entry) => entry.includes("waiting for memory"))).toHaveLength(1);

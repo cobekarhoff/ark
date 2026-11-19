@@ -2,12 +2,14 @@ import type { Subprocess } from "bun";
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
+  watch,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -457,6 +459,26 @@ export function setFakeHost(reading: {
       ? null
       : `vm.swapusage: total = 16384.00M  used = ${(reading.swapGigabytes * 1024).toFixed(2)}M  free = 0.00M  (encrypted)\n`,
   );
+}
+
+/**
+ * Resolves once the fake host has been read `count` more times: the sysctl shim of test/tmpdir-preload.ts logs one line
+ * after the last call of a reading, so a test never writes mid-reading. A test that must see a fresh reading while a
+ * hold lasts waits on this instead of a sleep. Linux reads /proc/meminfo, which the shim does not reach: it resolves at once there.
+ */
+export function afterHostReads(count: number): Promise<void> {
+  if (process.platform !== "darwin") return Promise.resolve();
+  const readsFile = join(process.env.ARK_FAKE_HOST as string, "reads");
+  const readsSoFar = () =>
+    existsSync(readsFile) ? readFileSync(readsFile, "utf8").split("\n").length - 1 : 0;
+  const target = readsSoFar() + count;
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const watcher = watch(process.env.ARK_FAKE_HOST as string, () => {
+    if (readsSoFar() < target) return;
+    watcher.close();
+    resolve();
+  });
+  return promise;
 }
 
 /** The healthy host that the preload sets: 50 percent free, 2 GB of swap. */
