@@ -144,12 +144,7 @@ await new Promise((done) => process.stdin.once("data", done));
 budget.close();
 process.exit(0);`,
     ],
-    {
-      env: environment(home),
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "inherit",
-    },
+    { env: environment(home), stdin: "pipe", stdout: "pipe", stderr: "inherit" },
   );
   started.push({ pid: holder.pid, group: false });
   await new Output(holder.stdout).until("held");
@@ -244,15 +239,7 @@ function makeFixture(
     ticket_source: "local",
     ...(options.budget === null ? {} : { test_budget_cores: options.budget ?? 3 }),
     ...(options.maxLoad === undefined ? {} : { test_max_load: options.maxLoad }),
-    suites: [
-      {
-        name: "cli",
-        level: "e2e",
-        repo: ".",
-        command: "true {report}",
-        parser: "bun",
-      },
-    ],
+    suites: [{ name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles,
   });
   const gate = join(directory, "gate");
@@ -319,30 +306,10 @@ const bareTicketWritten = (fixture: Fixture) =>
 const cpuCores = Math.min(availableParallelism(), 3);
 
 test.each([
-  {
-    title: "bun test --parallel=3",
-    args: ["--parallel=3"],
-    asks: 3,
-    parallel: true,
-  },
-  {
-    title: "bun test (serial, asks 1 core)",
-    args: [],
-    asks: 1,
-    parallel: false,
-  },
-  {
-    title: "bun test test --parallel=3",
-    args: ["test", "--parallel=3"],
-    asks: 3,
-    parallel: true,
-  },
-  {
-    title: "bun test --parallel",
-    args: ["--parallel"],
-    asks: cpuCores,
-    parallel: true,
-  },
+  { title: "bun test --parallel=3", args: ["--parallel=3"], asks: 3, parallel: true },
+  { title: "bun test (serial, asks 1 core)", args: [], asks: 1, parallel: false },
+  { title: "bun test test --parallel=3", args: ["test", "--parallel=3"], asks: 3, parallel: true },
+  { title: "bun test --parallel", args: ["--parallel"], asks: cpuCores, parallel: true },
   {
     title: "bun test --parallel=3 in a run worktree found by its path",
     args: ["--parallel=3"],
@@ -562,11 +529,7 @@ test("ARK-T695 a file run and an ark test child start at once on a load above te
 
 test.each([
   { title: "one file argument", args: ["test/a.test.ts"], ran: ["a"] },
-  {
-    title: "two file arguments",
-    args: ["test/a.test.ts", "test/b.test.ts"],
-    ran: ["a", "b"],
-  },
+  { title: "two file arguments", args: ["test/a.test.ts", "test/b.test.ts"], ran: ["a", "b"] },
 ])(
   "ARK-T684 bun test with $title starts at once while the budget is full",
   async ({ args, ran }) => {
@@ -646,12 +609,7 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
       summary: {
         why: "Run a whole-suite command under ark test.",
         changes: [
-          {
-            criterion: "FAKE-1-AC1",
-            where: "tests",
-            now: "now",
-            fix: "the suite proves it",
-          },
+          { criterion: "FAKE-1-AC1", where: "tests", now: "now", fix: "the suite proves it" },
         ],
       },
       steps: [
@@ -753,15 +711,7 @@ test("FAKE-1-AC1 spawn", async () => {
     workspace,
     ticket_source: "local",
     test_budget_cores: 3,
-    suites: [
-      {
-        name: "cli",
-        level: "e2e",
-        repo: ".",
-        command: "true {report}",
-        parser: "bun",
-      },
-    ],
+    suites: [{ name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles,
   });
   const run = bunTest(workspace, ["--parallel=3"], environment(home, { ARK_PROJECT: "demo" }));
@@ -823,13 +773,7 @@ test.each([
           ticket_source: "local",
           test_budget_cores: 0,
           suites: [
-            {
-              name: "cli",
-              level: "e2e",
-              repo: ".",
-              command: "true {report}",
-              parser: "bun",
-            },
+            { name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" },
           ],
           roles,
         }),
