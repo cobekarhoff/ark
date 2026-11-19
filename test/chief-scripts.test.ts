@@ -515,10 +515,13 @@ test(
 
     const result = runScript("auto-merger.sh", [workspace, "1"], { ARK_PROJECT: "demo" });
 
+    // Only the fake sleep ends it: after the second pass, never by the script itself.
+    expect(readFileSync(join(bin, "sleep.count"), "utf8").trim()).toBe("2");
     expect(result.err.split("\n").filter((line) => line.startsWith("HELD:"))).toEqual([
       `HELD: ${name} #52 ticket superseded`,
     ]);
     expect(result.out).not.toContain("CHANGE:");
+    expect(mergeCalls()).toEqual([]);
   },
   { timeout: 90_000 },
 );
