@@ -37,7 +37,7 @@ Expected: each of them starts at once with no waiting line; the same whole-suite
 ## Expected results
 
 - Step 1: both runs start at once with the budget full; the markers show the files ran; no waiting line; the ticket store gains no `bun test` ticket.
-- Step 2: with the marker the run starts at once, takes no ticket and prints no waiting line; the control run holds one waiting ticket with label `bun test` and runs no file until the release, and its whole output holds exactly one waiting line.
+- Step 2: with the marker the run starts at once, takes no ticket and prints no waiting line; the control run holds one waiting ticket with label `bun test` and runs no file until the release, and its whole output holds at most one waiting line. The ticket in the store is the proof of the wait: the release follows the ticket at once, and when it passes before the worker's first look at the tickets the cores are free and no line is right (exactly one line is proved by ARK-T683, whose rows spend time between the ticket and the release).
 - Step 3: while `gate` blocks, the ticket store holds exactly one ticket, the suite's own (not label `bun test`). `ark test` then ends with exit 0 and no hang (so neither the base run nor the census run waited on the cores of its own run); the output of `ark test` and the log of the head suite hold no bare-run waiting line; after the end the store holds no ticket.
 - Step 4: the head worktree ran the four files once, and the base checkout ran them twice (census and base run).
 - Step 5: the nested run starts at once and prints no waiting line, `nested-ran` exists, and both runs exit 0. `store-after-nested` holds exactly one ticket (the outer run's, label `bun test`) and none for the nested run.

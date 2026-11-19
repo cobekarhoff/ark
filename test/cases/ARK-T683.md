@@ -22,6 +22,7 @@ Expected: with the budget full, no file runs and one waiting line shows; after t
 - The environment of every `bun test` child the case starts is built, not inherited: the environment of the case minus the `ark test` marker (the name `run()` in `cli/test-run.ts` sets), `BUN_TEST_WORKER_ID`, `JEST_WORKER_ID`, `ARK_PROJECT` and `ARK_HOME`; then `ARK_HOME` is the temp folder, and `ARK_PROJECT` is set only in the row that says so. Reason: the case itself may run under `ark test` (the marker would make the child never wait) or under an outer `bun test --parallel` (the worker variables would make a serial child read the command line of its parent).
 - The holder is a real child process: `openTestBudget("holder", 3, ...)` and `await budget.take(<cores>)` from `cli/test-lock.ts`, then it blocks reading its standard input until the case writes to it (the release). Its ticket pid is live.
 - No sleeps: the case waits on events (a line read from the child's output, a marker file, process exit).
+- A marker counts as written only when it holds a complete line: a file appends with create then write, so a marker file that exists and is still empty is not written yet, and neither a wait for it nor a read of its pid sees it. Without this rule a read of the pid gives no pid, the case takes a worker that also runs `gate` for another worker, and waits for end-of-file of a pipe that `gate` still holds (the Linux hang of ARK-527).
 
 ## Steps
 
