@@ -604,12 +604,19 @@ test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only termin
     readFileSync(join(state, "orca.log"), "utf8")
       .split("\n")
       .filter((line) => line.startsWith("terminal switch"));
-  // The snapshot lists the terminals as live after the first Orca read.
-  for (let tries = 0; tries < 50; tries++) {
-    const snapshot = (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
-    if (Array.isArray(snapshot.runs) && Array.isArray(snapshot.runs[0]?.agents)) break;
-    await Bun.sleep(100);
-  }
+  // The snapshot lists `term-worker` as live only after the first Orca read answers.
+  await snapshotWhen(
+    baseUrl,
+    (snapshot) =>
+      snapshot.runs !== "unknown" &&
+      snapshot.runs.some(
+        (openRun) =>
+          Array.isArray(openRun.agents) &&
+          openRun.agents.some(
+            (agent) => agent.terminal === "term-worker" && agent.presence === "live",
+          ),
+      ),
+  );
 
   expect((await post("term-worker")).status).toBe(200);
   expect(switches()).toEqual(["terminal switch --terminal term-worker"]);
@@ -632,7 +639,7 @@ test("ARK-T662 open-in-orca answers 200, 403, 400, 413 and 502, runs only termin
     orcaSwitchFails: true,
   });
   expect((await post("term-worker")).status).toBe(502);
-});
+}, 60_000);
 
 // ---------------------------------------------------------------- AC5
 
