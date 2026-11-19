@@ -53,6 +53,17 @@ afterEach(() => {
     }
 });
 
+// Descriptors that a case holds open on a named pipe so that a file blocks reading it; closed when the case ends.
+const heldDescriptors: number[] = [];
+afterEach(() => {
+  for (const descriptor of heldDescriptors.splice(0))
+    try {
+      closeSync(descriptor);
+    } catch {
+      // already closed
+    }
+});
+
 /** The text a child printed, with a promise for the point where a line shows. */
 class Output {
   text = "";
@@ -74,7 +85,7 @@ class Output {
       watcher.done();
   }
 
-  until(needle: string): Promise<void> {
+  until(needle: string, _limit?: WaitLimit): Promise<void> {
     const { promise, resolve: done } = Promise.withResolvers<void>();
     if (this.text.includes(needle)) done();
     else this.#watchers.push({ needle, done });
@@ -86,8 +97,14 @@ class Output {
   }
 }
 
+/** A time limit for one wait, and the name that its error carries when the limit passes (ARK-527). */
+interface WaitLimit {
+  within: number;
+  name: string;
+}
+
 /** Resolves when `ready()` holds, re-checked on every change of `directory`. */
-function waitFor(directory: string, ready: () => boolean): Promise<void> {
+function waitFor(directory: string, ready: () => boolean, _limit?: WaitLimit): Promise<void> {
   const { promise, resolve: done } = Promise.withResolvers<void>();
   const check = () => {
     if (!ready()) return;
@@ -97,6 +114,28 @@ function waitFor(directory: string, ready: () => boolean): Promise<void> {
   const watcher = watch(directory, check);
   check();
   return promise;
+}
+
+/** The wait for a promise (a file's end, a child's exit, an output's end) that must carry a limit and a name. */
+function bounded<T>(promise: Promise<T>, _limit: WaitLimit): Promise<T> {
+  return promise;
+}
+
+// ARK-527 rows: a wait that must pass gets a roomy limit; the wait that a row proves fails gets a short one. A row
+// asserts that the failing wait rejects with its name, and that it did so far below the 90 s test timeout.
+const passLimit = 5_000;
+const failLimit = 500;
+const rowTimeout = 15_000;
+const rejectionCeiling = 5_000;
+
+async function expectNamedRejection(wait: () => Promise<unknown>, name: RegExp): Promise<void> {
+  const startedAt = performance.now();
+  const error = await wait().then(
+    () => new Error("the wait resolved"),
+    (caught: unknown) => caught,
+  );
+  expect(String((error as Error)?.message)).toMatch(name);
+  expect(performance.now() - startedAt).toBeLessThan(rejectionCeiling);
 }
 
 const alive = (pid: number): boolean => {
@@ -162,16 +201,50 @@ import { join } from "node:path";
 const markers = ${JSON.stringify(markers)};
 `;
 
-/** The fake suite: `a`, `b`, `c` and `gate`. Each opens the write end of `alive-<name>` (a pipe, when the case made it) and keeps it until its worker ends. */
-function suiteFiles(markers: string, failing = false): Record<string, string> {
-  const files: Record<string, string> = {
-    "bunfig.toml": `[test]\npreload = [${JSON.stringify(preload)}]\n`,
-  };
-  for (const name of ["a", "b", "c"])
-    files[`test/${name}.test.ts`] = `${header(markers)}test("FAKE-1-AC1 ${name}", () => {
+type Variant = "stuck-before-marker" | "stuck-after-marker" | "leak";
+
+/** The files of the fake suite that open an `alive-<name>` pipe, `gate` last: `stuck` replaces `a`, `leak` has none. */
+const aliveNames = (variant?: Variant): string[] =>
+  variant === "leak"
+    ? ["a", "b", "gate"]
+    : variant
+      ? ["stuck", "b", "c", "gate"]
+      : ["a", "b", "c", "gate"];
+
+/**
+ * The fake suite: `a`, `b`, `c` and `gate`. Each opens the write end of `alive-<name>` (a pipe, when the case made
+ * it) and keeps it until its worker ends. A `variant` replaces one file: `stuck` replaces `a` and blocks reading a
+ * named pipe that the case holds open (it writes `ran-stuck` before or after it blocks), `leak` replaces `c` and
+ * leaves a detached `sleep` that holds the output of the run. `gate` also blocks on the pipe `hang`, when the case
+ * made one. `preload: false` leaves out the `bunfig.toml` preload.
+ */
+function suiteFiles(
+  markers: string,
+  options: { failing?: boolean; variant?: Variant; preload?: boolean } = {},
+): Record<string, string> {
+  const files: Record<string, string> = {};
+  if (options.preload !== false)
+    files["bunfig.toml"] = `[test]\npreload = [${JSON.stringify(preload)}]\n`;
+  for (const name of aliveNames(options.variant).filter((entry) => entry !== "gate"))
+    files[`test/${name}.test.ts`] =
+      name === "stuck"
+        ? `${header(markers)}test("FAKE-1-AC1 stuck", () => {
+  openSync(join(markers, "alive-stuck"), "w");
+  ${options.variant === "stuck-after-marker" ? 'appendFileSync(join(markers, "ran-stuck"), process.pid + "\\n");' : ""}
+  readFileSync(openSync(join(import.meta.dir, "..", "stuck"), "r"));
+});
+`
+        : `${header(markers)}test("FAKE-1-AC1 ${name}", () => {
   openSync(join(markers, "alive-${name}"), "w");
   appendFileSync(join(markers, "ran-${name}"), process.pid + "\\n");
   appendFileSync(join(markers, "runs.log"), process.cwd() + " ${name}\\n");
+});
+`;
+  if (options.variant === "leak")
+    files["test/leak.test.ts"] = `${header(markers)}test("FAKE-1-AC1 leak", () => {
+  const child = Bun.spawn(["sleep", "600"], { stdout: "inherit", stderr: "inherit", stdin: "ignore", detached: true });
+  child.unref();
+  appendFileSync(join(markers, "leak-pid"), String(child.pid));
 });
 `;
   files["test/gate.test.ts"] = `${header(markers)}test("FAKE-1-AC1 gate", () => {
@@ -182,9 +255,11 @@ function suiteFiles(markers: string, failing = false): Record<string, string> {
   appendFileSync(join(markers, "runs.log"), process.cwd() + " gate\\n");
   if (pipe !== null) readFileSync(pipe);
   appendFileSync(join(markers, "ran-gate"), process.pid + "\\n");
+  const hang = join(import.meta.dir, "..", "hang");
+  if (existsSync(hang) && statSync(hang).isFIFO()) readFileSync(openSync(hang, "r"));
 });
 `;
-  if (failing)
+  if (options.failing)
     files["test/failing.test.ts"] = `import { expect, test } from "bun:test";
 test("FAKE-1-AC1 failing", () => { expect(1).toBe(2); });
 `;
@@ -214,6 +289,10 @@ function makeFixture(
     pipes?: boolean;
     budget?: number | null;
     failing?: boolean;
+    variant?: Variant;
+    preload?: boolean;
+    /** Named pipes in the scratch folder (`stuck`, `hang`) that the case holds open and never writes. */
+    blockers?: string[];
   } = {},
 ): Fixture {
   const home = tempArkHome();
@@ -226,9 +305,13 @@ function makeFixture(
         ? realpathSync(mkdtempSync(join(tmpdir(), "bare-elsewhere-")))
         : workspace;
   mkdirSync(directory, { recursive: true });
-  for (const [name, content] of Object.entries(suiteFiles(markers, options.failing))) {
+  for (const [name, content] of Object.entries(suiteFiles(markers, options))) {
     mkdirSync(join(directory, name, ".."), { recursive: true });
     writeFileSync(join(directory, name), content);
+  }
+  for (const name of options.blockers ?? []) {
+    Bun.spawnSync(["mkfifo", join(directory, name)]);
+    heldDescriptors.push(openSync(join(directory, name), constants.O_RDWR));
   }
   writeProject("demo", {
     workspace,
@@ -241,7 +324,7 @@ function makeFixture(
   let gateDescriptor = -1;
   const ended: Record<string, Promise<number>> = {};
   if (options.pipes) {
-    for (const name of ["a", "b", "c", "gate"]) {
+    for (const name of aliveNames(options.variant)) {
       const pipe = join(markers, `alive-${name}`);
       Bun.spawnSync(["mkfifo", pipe]);
       const reader = Bun.spawn(["cat", pipe], { stdout: "ignore" });
@@ -295,8 +378,8 @@ const ownerTicketFiles = (fixture: Fixture): string[] =>
     : [];
 
 /** Resolves when a bare run has written its ticket, which is the point where the run waits or holds. */
-const bareTicketWritten = (fixture: Fixture) =>
-  waitFor(fixture.storeDirectory(), () => ownerTicketFiles(fixture).length > 0);
+const bareTicketWritten = (fixture: Fixture, limit?: WaitLimit) =>
+  waitFor(fixture.storeDirectory(), () => ownerTicketFiles(fixture).length > 0, limit);
 
 const cpuCores = Math.min(availableParallelism(), 3);
 
@@ -412,6 +495,105 @@ macOnly(
   },
 );
 
+const waitForMarkers = async (fixture: Fixture, names: string[], within = passLimit) => {
+  for (const name of names)
+    await waitFor(fixture.markers, () => fixture.markerLines(name).length > 0, { within, name });
+};
+
+// ARK-527: each row reaches one wait that its held inner run never satisfies, and asserts that this wait rejects with
+// its name inside its own short limit. Every wait the row passes first carries a roomy limit.
+test(
+  "ARK-T683 11a a stuck file that never writes its marker fails the wait for the marker inside its limit",
+  async () => {
+    const fixture = makeFixture({ variant: "stuck-before-marker", blockers: ["stuck"] });
+    const holder = await startHolder(fixture.home, 3);
+    bunTest(fixture.directory, ["--parallel=3"], environment(fixture.home));
+    await bareTicketWritten(fixture, { within: passLimit, name: "ticket of the bare run" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate", "ran-b", "ran-c"]);
+    await expectNamedRejection(
+      () => waitForMarkers(fixture, ["ran-stuck"], failLimit),
+      /ran-stuck/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11b a worker blocked in its file fails the wait for the end of its pipe inside its limit",
+  async () => {
+    const fixture = makeFixture({
+      variant: "stuck-after-marker",
+      pipes: true,
+      blockers: ["stuck"],
+    });
+    const holder = await startHolder(fixture.home, 3);
+    bunTest(fixture.directory, ["--parallel=3"], environment(fixture.home));
+    await bareTicketWritten(fixture, { within: passLimit, name: "ticket of the bare run" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate", "ran-b", "ran-c", "ran-stuck"]);
+    await expectNamedRejection(
+      () => bounded(fixture.ended.stuck!, { within: failLimit, name: "end of alive-stuck" }),
+      /alive-stuck/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11c a run with no preload fails the wait for the waiting line inside its limit",
+  async () => {
+    const fixture = makeFixture({ preload: false });
+    await startHolder(fixture.home, 3);
+    const run = bunTest(fixture.directory, [], environment(fixture.home));
+    await expectNamedRejection(
+      () => run.output.until(waitingLine, { within: failLimit, name: "waiting line" }),
+      /waiting line/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11d a file that blocks after the release fails the wait for the exit of the child inside its limit",
+  async () => {
+    const fixture = makeFixture({ pipes: true, blockers: ["hang"] });
+    const holder = await startHolder(fixture.home, 3);
+    const run = bunTest(fixture.directory, [], environment(fixture.home));
+    await run.output.until(waitingLine, { within: passLimit, name: "waiting line" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate"]);
+    fixture.openGate();
+    await expectNamedRejection(
+      () => bounded(run.child.exited, { within: failLimit, name: "exit of the child" }),
+      /exit of the child/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11e a process that holds the output fails the wait for the end of the output inside its limit",
+  async () => {
+    const fixture = makeFixture({ variant: "leak", pipes: true });
+    const holder = await startHolder(fixture.home, 3);
+    const run = bunTest(fixture.directory, [], environment(fixture.home));
+    await run.output.until(waitingLine, { within: passLimit, name: "waiting line" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate"]);
+    fixture.openGate();
+    expect(await bounded(run.child.exited, { within: passLimit, name: "exit of the child" })).toBe(
+      0,
+    );
+    started.push({ pid: Number(fixture.markerLines("leak-pid")[0]), group: false });
+    await expectNamedRejection(
+      () => bounded(run.output.done, { within: failLimit, name: "end of the output" }),
+      /end of the output/,
+    );
+  },
+  rowTimeout,
+);
+
 test.each([
   { title: "one file argument", args: ["test/a.test.ts"], ran: ["a"] },
   { title: "two file arguments", args: ["test/a.test.ts", "test/b.test.ts"], ran: ["a", "b"] },
@@ -456,7 +638,29 @@ test("ARK-T684 a whole-suite bun test with the ark test marker starts at once, a
   expect(control.output.count(waitingLine)).toBe(1);
 });
 
-test("ARK-T684 ark test runs its whole-suite head suite, base run and census run with no second wait on its own cores", async () => {
+test(
+  "ARK-T684 6 a bare run that never takes a ticket fails the wait for its ticket inside its limit",
+  async () => {
+    const fixture = makeFixture({ preload: false });
+    await startHolder(fixture.home, 3);
+    const control = bunTest(fixture.directory, ["test", "--parallel=3"], environment(fixture.home));
+    expect(
+      await bounded(control.child.exited, { within: passLimit, name: "exit of the child" }),
+    ).toBe(0);
+    await expectNamedRejection(
+      () => bareTicketWritten(fixture, { within: failLimit, name: "ticket of the bare run" }),
+      /ticket of the bare run/,
+    );
+    expect(ownerTicketFiles(fixture)).toEqual([]);
+  },
+  rowTimeout,
+);
+
+const wholeSuiteCommand =
+  "bun test test --parallel=<cores> --reporter=junit --reporter-outfile={report}";
+
+/** A started run of project `demo` whose cli suite runs `command` in a scratch repo, with `ark test` of it running. */
+function startArkTest(command: string) {
   const home = tempArkHome();
   const markers = realpathSync(mkdtempSync(join(tmpdir(), "bare-markers-")));
   const workspace = tempGitRepo(suiteFiles(markers));
@@ -466,16 +670,7 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
     test_budget_cores: 3,
     test_min_free_memory_percent: 0,
     test_max_swap_gb: 1000,
-    suites: [
-      {
-        name: "cli",
-        level: "e2e",
-        repo: ".",
-        cores: 3,
-        command: "bun test test --parallel=<cores> --reporter=junit --reporter-outfile={report}",
-        parser: "bun",
-      },
-    ],
+    suites: [{ name: "cli", level: "e2e", repo: ".", cores: 3, command, parser: "bun" }],
     roles,
   });
   const ticket = writeTicket("demo", "FAKE-1", [
@@ -545,6 +740,29 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
   const startedInWorktree = () =>
     existsSync(join(markers, "started-gate")) &&
     readFileSync(join(markers, "started-gate"), "utf8").includes(` ${worktree}\n`);
+  return {
+    runId,
+    runDirectory,
+    worktree,
+    markers,
+    gateDescriptor,
+    caller,
+    output,
+    startedInWorktree,
+  };
+}
+
+test("ARK-T684 ark test runs its whole-suite head suite, base run and census run with no second wait on its own cores", async () => {
+  const {
+    runId,
+    runDirectory,
+    worktree,
+    markers,
+    gateDescriptor,
+    caller,
+    output,
+    startedInWorktree,
+  } = startArkTest(wholeSuiteCommand);
   await waitFor(markers, startedInWorktree);
 
   // The head suite runs: the store holds its ticket only, and no bare-run ticket.
@@ -566,6 +784,25 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
   expect(baseRuns).toHaveLength(8);
   expect(new Set(baseRuns.map((line) => line.split(" ")[0])).size).toBe(1);
 });
+
+test("ARK-T684 7 an ark test head suite that never starts its gate file fails the wait for the start inside its limit", async () => {
+  const { markers, startedInWorktree } = startArkTest(
+    "bun test test/a.test.ts test/b.test.ts --parallel=<cores> --reporter=junit --reporter-outfile={report}",
+  );
+  // The head suite ran its files, so the missing `started-gate` is the file that `command` leaves out.
+  await waitFor(markers, () => existsSync(join(markers, "ran-b")), {
+    within: 20_000,
+    name: "ran-b of the head suite",
+  });
+  await expectNamedRejection(
+    () =>
+      waitFor(markers, startedInWorktree, {
+        within: failLimit,
+        name: "started-gate of the head worktree",
+      }),
+    /started-gate/,
+  );
+}, 30_000);
 
 test("ARK-T684 a whole-suite bun test that a test of a held bare run starts does not wait on the cores its parent holds", async () => {
   const home = tempArkHome();
