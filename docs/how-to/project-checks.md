@@ -29,7 +29,7 @@ checks:
 
 A check may use two more things:
 
-- `cores`: the CPU cores the check takes from the host's test budget (`test_budget_cores`, default 60% of the host's cores, rounded down). A whole number, 1 or more. The default for a check is 1.
+- `cores`: the CPU cores the check takes from the host's test budget (`test_budget_cores`, default 60% of the host's cores, rounded down; a whole-suite `bun test` outside `ark test` waits for the same budget). A whole number, 1 or more. The default for a check is 1.
 - `<cores>`: Ark replaces this in the command of a check, a suite or a suite's `base_command` with the number of cores that command took. Use it for a flag such as `--workers=<cores>`.
 
 ### Ark's own check that writes

@@ -27,7 +27,7 @@ import { baseSide, oldIdsTouched, planMembership } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { checkStage } from "./merge-request.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
-import { openTestBudget, type TestBudget } from "./test-lock.ts";
+import { budgetHeldVariable, openTestBudget, type TestBudget } from "./test-lock.ts";
 import { sampleGroup, updateResources, type SideUse } from "./resources-file.ts";
 import { callTest, runnerMain } from "./test-runner.ts";
 import { discoverRepos, mirrorRoot, repoBase, submodulesOf, targetBranch } from "./workspace.ts";
@@ -80,7 +80,11 @@ async function stopChildren(): Promise<void> {
 async function run(command: string[], cwd: string, env?: Record<string, string>, measure = false) {
   if (stopping) await new Promise<never>(() => {});
   // bun test --parallel workers set JEST_WORKER_ID; Playwright refuses to start when it sees it.
-  const childEnv: Record<string, string | undefined> = { ...process.env, ...env };
+  const childEnv: Record<string, string | undefined> = {
+    ...process.env,
+    ...env,
+    [budgetHeldVariable]: "held",
+  };
   delete childEnv.JEST_WORKER_ID;
   const child = Bun.spawn(command, {
     cwd,

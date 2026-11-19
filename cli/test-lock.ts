@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -29,6 +30,12 @@ import { arkHome } from "./paths.ts";
  * A ticket is removed by its owner, or by a reader that sees its pid ended.
  */
 export type Ticket = { run: string; pid: number; cores: number; arrival: string; started?: string };
+
+/**
+ * The environment variable that tells a `bun test` preload its cores are already held: `ark test` sets it on every
+ * command it starts, and a bare `bun test` sets it after it takes its own ticket, so no nested run waits twice.
+ */
+export const budgetHeldVariable = "ARK_TEST_BUDGET";
 
 const pollMilliseconds = 100;
 const lineWindowMilliseconds = 30_000;
@@ -106,6 +113,21 @@ function writeTicket(file: string, ticket: Ticket): void {
   renameSync(`${file}.tmp`, file);
 }
 
+/** Creates `file` with `ticket` only when it does not exist. One process wins; no reader sees a partial file. */
+function claimTicket(file: string, ticket: Ticket): boolean {
+  const staging = `${file}.${process.pid}.claim`;
+  writeFileSync(staging, JSON.stringify(ticket));
+  try {
+    linkSync(staging, file);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  } finally {
+    rmSync(staging, { force: true });
+  }
+}
+
 function minutes(started: string, now: number): string {
   const whole = Math.floor((now - Date.parse(started)) / 60_000);
   return whole < 1 ? "<1" : String(whole);
@@ -142,6 +164,13 @@ type Options = {
   minimumFreeMemoryPercent?: number;
   /** A suite waits while swap used is above this many GB (inclusive: equal admits). */
   maximumSwapGigabytes?: number;
+  /**
+   * The pid that owns the tickets, when it is not this process (a `bun test --parallel` coordinator; its workers
+   * take for it). One ticket for that pid: the first `take()` creates it and waits; every later `take()`, in any
+   * process, waits until that ticket runs and takes none. This process registers no exit cleanup, so the ticket
+   * stays until the owner ends and a reader prunes it.
+   */
+  owner?: number;
 };
 
 /**
@@ -157,6 +186,7 @@ export function openTestBudget(
     print = console.log,
     minimumFreeMemoryPercent = defaultMinimumFreeMemoryPercent,
     maximumSwapGigabytes = defaultMaximumSwapGigabytes,
+    owner,
   }: Options = {},
 ): TestBudget {
   let uncheckedPrinted = false;
@@ -187,7 +217,7 @@ export function openTestBudget(
     for (const file of files) rmSync(file, { force: true });
     files.clear();
   };
-  process.on("exit", cleanup);
+  if (owner === undefined) process.on("exit", cleanup);
 
   return {
     close() {
@@ -198,18 +228,17 @@ export function openTestBudget(
     async take(requested) {
       if (closed) throw new Error("ark test: the budget is closed");
       const cores = requested === undefined || requested > budget ? budget : Math.max(1, requested);
-      const file = join(ticketDirectory(), `${process.pid}-${randomUUID()}.json`);
+      const file = join(
+        ticketDirectory(),
+        owner === undefined ? `${process.pid}-${randomUUID()}.json` : `${owner}-owner.json`,
+      );
       mkdirSync(ticketDirectory(), { recursive: true });
-      writeTicket(file, {
+      const ticket: Ticket = {
         run: runId,
-        pid: process.pid,
+        pid: owner ?? process.pid,
         cores,
         arrival: new Date().toISOString(),
-      });
-      files.add(file);
-      let printedKey: string | null = null;
-      let printedAt = 0;
-      let memoryPrinted: string | null = null;
+      };
       // The time spent waiting for others or for memory: the polling sleeps only, so a suite that is admitted at once waits 0.
       let waitMilliseconds = 0;
       const nap = async () => {
@@ -217,6 +246,23 @@ export function openTestBudget(
         await Bun.sleep(pollMilliseconds);
         waitMilliseconds += Date.now() - slept;
       };
+      if (owner === undefined) {
+        writeTicket(file, ticket);
+        files.add(file);
+      } else {
+        // ponytail: a follower may run in the moment between the creator's `started` write and its verification,
+        // before a revoke; only two suites that overflow the budget together revoke. Upgrade: a second flag.
+        while (!claimTicket(file, ticket)) {
+          const existing = readTicket(file);
+          if (existing?.started !== undefined && alive(existing.pid))
+            return { cores: existing.cores, waitMilliseconds, release: () => {} };
+          readTickets(); // prunes a ticket of an ended owner, so the next claim can win
+          await nap();
+        }
+      }
+      let printedKey: string | null = null;
+      let printedAt = 0;
+      let memoryPrinted: string | null = null;
       try {
         for (;;) {
           if (closed) throw new Error("ark test: the budget is closed");
@@ -240,6 +286,7 @@ export function openTestBudget(
                 cores,
                 waitMilliseconds,
                 release: () => {
+                  if (owner !== undefined) return; // the ticket goes when the owner ends
                   files.delete(file);
                   rmSync(file, { force: true });
                 },
