@@ -54,7 +54,7 @@ Expected: with the budget full, no file runs and one waiting line shows; after t
 - Step 8: both ways to the project wait the same way.
 - Step 9: all files run with no wait and no waiting line (cores fit).
 - Step 10: the waiting line shows live in the terminal output while no file runs, and exactly one waiting line shows in the whole output.
-- Step 11: in each row the one failing wait rejects with an error that names what it waited for (11a the marker `ran-stuck`, 11b the end of `alive-stuck`, 11c the waiting line, 11d the exit of the child, 11e the end of the output), inside its own time limit and below the 90 s test timeout; the case asserts that rejection and its elapsed time, and passes. At the head before this run each of these waits is unbounded: the row reaches the 90 s test timeout and fails, so each row is red proof. The rows do not depend on the Linux cause: each state is built on any host.
+- Step 11: in each row the one failing wait rejects with an error that names what it waited for (11a the marker `ran-stuck`, 11b the end of `alive-stuck`, 11c the waiting line, 11d the exit of the child, 11e the end of the output), inside its own time limit and below the 90 s test timeout; the case asserts that rejection and its elapsed time, and passes. At the head before this run each of these waits is unbounded: the row fails at its own row test timeout (a limit set on the row, shorter than the 90 s default) and not at a named wait error, so each row is red proof. The rows do not depend on the Linux cause: each state is built on any host.
 
 ## Screenshot checkpoints
 
