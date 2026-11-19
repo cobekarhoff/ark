@@ -2743,7 +2743,7 @@ test("ARK-T117 Esc from a ticket page returns the Roadmap to the scroll position
   await expect(chip).toBeVisible();
   const target = (await selected.getAttribute("data-ticket"))!;
   release();
-  await expect(chip).toHaveCount(0);
+  await waitForChipGone(page);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(new RegExp(`#/ticket/${target}$`));
   await expect(page.getByTestId("ticket-page")).toBeVisible();
@@ -2791,7 +2791,7 @@ test("ARK-T118 The hub header has the same height with 0, 1 and 4 or more stale 
   expect(await heightOf()).toBe(heightAtFour);
   release.gh();
   release.plannotator();
-  await expect(chip).toHaveCount(0);
+  await waitForChipGone(page);
   await checkpoint(page, "header-without-chip");
   expect(await heightOf()).toBe(heightAtFour);
 });
@@ -4592,8 +4592,9 @@ test("ARK-T370 Home counts only the chosen project in its tiles, lists, cost and
 });
 
 /**
- * Home of project `p` with its Master Chief Run, on the frozen clock. Every source reads at 300 ms, so
- * `show` (a new answer of the fake orca) reaches the tile in about a second.
+ * Home of project `p` with its Master Chief Run, on the frozen clock. Every source but the provider limits reads at
+ * 300 ms (ARK_PROVIDER_LIMITS_MS, 2 s, wins for those), so `show` (a new answer of the fake orca) reaches the tile
+ * in about a second.
  */
 async function homeWithUnread(page: Page) {
   isolate();
