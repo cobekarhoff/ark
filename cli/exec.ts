@@ -1,5 +1,12 @@
-/** Every external reader (orca, plannotator) waits at most this long. */
-export const readerTimeoutMilliseconds = 2000;
+/**
+ * How long an external reader (orca, plannotator, ps, git) waits: 2 s, or ARK_READER_TIMEOUT_MS when
+ * it is a number from 1 to 2147483647 (a test raises it on a loaded host). Read at each call, so a
+ * variable set after the import counts. Any other value, such as empty, text, zero or negative, keeps 2 s.
+ */
+export function readerTimeout(): number {
+  const limit = Number(process.env.ARK_READER_TIMEOUT_MS);
+  return limit >= 1 && limit <= 2147483647 ? limit : 2000;
+}
 
 /**
  * Runs a command and returns its stdout, or null when it fails, is missing or takes longer than
@@ -7,7 +14,7 @@ export const readerTimeoutMilliseconds = 2000;
  */
 export async function exec(
   command: string[],
-  timeoutMilliseconds = readerTimeoutMilliseconds,
+  timeoutMilliseconds = readerTimeout(),
   okExitCodes = [0],
   cwd?: string,
 ): Promise<string | null> {
@@ -42,7 +49,7 @@ export async function exec(
 /** `exec` plus JSON parsing. Output of a local tool is trusted, so the result is cast by the caller. */
 export async function execJson<T>(
   command: string[],
-  timeoutMilliseconds = readerTimeoutMilliseconds,
+  timeoutMilliseconds = readerTimeout(),
   okExitCodes = [0],
   cwd?: string,
 ): Promise<T | null> {
@@ -63,7 +70,7 @@ export type ExecResult = { stdout: string; stderr: string; code: number | null; 
  */
 export async function execResult(
   command: string[],
-  timeoutMilliseconds = readerTimeoutMilliseconds,
+  timeoutMilliseconds = readerTimeout(),
 ): Promise<ExecResult> {
   try {
     const child = Bun.spawn(command, {
