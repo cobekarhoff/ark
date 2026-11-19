@@ -14,6 +14,7 @@ changed_by: 2026-11-18-ARK-515-1
 Prove each suite entry of `test.completed` that ran carries `loadAtStart` and `loadPeak` (the 1-minute load), a reused suite carries `null` for both, and the readers of `events.ndjson` read an old entry without them.
 
 Gate answers:
+
 1. Protects the event contract of AC2 (new fields, the `null` of a reused suite) and the tolerance of the readers for the old shape.
 2. A regression that fails it: fields missing, a load of 0 or a wrong slot (5-minute) recorded, a reused suite not `null`, a reader that fails on an absent field.
 3. ARK-T135 proves the event holds suites, heads, mode and duration, and the reused flag, with no load; ARK-T163 owns the cache semantics. The load fields have no case.

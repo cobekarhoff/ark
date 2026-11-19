@@ -14,6 +14,7 @@ changed_by: 2026-11-18-ARK-515-1
 Prove `ark test` takes no ticket as started, runs no check and no suite while the 1-minute load average is above `test_max_load` of `ark.yml`, prints one `waiting for load` line that names the load and the limit, and runs at once when the load is at or under the limit. The default limit is the core count, a fraction is a valid limit, a missing reading never holds, and `ark chief state` is unchanged.
 
 Gate answers:
+
 1. Protects the `ark test` admission contract of AC1: the hold, its inclusive limit, its default, its line and the `holdReasons` boundary.
 2. A regression that fails it: the hold is missing, `>=` instead of `>`, `integer()` for the key, a default other than `availableParallelism()`, a hold on `null`, the `memory` prefix, or a load reason in `holdReasons`.
 3. No existing case holds the load (ARK-T187 holds memory; ARK-T365 and ARK-T188 hold the chief state on the 5-minute load and CPU). This case owns the load hold; ARK-T694 owns the recovery and the print cadence at `openTestBudget`; ARK-T695 owns the bare path.

@@ -14,6 +14,7 @@ changed_by: 2026-11-18-ARK-515-1
 Prove a whole-suite bare `bun test` (`cli/bare-test-budget.ts`) is held by the same load rule as `ark test`: no file runs while the load is above `test_max_load` of the project's `ark.yml`, exactly one `waiting for load` line shows, and the files run when the load is at or under the configured limit, whether that limit is below or above the core-count default.
 
 Gate answers:
+
 1. Protects the bare path of AC1 ("held by the same rule") and the exemptions of ARK-T684 (file argument, `ark test` child, nested run) on the load rule.
 2. A regression that fails it: `holdTestBudget` omits `maximumLoad` (the bare run ignores the load, or the key and falls back to the core count), or the load line prints once for each worker.
 3. ARK-T683 and ARK-T684 prove the bare wait on cores only; ARK-T692 proves the rule through `ark test`. Neither reaches the bare entry, which is a separate call site of `openTestBudget`.

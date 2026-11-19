@@ -14,6 +14,7 @@ changed_by: 2026-11-18-ARK-515-1
 Prove that `openTestBudget` re-reads the 1-minute load on each fresh host reading (readings stay cached for 1,000 ms; the loop still polls every 100 ms), holds a waiting ticket while it is above the limit, and lets it start once the load is at or under the limit, with one line for each change of reason, through the same loop and nap as the memory hold.
 
 Gate answers:
+
 1. Protects the waiting-to-started transition of AC1 and the print cadence "same as the memory reasons".
 2. A regression that fails it: a one-shot load reading that never refreshes, a line for each poll, a reason list that loses the memory or the load reason, a started ticket while waiting.
 3. ARK-T692 runs the real `ark test` at fixed readings (the runner's environment cannot change while it runs), so it shows hold and start for separate runs, but not the move from one to the other. ARK-T187 shows that move for memory only.

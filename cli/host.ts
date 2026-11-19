@@ -131,11 +131,65 @@ export async function sampleCpuPercent(milliseconds = 1000): Promise<number | nu
   if (after.total === before.total) return null;
   return Math.round(((after.busy - before.busy) / (after.total - before.total)) * 1000) / 10;
 }
+/**
+ * Real load averages. `ARK_FAKE_LOAD_ONE` replaces the 1-minute figure on every reading: a number, or `file:<path>`
+ * (a file whose number is read each time). A value that is not a number is a reading that failed.
+ */
+function readLoadAverages(): [number, number, number] {
+  const averages = loadavg() as [number, number, number];
+  const fake = process.env.ARK_FAKE_LOAD_ONE;
+  if (fake === undefined) return averages;
+  const text = (
+    fake.startsWith("file:") ? readFileSync(fake.slice("file:".length), "utf8") : fake
+  ).trim();
+  const loadOne = text === "" ? Number.NaN : Number(text);
+  if (!Number.isFinite(loadOne)) throw new Error(`ARK_FAKE_LOAD_ONE is not a number: ${fake}`);
+  return [loadOne, averages[1], averages[2]];
+}
+
+/** The 1-minute load average now, through the reader the admission uses; null when it cannot be read. */
+function readLoadOne(): number | null {
+  try {
+    return readLoadAverages()[0];
+  } catch {
+    return null;
+  }
+}
+
+/** The 1-minute load when it started and the highest value sampled since; both null while nothing could be read. */
+export type LoadSampler = {
+  start: number | null;
+  /** Takes a last sample, ends the sampling and returns the highest value. Safe to call twice. */
+  stop(): number | null;
+};
+
+/** Samples the 1-minute load once a second. `read` is a parameter so a test can feed it values. */
+export function sampleLoad(read: () => number | null = readLoadOne): LoadSampler {
+  const start = read();
+  let peak = start;
+  const sample = () => {
+    const value = read();
+    if (value !== null && (peak === null || value > peak)) peak = value;
+  };
+  const timer = setInterval(sample, 1000);
+  let stopped = false;
+  return {
+    start,
+    stop() {
+      if (!stopped) {
+        stopped = true;
+        clearInterval(timer);
+        sample();
+      }
+      return peak;
+    },
+  };
+}
 
 const defaultReaders: HostReaders = {
   memory: readMemory,
   pressureLevel: readPressureLevel,
-  loadAverages: () => loadavg() as [number, number, number],
+  loadAverages: readLoadAverages,
   cores: () => availableParallelism(),
   cpuPercent: readCpuPercent,
   freeGigabytesOf,
@@ -229,6 +283,16 @@ export function memoryReasons(
       `swap ${swapUsedGigabytes.toFixed(1)} GB is above the ${maximumSwapGigabytes} GB ceiling`,
     );
   return { reasons, unchecked: freeMemoryPercent === null || swapUsedGigabytes === null };
+}
+
+/**
+ * The reason the 1-minute load holds a suite, or null. Inclusive: only a load above the limit holds, and a load
+ * that could not be read never does. Not part of `holdReasons`: `ark chief state` does not hold runs for it.
+ */
+export function loadReason(reading: HostReading, maximumLoad: number): string | null {
+  const { loadOne } = reading;
+  if (loadOne === null || loadOne <= maximumLoad) return null;
+  return `1-minute load ${Number(loadOne.toFixed(2))} is above the limit ${maximumLoad}`;
 }
 
 /** Master Chief starts no run while free disk is under this many GB. */
