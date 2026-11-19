@@ -120,8 +120,9 @@ function waitFor(directory: string, ready: () => boolean, limit: WaitLimit): Pro
  */
 function bounded<T>(promise: Promise<T>, { within, name }: WaitLimit): Promise<T> {
   const { promise: expired, reject } = Promise.withResolvers<never>();
-  const timer = setTimeout(() => reject(new Error(`no ${name} within ${within} ms`)), within);
-  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+  const deadline = AbortSignal.timeout(within);
+  deadline.addEventListener("abort", () => reject(new Error(`no ${name} within ${within} ms`)));
+  return Promise.race([promise, expired]);
 }
 
 /** The exit of a child and then the end of its output, each with the roomy limit. Resolves to the exit code. */
