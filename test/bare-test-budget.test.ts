@@ -122,6 +122,8 @@ function environment(
     delete merged[name];
   delete merged.ARK_HOME;
   if (home !== null) merged.ARK_HOME = home;
+  // ARK-515: a load of 0, so the one waiting line of a case is the budget line on a busy host; a case that tests the load sets its own.
+  merged.ARK_FAKE_LOAD_ONE = "0";
   Object.assign(merged, extra);
   return Object.fromEntries(
     Object.entries(merged).filter(([, value]) => value !== undefined),
@@ -142,7 +144,12 @@ await new Promise((done) => process.stdin.once("data", done));
 budget.close();
 process.exit(0);`,
     ],
-    { env: environment(home), stdin: "pipe", stdout: "pipe", stderr: "inherit" },
+    {
+      env: environment(home),
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "inherit",
+    },
   );
   started.push({ pid: holder.pid, group: false });
   await new Output(holder.stdout).until("held");
@@ -214,6 +221,8 @@ function makeFixture(
     pipes?: boolean;
     budget?: number | null;
     failing?: boolean;
+    /** `test_max_load` of the project; absent means the core-count default. */
+    maxLoad?: number;
   } = {},
 ): Fixture {
   const home = tempArkHome();
@@ -234,7 +243,16 @@ function makeFixture(
     workspace,
     ticket_source: "local",
     ...(options.budget === null ? {} : { test_budget_cores: options.budget ?? 3 }),
-    suites: [{ name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
+    ...(options.maxLoad === undefined ? {} : { test_max_load: options.maxLoad }),
+    suites: [
+      {
+        name: "cli",
+        level: "e2e",
+        repo: ".",
+        command: "true {report}",
+        parser: "bun",
+      },
+    ],
     roles,
   });
   const gate = join(directory, "gate");
@@ -301,10 +319,30 @@ const bareTicketWritten = (fixture: Fixture) =>
 const cpuCores = Math.min(availableParallelism(), 3);
 
 test.each([
-  { title: "bun test --parallel=3", args: ["--parallel=3"], asks: 3, parallel: true },
-  { title: "bun test (serial, asks 1 core)", args: [], asks: 1, parallel: false },
-  { title: "bun test test --parallel=3", args: ["test", "--parallel=3"], asks: 3, parallel: true },
-  { title: "bun test --parallel", args: ["--parallel"], asks: cpuCores, parallel: true },
+  {
+    title: "bun test --parallel=3",
+    args: ["--parallel=3"],
+    asks: 3,
+    parallel: true,
+  },
+  {
+    title: "bun test (serial, asks 1 core)",
+    args: [],
+    asks: 1,
+    parallel: false,
+  },
+  {
+    title: "bun test test --parallel=3",
+    args: ["test", "--parallel=3"],
+    asks: 3,
+    parallel: true,
+  },
+  {
+    title: "bun test --parallel",
+    args: ["--parallel"],
+    asks: cpuCores,
+    parallel: true,
+  },
   {
     title: "bun test --parallel=3 in a run worktree found by its path",
     args: ["--parallel=3"],
@@ -414,7 +452,11 @@ macOnly(
 
 test.each([
   { title: "one file argument", args: ["test/a.test.ts"], ran: ["a"] },
-  { title: "two file arguments", args: ["test/a.test.ts", "test/b.test.ts"], ran: ["a", "b"] },
+  {
+    title: "two file arguments",
+    args: ["test/a.test.ts", "test/b.test.ts"],
+    ran: ["a", "b"],
+  },
 ])(
   "ARK-T684 bun test with $title starts at once while the budget is full",
   async ({ args, ran }) => {
@@ -494,7 +536,12 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
       summary: {
         why: "Run a whole-suite command under ark test.",
         changes: [
-          { criterion: "FAKE-1-AC1", where: "tests", now: "now", fix: "the suite proves it" },
+          {
+            criterion: "FAKE-1-AC1",
+            where: "tests",
+            now: "now",
+            fix: "the suite proves it",
+          },
         ],
       },
       steps: [
@@ -596,7 +643,15 @@ test("FAKE-1-AC1 spawn", async () => {
     workspace,
     ticket_source: "local",
     test_budget_cores: 3,
-    suites: [{ name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
+    suites: [
+      {
+        name: "cli",
+        level: "e2e",
+        repo: ".",
+        command: "true {report}",
+        parser: "bun",
+      },
+    ],
     roles,
   });
   const run = bunTest(workspace, ["--parallel=3"], environment(home, { ARK_PROJECT: "demo" }));
@@ -615,6 +670,115 @@ test("FAKE-1-AC1 spawn", async () => {
   ).toMatchObject({ run: "bun test", cores: 3 });
 });
 
+// ARK-T695. The configured limit is C/2 or 2*C, never the core count C, and each load lies between it and C, so a run
+// that ignores the project's test_max_load (and reads the default C) gets the opposite result.
+const coreCount = availableParallelism();
+const loadLine = (load: number, limit: number) =>
+  `waiting for load: 1-minute load ${Number(load.toFixed(2))} is above the limit ${limit}`;
+
+/** Kills a detached `bun test` and its workers by its own pid, the one this case started. */
+const stopRun = (child: { pid: number }) => process.kill(-child.pid, "SIGKILL");
+
+test("ARK-T695 a whole-suite bun test holds on the load of test_max_load below the core count, runs no file, prints one load line, and wears the bun test prefix", async () => {
+  const fixture = makeFixture({ maxLoad: coreCount / 2 });
+  const load = 0.75 * coreCount;
+  const environmentOfLoad = environment(fixture.home, {
+    ARK_FAKE_LOAD_ONE: String(load),
+  });
+
+  mkdirSync(fixture.storeDirectory(), { recursive: true }); // waitFor watches it, and no holder made it
+  // A --parallel run: its output reaches the pipe only when a file ends, so the wait is read from the ticket store.
+  const parallel = bunTest(fixture.directory, ["--parallel=3"], environmentOfLoad);
+  await bareTicketWritten(fixture);
+  // A negative result needs a deadline: over one cache lifetime of the host reading and three polls.
+  await Bun.sleep(1_500);
+  expect(fixture.ran()).toEqual([]);
+  expect(parallel.child.exitCode).toBeNull();
+  expect(readTestLock().waiting).toMatchObject([
+    { run: "bun test", pid: parallel.child.pid, cores: 3 },
+  ]);
+  expect(chiefState()).toContain(`- waiting: bun test (pid ${parallel.child.pid}), 3 cores`);
+  stopRun(parallel.child);
+  await parallel.child.exited;
+
+  // A serial run prints live: the one line names the load and the limit, under the wrapper of the bare caller.
+  const serial = bunTest(fixture.directory, [], environmentOfLoad);
+  await serial.output.until("waiting for load");
+  expect(fixture.ran()).toEqual([]);
+  stopRun(serial.child);
+  await serial.child.exited;
+  await serial.output.done;
+  const lines = serial.output.text.split("\n").filter((line) => line.includes("waiting for load"));
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toContain(loadLine(load, coreCount / 2));
+  expect(lines[0]!.startsWith("bun test: ")).toBe(true);
+  expect(serial.output.text).not.toContain("waiting for memory");
+});
+
+test("ARK-T695 a whole-suite bun test runs every file and prints no load line when the load is above the core count but at or under test_max_load", async () => {
+  const fixture = makeFixture({ maxLoad: 2 * coreCount });
+  const run = bunTest(
+    fixture.directory,
+    ["--parallel=3"],
+    environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(1.5 * coreCount) }),
+  );
+  expect(await run.child.exited, run.output.text).toBe(0);
+  await run.output.done;
+  expect(run.output.text).not.toContain("waiting for load");
+  for (const name of ["a", "b", "c", "gate"])
+    expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
+});
+
+test("ARK-T695 a whole-suite bun test of a project with no test_max_load takes the core count: a load equal to it runs, a load 0.1 above it holds", async () => {
+  const fixture = makeFixture();
+  const equal = bunTest(
+    fixture.directory,
+    ["--parallel=3"],
+    environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(coreCount) }),
+  );
+  expect(await equal.child.exited, equal.output.text).toBe(0);
+  await equal.output.done;
+  expect(equal.output.text).not.toContain("waiting for load");
+
+  const above = coreCount + 0.1;
+  const held = bunTest(
+    fixture.directory,
+    [],
+    environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(above) }),
+  );
+  await held.output.until("waiting for load");
+  stopRun(held.child);
+  await held.child.exited;
+  await held.output.done;
+  expect(held.output.text).toContain(loadLine(above, coreCount));
+});
+
+test("ARK-T695 a file run and an ark test child start at once on a load above test_max_load", async () => {
+  const fixture = makeFixture({ maxLoad: coreCount / 2 });
+  const load = String(0.75 * coreCount);
+  const fileRun = bunTest(
+    fixture.directory,
+    ["test/a.test.ts"],
+    environment(fixture.home, { ARK_FAKE_LOAD_ONE: load }),
+  );
+  expect(await fileRun.child.exited, fileRun.output.text).toBe(0);
+  await fileRun.output.done;
+  expect(fileRun.output.text).not.toContain("waiting for load");
+  expect(fixture.markerLines("ran-a")).toHaveLength(1);
+
+  const child = bunTest(
+    fixture.directory,
+    ["test", "--parallel=3"],
+    environment(fixture.home, {
+      ARK_FAKE_LOAD_ONE: load,
+      [budgetHeldVariable]: "held",
+    }),
+  );
+  expect(await child.child.exited, child.output.text).toBe(0);
+  await child.output.done;
+  expect(child.output.text).not.toContain("waiting for load");
+  expect(ownerTicketFiles(fixture)).toEqual([]);
+});
 // The hook never refuses a run: a host it cannot read runs the suite at once, as the suite itself exits.
 type FailOpenRow = {
   title: string;
@@ -658,7 +822,13 @@ test.each([
           ticket_source: "local",
           test_budget_cores: 0,
           suites: [
-            { name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" },
+            {
+              name: "cli",
+              level: "e2e",
+              repo: ".",
+              command: "true {report}",
+              parser: "bun",
+            },
           ],
           roles,
         }),

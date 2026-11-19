@@ -308,7 +308,7 @@ function runnerPid(run: string): number {
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
 function startTest(run: string, extraEnvironment: Record<string, string> = {}): Started {
   const child = Bun.spawn(["bun", arkEntry, "test", run], {
-    env: { ...process.env, ARK_HOME: arkHome, ...extraEnvironment },
+    env: { ...process.env, ARK_HOME: arkHome, ARK_FAKE_LOAD_ONE: "0", ...extraEnvironment },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
