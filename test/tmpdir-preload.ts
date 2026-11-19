@@ -2,6 +2,7 @@ import { afterAll, setDefaultTimeout } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { holdTestBudget } from "../cli/bare-test-budget.ts";
 import { writeOwnerFile } from "../cli/owner-file.ts";
 
 // ARK-292: default for the first file only; bun resets it per file, so each test file also calls setDefaultTimeout(30_000).
@@ -95,3 +96,7 @@ process.env.PATH = `${hostBin}:${process.env.PATH}`;
 afterAll(() => {
   rmSync(hostRoot, { recursive: true, force: true });
 });
+
+// ARK-513: a whole-suite `bun test` outside `ark test` waits for the shared test budget. After the fake host above,
+// so the memory admission inside the wait reads the healthy host a test of this repo expects.
+await holdTestBudget();
