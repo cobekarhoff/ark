@@ -712,6 +712,83 @@ describe("ark test checks", () => {
       });
     });
 
+    test("ARK-T720 a quick --keep-going run that records every AC failing is the bug run's red proof, and one that leaves an AC not run is refused", () => {
+      const planCase = (id: string) => ({
+        id,
+        action: "add",
+        level: "e2e",
+        given: [],
+        when: ["run it"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+        then: ["it works"],
+        expected: "it works",
+      });
+      const twoCriteria = {
+        criteria: ["FAKE-1/AC1", "FAKE-1/AC2"],
+        ticketCriteria: [
+          { id: "AC1", method: "test", verified_by: ["FAKE-T1"] },
+          { id: "AC2", method: "test", verified_by: ["FAKE-T2"] },
+        ],
+        testCases: [planCase("FAKE-T1"), planCase("FAKE-T2")],
+      };
+      const commitFiles = (runDirectory: string, files: Record<string, string>) => {
+        const worktree = join(runDirectory, "workspace");
+        for (const [name, content] of Object.entries(files))
+          writeFileSync(join(worktree, name), content);
+        for (const args of [
+          ["add", "-A"],
+          ["commit", "-q", "-m", "red tests"],
+        ])
+          Bun.spawnSync(["git", "-C", worktree, ...args]);
+      };
+      installFakeOrca();
+
+      // Every AC fails in the quick run, past a failed check: the implementer starts.
+      const everyFailing = bugRun({ ...twoCriteria, e2e: [] });
+      writeFileSync(everyFailing.failureSwitch, "");
+      commitFiles(everyFailing.runDirectory, {
+        "e2e.test.ts": suiteTests([failing("FAKE-T1 works"), failing("FAKE-T2 works")]),
+      });
+      const red = ark("test", everyFailing.runId, "--quick", "--keep-going");
+      expect(red.code).toBe(1);
+      expect(red.err).toContain("check lint failed");
+      expect(red.err).toContain("suite e2e failed");
+      expect(red.out).toContain("FAKE-1/AC1  failing");
+      expect(red.out).toContain("FAKE-1/AC2  failing");
+      expect(testCompleted(everyFailing.runDirectory).at(-1)).toMatchObject({
+        mode: "quick",
+        criteria: { "FAKE-1/AC1": "failing", "FAKE-1/AC2": "failing" },
+      });
+      expect(ark("run", "step", everyFailing.runId, "build", "start").code).toBe(0);
+
+      // FAKE-T2 sits in a file the quick run does not select: AC2 reads `not run` and the start is refused.
+      const suiteCommand = "bun test --reporter=junit --reporter-outfile={report}";
+      const oneNotRun = bugRun({
+        ...twoCriteria,
+        e2e: [passing("FAKE-T1 works")],
+        e2eCommand: `${suiteCommand} ./e2e.test.ts ./other.test.ts`,
+        suiteOverrides: {
+          e2e: { base_files: "e2e.test.ts", base_command: `${suiteCommand} {files}` },
+        },
+      });
+      commitFiles(oneNotRun.runDirectory, {
+        "e2e.test.ts": suiteTests([failing("FAKE-T1 works")]),
+        "other.test.ts": suiteTests([failing("FAKE-T2 works")]),
+      });
+      const partial = ark("test", oneNotRun.runId, "--quick", "--keep-going");
+      expect(partial.code).toBe(1);
+      expect(testCompleted(oneNotRun.runDirectory).at(-1)).toMatchObject({
+        mode: "quick",
+        criteria: { "FAKE-1/AC1": "failing", "FAKE-1/AC2": "not run" },
+      });
+      const refused = ark("run", "step", oneNotRun.runId, "build", "start");
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain("bug run: record a failing ark test of the ACs before the fix");
+      expect(readFileSync(join(oneNotRun.runDirectory, "events.ndjson"), "utf8")).not.toContain(
+        '"step.started"',
+      );
+    });
+
     test("ARK-T665 a refactor run stopped by a failed check runs no base suite and records no base result", () => {
       const failureSwitch = join(mkdtempSync(join(tmpdir(), "ark-check-switch-")), "check-fails");
       writeFileSync(failureSwitch, "");
