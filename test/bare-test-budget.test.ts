@@ -1180,7 +1180,7 @@ test("ARK-T707 a whole-suite bun test starts at once under the marker of a live 
     });
     expect(repo.ranX(), name).toBe(false);
     expect(waiting.output.count(waitingLine), name).toBeLessThanOrEqual(1);
-    stopRun(waiting.child);
+    process.kill(-waiting.child.pid, "SIGKILL"); // the detached run this case started, by its own pid
     await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
   }
 
@@ -1219,7 +1219,7 @@ test("ARK-T707 a whole-suite bun test takes its own ticket under the marker of a
   const waiting = bunTest(blocked.directory, ["test", "--parallel=3"], projectEnvironment);
   await waitsForBudget(fixture, waiting.child, (ticket) => ticket.pid === waiting.child.pid);
   expect(blocked.ranX()).toBe(false);
-  stopRun(waiting.child);
+  process.kill(-waiting.child.pid, "SIGKILL"); // the detached run this case started, by its own pid
   await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
   await holder.release();
 });
