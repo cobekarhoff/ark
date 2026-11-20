@@ -838,7 +838,12 @@ last full `test.completed` recorded in `red_on_main`, with the run id, once; a r
 cannot be read prints `unavailable` there. It also runs `ark companions sync` and prints its lines,
 and each failure as `unavailable: <reason>`, under `Companions`; with no `companions` in ark.yml and
 no recorded companion worker it adds no section and no Orca call, and a failing sync never changes
-the exit code. --project falls back to ARK_PROJECT.
+the exit code. The `Services` section ends with the `Hub` line of `ark services status`. The `Host`
+section prints one line each for `free memory`, `swap used`, `load (5 min)`, `cpu` and `free disk`,
+then `tests: running <n>, waiting <n>` (the `ark test` runs), `orphaned bun test workers: <n> (<MB>
+MB)` (`0` when none) and, last, `hold new runs: no` or `hold new runs: <reason>`; a reading that
+cannot be taken, such as the orphan count when `ps` fails, prints `unavailable`. --project falls
+back to ARK_PROJECT.
 ```
 
 ### chief handover

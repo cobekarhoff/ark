@@ -30,11 +30,11 @@ ark services status --project ark
 ark services uninstall --project ark
 ```
 
-| Command                  | What it does                                                                                                                                                                                                                |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ark services install`   | Writes and loads one LaunchAgent for each service, named `dev.ark.<project>.<service>`. Run it again after a change: an unchanged service prints `... is already installed. Nothing changed.`                               |
-| `ark services status`    | Prints one line for each service: `not installed`, `loaded` or `running` with its pid, and the last line of its log.                                                                                                        |
-| `ark services uninstall` | Unloads and deletes all four LaunchAgents of the project. It leaves the logs and the git repository of the project folder. With none installed it prints `No services of project <project> are installed. Nothing changed.` |
+| Command                  | What it does                                                                                                                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ark services install`   | Writes and loads one LaunchAgent for each service, named `dev.ark.<project>.<service>`. Run it again after a change: an unchanged service prints `... is already installed. Nothing changed.`                                                                 |
+| `ark services status`    | Prints one line for each service: `not installed`, `loaded` or `running` with its pid, and the last line of its log. Then one `Hub` line from the hub's `GET /api/health`: the answer time and the loop lag, `stalled: no answer in 5 s` or `no hub running`. |
+| `ark services uninstall` | Unloads and deletes all four LaunchAgents of the project. It leaves the logs and the git repository of the project folder. With none installed it prints `No services of project <project> are installed. Nothing changed.`                                   |
 
 Example output of `ark services status`:
 
