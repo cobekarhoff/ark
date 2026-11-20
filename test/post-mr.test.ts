@@ -166,7 +166,7 @@ test("ARK-T223 an escalation answer survives ark test after an MR is open and th
   expect(readEvents(directory)).toEqual(before);
 });
 
-test("ARK-287-AC1 before any MR is open a test.completed event still clears the escalation answer", () => {
+test("ARK-T727 a test.completed event before any merge request is open still clears the escalation answer, and the next failed test escalates again", () => {
   const { runId, directory } = openRun(false);
   const failedTest = () =>
     appendEvent(directory, "test.completed", {
@@ -228,7 +228,7 @@ if (process.argv[2] === "mr") {
   ].map((mergeRequest) => ({ ...mergeRequest, workspace }));
 }
 
-test("ARK-208-AC3 status attributes GitHub checks and GitLab head-pipeline job failures to each MR", () => {
+test("ARK-T728 ark merge-request status attributes GitHub checks and GitLab head-pipeline job failures to each merge request", () => {
   const { runId, directory, workspace } = openRun();
   for (const mergeRequest of emulateHosts(workspace)) {
     appendEvent(directory, "worktree.created", {
@@ -249,7 +249,7 @@ test("ARK-208-AC3 status attributes GitHub checks and GitLab head-pipeline job f
   expect(readEvents(directory)).toEqual(before);
 });
 
-test("ARK-208-AC3 status prints ci: failed when the GitLab pipeline failed, never passed", () => {
+test("ARK-T729 ark merge-request status prints ci: failed for a GitLab pipeline that failed, and never passed", () => {
   const { runId, directory, workspace } = openRun();
   const mergeRequest = emulateHosts(workspace, true).find(
     (candidate) => candidate.repo === "gitlab",
