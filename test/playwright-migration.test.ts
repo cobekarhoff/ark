@@ -98,7 +98,7 @@ describe("playwright migration", () => {
     long,
   );
 
-  test("ARK-243-AC2 the bun parser maps Playwright JUnit statuses and criterion ids", async () => {
+  test("ARK-T134 the bun parser maps Playwright JUnit statuses and criterion ids", async () => {
     const report = await Bun.file(join(root, "test/fixtures/playwright/junit.xml")).text();
     expect(parseBun({ report, stdout: "" })).toEqual([
       {
@@ -106,14 +106,22 @@ describe("playwright migration", () => {
         criteria: ["ARK-901-AC1"],
         cases: [],
         status: "passed",
+        duration_s: 0.5,
       },
       {
         name: "ARK-901-AC2 fails with a message",
         criteria: ["ARK-901-AC2"],
         cases: [],
         status: "failed",
+        duration_s: 0.4,
       },
-      { name: "ARK-901-AC3 is skipped", criteria: ["ARK-901-AC3"], cases: [], status: "skipped" },
+      {
+        name: "ARK-901-AC3 is skipped",
+        criteria: ["ARK-901-AC3"],
+        cases: [],
+        status: "skipped",
+        duration_s: 0,
+      },
     ]);
   });
 

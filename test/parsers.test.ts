@@ -14,8 +14,9 @@ setDefaultTimeout(30_000);
 const fixture = (name: string) =>
   readFileSync(join(import.meta.dir, "fixtures/parsers", name), "utf8");
 
-// The file of each result is asserted in its own test below.
-const bare = (results: TestResult[]) => results.map(({ file: _file, ...rest }) => rest);
+// The file and the duration of each result are asserted in their own tests.
+const bare = (results: TestResult[]) =>
+  results.map(({ file: _file, duration_s: _duration, ...rest }) => rest);
 
 test("ARK-T134 pytest maps ac markers to per-test results", () => {
   const results = parsePytest({ report: fixture("pytest-report.xml"), stdout: "" });
@@ -78,6 +79,7 @@ test("ARK-T134 bun reads case ids and old AC ids from the JUnit title into cases
       cases: ["ARK-T12"],
       status: "passed",
       file: "a.test.ts",
+      duration_s: 0.000013,
     },
     {
       name: "CLARA-12-AC1 old only",
@@ -85,6 +87,7 @@ test("ARK-T134 bun reads case ids and old AC ids from the JUnit title into cases
       cases: [],
       status: "passed",
       file: "a.test.ts",
+      duration_s: 0.000003,
     },
     {
       name: "ARK-T13 CLARA-12-AC2 both",
@@ -92,14 +95,23 @@ test("ARK-T134 bun reads case ids and old AC ids from the JUnit title into cases
       cases: ["ARK-T13"],
       status: "passed",
       file: "a.test.ts",
+      duration_s: 0.000001,
     },
-    { name: "neither", criteria: [], cases: [], status: "passed", file: "a.test.ts" },
+    {
+      name: "neither",
+      criteria: [],
+      cases: [],
+      status: "passed",
+      file: "a.test.ts",
+      duration_s: 0.000001,
+    },
     {
       name: "ARK-9/AC1 slash",
       criteria: ["ARK-9/AC1"],
       cases: [],
       status: "passed",
       file: "a.test.ts",
+      duration_s: 0.000001,
     },
   ]);
 });
