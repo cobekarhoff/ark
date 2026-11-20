@@ -187,7 +187,7 @@ test("ARK-175-AC3 formatter rejects source and document drift and fixes both", (
   }
 });
 
-test("ARK-T103 ARK-175-AC4 CI command sequence blocks each failed check", () => {
+test("ARK-T103 CI command sequence blocks each failed check", () => {
   expect(ciCommands.filter((command) => !setupCommands.includes(command))).toEqual([
     "bun run typecheck",
     "bun run lint",

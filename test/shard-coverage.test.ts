@@ -146,7 +146,7 @@ test("ARK-T697 the CI workflow runs on every pull request and every push to main
   ).toEqual([]);
 });
 
-test("ARK-T697 the timings file is a Bun timings file with one recorded time for each of existing files", () => {
+test("ARK-T697 the timings file is a Bun timings file whose entries are recorded times of existing files", () => {
   const timingsPath = /--timings=(\S+)/.exec(shardStep!)![1];
   const timings = JSON.parse(readFileSync(join(repositoryRoot, timingsPath), "utf8")) as {
     version: number;
