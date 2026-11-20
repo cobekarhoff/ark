@@ -1530,7 +1530,7 @@ function healthProber(hub: Hub) {
       }
     },
     largestLag: () => Math.max(0, ...probes.map((entry) => entry.lag_ms ?? 0)),
-    message: () => lagWindowMessage(probes, lines, startEpoch),
+    message: () => `ARK-T734 ${lagWindowMessage(probes, lines, startEpoch)}`,
   };
 }
 

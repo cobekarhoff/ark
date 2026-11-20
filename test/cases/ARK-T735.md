@@ -37,7 +37,7 @@ No `setTimeout(`, `Bun.sleep(`, `waitForTimeout(` or `.toBeLessThan(<3 or more d
 4. Replace `orca.fail` with `run-list`; poll twice; read the snapshot.
 5. Replace `orca.fail` with `inbox`; poll twice; read the snapshot.
 6. Replace `orca.fail` with `worker-list <chief orca run id>`; poll twice; read the snapshot.
-7. Remove `orca.fail` and change the title of one worker's task of run 3 in `orca.tasks` by adding a note after the step id and keeping the form (`s2 (validator, .)` becomes `s2 retry (validator, .)`, so the step and the role stay). Poll twice; read the snapshot.
+7. Remove `orca.fail` and change the title of one worker's task of run 3 in `orca.tasks` by adding a note after the step id and keeping the form (`s2-1 (validator, .)` becomes `s2-1 retry (validator, .)`, so the step and the role stay). Poll twice; read the snapshot.
 8. Stop the hub with SIGTERM and await its exit.
 
 ## Expected results
