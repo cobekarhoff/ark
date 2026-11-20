@@ -24,7 +24,7 @@ export const servicesUninstallCommand: Command = {
 export const servicesStatusCommand: Command = {
   usage: "services status [--project <name>]",
   description:
-    "Prints one line for each service of the project: `not installed`, `loaded` (loaded, no process) or `running` with `pid <n>` (from `launchctl list <label>`), and `last log: <last line of its log>`. Then one `Hub` line from `GET /api/health` of the live hub (found by its lock file in ARK_HOME): `answered in <n> ms, loop lag <n> ms`, or `stalled: no answer in 5 s` when it does not answer in 5 s, or `no hub running` (no lock, a dead pid or a refused connection; exit 0). `ark chief state` prints the same lines under its Services heading. A project with `merge_requests: none` shows the auto-merger as not installed. --project falls back to ARK_PROJECT.",
+    "Prints one line for each service of the project: `not installed`, `loaded` (loaded, no process) or `running` with `pid <n>` (from `launchctl list <label>`), and `last log: <last line of its log>`. Then one `Hub` line for each live hub (one for each clone; found by its lock file in ARK_HOME), from its `GET /api/health`: `answered in <n> ms, loop lag <n> ms`, or `answered in <n> ms, no loop lag measured (no page connected)` when the hub has no loop lag yet, or `stalled: no answer in 5 s on port <port>` when it does not answer in 5 s. `no hub running` prints only when no live hub gave a line (no lock, a dead pid, a refused connection or an answer that is not JSON; exit 0). `ark chief state` prints the same lines under its Services heading. A project with `merge_requests: none` shows the auto-merger as not installed. --project falls back to ARK_PROJECT.",
   flags: { "--project": true },
   minimum: 0,
   maximum: 0,
