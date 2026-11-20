@@ -23,6 +23,8 @@ const originalPath = process.env.PATH;
 afterEach(() => {
   removeFakeOrca();
   process.env.PATH = originalPath;
+  for (const name of ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"])
+    delete process.env[name];
 });
 
 /** A building run; every step in plan.yml starts its worker through the fake Orca (ARK-359). */
@@ -287,10 +289,26 @@ function git(directory: string, ...args: string[]): string {
 }
 
 /**
+ * ARK-599, opt-in load condition: every git ref update waits `seconds`, in this process and in each `ark` and `git`
+ * child (a reference-transaction hook through GIT_CONFIG_*, the shape of syncDelaySeconds in test/sync.test.ts), so a
+ * test that sits near the 30 s default limit on a quiet host runs past it. Off unless a test asks; `afterEach` removes it.
+ */
+function slowRefUpdates(seconds: number): void {
+  const hooks = mkdtempSync(join(tmpdir(), "ark-ref-hooks-"));
+  const hook = join(hooks, "reference-transaction");
+  writeFileSync(hook, `#!/bin/sh\n[ "$1" = prepared ] && sleep ${seconds}\nexit 0\n`);
+  chmodSync(hook, 0o755);
+  process.env.GIT_CONFIG_COUNT = "1";
+  process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
+  process.env.GIT_CONFIG_VALUE_0 = hooks;
+}
+
+/**
  * Repo `lib` (the upstream) and repo `app` (holds lib as the submodule libs/lib), each with a bare remote. The run has
  * the bump step `bump-lib`, done: libs/lib points at the head of the lib branch. Both MRs are open: !41 of lib, !87 of app.
  */
-function submoduleRun() {
+function submoduleRun(refDelaySeconds?: number) {
+  if (refDelaySeconds !== undefined) slowRefUpdates(refDelaySeconds);
   tempArkHome();
   installFakeOrca(); // each plan step starts its worker through Orca (ARK-359)
   const workspace = workspaceWithRepos(["app", "lib"]);
@@ -449,7 +467,7 @@ function submoduleRun() {
 
 test("ARK-T142 after the upstream MR squash merges, the refresh moves the submodule to the merged commit and the push carries it", () => {
   const { runId, root, libRemote, appRemote, libTree, appTree, submodule, branchHead, finish } =
-    submoduleRun();
+    submoduleRun(0.4);
   // The host squash-merges the lib branch: the commit on main differs from the branch head.
   const host = join(root, "host");
   git(root, "clone", "-q", libRemote, host);
@@ -496,7 +514,7 @@ test("ARK-T142 after the upstream MR squash merges, the refresh moves the submod
 });
 
 test("ARK-T142 refreshing a fast-forward merge records the event and makes no commit", () => {
-  const { runId, directory, appTree, submodule, branchHead } = submoduleRun();
+  const { runId, directory, appTree, submodule, branchHead } = submoduleRun(0.8);
   // a fast-forward merge: the merged commit is the branch head, already pinned
   fakeHosts({
     "glab mr view 41 --output json": {
@@ -515,7 +533,7 @@ test("ARK-T142 refreshing a fast-forward merge records the event and makes no co
 });
 
 test("ARK-T142 the refresh commit holds only the gitlink, and unrelated staged work stays staged", () => {
-  const { runId, root, libRemote, libTree, appTree, branchHead } = submoduleRun();
+  const { runId, root, libRemote, libTree, appTree, branchHead } = submoduleRun(0.6);
   const host = join(root, "host");
   git(root, "clone", "-q", libRemote, host);
   git(host, "merge", "--squash", `origin/${libTree.branch}`);

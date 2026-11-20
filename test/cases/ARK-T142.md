@@ -2,11 +2,11 @@
 id: ARK-T142
 title: ARK-T142 the post-merge refresh moves a submodule to the merged commit
 level: integration
-technique: state transition
+technique: "state transition, plus a load condition: an opt-in fixture delay that pushes the three tests built on submoduleRun() past the 30 s default test limit"
 priority: high
-risk: the submodule moves to the branch head of a squash-merged upstream, or the refresh commit never reaches the remote, so the downstream MR pins a commit that is not on the upstream target branch
+risk: "the submodule moves to the branch head of a squash-merged upstream, or the refresh commit never reaches the remote, so the downstream MR pins a commit that is not on the upstream target branch; a test dies on the 30 s default limit when its ark processes and git clones run on a loaded host, so a good refresh reads as a failure and a real regression hides in the noise (ARK-599: the squash test timed out at 30018 ms in the full test of run 2026-11-19-ARK-512-1)"
 status: active
-changed_by: 2026-11-13-ARK-430-1
+changed_by: 2026-11-20-ARK-599-1
 ---
 
 ## Objective
@@ -17,9 +17,19 @@ Prove that the post-merge refresh moves a submodule to the merged commit.
 
 Repo lib and repo app (holds lib as the submodule libs/lib) each have a bare remote. The lib MR !41 is merged by squash: the commit on main differs from the branch head. The app MR !87 waits for !41, and its bump step bump-lib points libs/lib at the lib branch head. The reviewer findings file `findings/review.md` holds `Not in plan:` lines for the unplanned files (`app/libs/lib`, `lib/feature.txt`), so the reviewer finish is not refused.
 
+Opt-in fixture delay: the three tests built on `submoduleRun()` (`:450`, `:498`, `:517` of `test/post-mr.test.ts`) take an opt-in delay (off by default, so no other caller of `submoduleRun()`, `ark()`, `spawnArk` or `fakeHosts` changes) that makes their ark processes slower. The delay is a fixture input, not a product setting, and it is never written with `setTimeout(`, `Bun.sleep(` or a three-digit `toBeLessThan`, so `test/wallclock.test.ts` stays green. It is sized so that each of the three, with the 30 s default and the delay on, runs past 30 s, and so that the new limit still holds. The delay covers the setup of `submoduleRun()` (7 ark processes and about 16 git processes) as well as the body, because both spend time on a loaded host. Why each test is in the delay proof:
+
+- `:450` (squash refresh, 16.2 s on a quiet host, 30018 ms under load in run 2026-11-19-ARK-512-1): the test that timed out. Required.
+- `:498` (fast-forward refresh, 5.8 s): shares the `submoduleRun()` setup of 7 ark processes and about 16 git processes with `:450`, so a slow host slows its setup the same way.
+- `:517` (refresh commit, 4.0 s): same `submoduleRun()` setup as `:450`.
+
+`:541` (not a bump step, 0.9 s) builds its run with `openRun()` and runs one `ark bump refresh` that throws before any git or host call. It has no clone and no host call for a delay to model, so it gets a limit and no delay proof.
+
+All four tests carry their own limit, a literal `{ timeout: 120_000 }` option, never the 30 s default of `setDefaultTimeout(30_000)`. The titles and the case id of each test do not change.
+
 ## Steps
 
-Run the case with `bun test test/post-mr.test.ts`.
+Run the case with `bun test test/post-mr.test.ts`; the quick repeat is `bun test --rerun-each=N test/post-mr.test.ts`.
 
 1. Make the host fail and run `ark bump refresh <run> bump-lib`.
 2. Make the host answer and run `ark merge-request status <run>`.
@@ -28,6 +38,10 @@ Run the case with `bun test test/post-mr.test.ts`.
 5. Merge the upstream MR by fast-forward (the merged commit is the pinned branch head) and run `ark bump refresh <run> bump-lib`.
 6. Squash-merge the upstream MR, stage an unrelated file in the app worktree and run the refresh.
 7. Run `ark bump refresh <run> implementer --to 1.0.0` on a run whose plan has no such bump step.
+8. Red run: at the validator commit (the delay on in `:450`, `:498` and `:517`, the old assertions, the 30 s default, before the implementer adds the limits), run `bun test test/post-mr.test.ts` and read the result of each of the three. This is not the base: base has no delay input and passes.
+9. Green run: at head (the delay on, `{ timeout: 120_000 }` on all four tests), run `bun test test/post-mr.test.ts` and read the result of each of the four.
+10. Delay-off run: run the four tests with the delay off (the delay input at its default) and read the result of each.
+11. Repeat: run `bun test --rerun-each=N test/post-mr.test.ts` (N = 5) at head and read that every repeat of the four tests passes.
 
 ## Expected results
 
@@ -38,6 +52,10 @@ Run the case with `bun test test/post-mr.test.ts`.
 - The fast-forward refresh exits 0, makes no new commit, leaves the app head unchanged and records one `bump.refreshed` with the pinned commit.
 - The refresh commit holds only `libs/lib`, and the unrelated file is still staged.
 - The refresh of a step that is not a bump step exits 1 with `is not a bump step of the plan` and records no `bump.refreshed`.
+- Step 8: at the validator commit each of `:450`, `:498` and `:517` fails with a timeout at the 30 s default; `:541` passes (the whole file runs, with no delay) and is not part of the red proof.
+- Step 9: at head all four tests pass with every assertion above unchanged.
+- Step 10: with the delay off, all four tests pass with every assertion above unchanged; every other caller of the shared helpers (the rest of `test/post-mr.test.ts` and the files that call `fakeHosts`, `ark()` and `spawnArk`) runs as before, which the full `cli` suite shows.
+- Step 11: every repeat of the four tests passes.
 
 Proof: `test/post-mr.test.ts`.
 
