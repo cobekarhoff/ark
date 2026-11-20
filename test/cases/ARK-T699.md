@@ -29,18 +29,20 @@ The new test file holds no `setTimeout(`, `Bun.sleep(`, `waitForTimeout(` or `.t
 
 ## Steps
 
-1. Start the hub; read its port. Open `GET /events` (Server-Sent Events) and hold it, reading pushes, until the end of the case. Wait for the first push that holds the runs (the first snapshot of the page, an event wait on the stream read, never a timer); the 120 s window starts there. Why: a page asks for a run only after it has its first snapshot, and the cold start of the first Ark read (about 2 s on a 4-core CI runner, where request 1 waited in `reader.ready()`) is not a reader pass that AC1 bounds. Every reader pass after the first snapshot, including the first pass of the other sources, is inside the window.
+1. Start the hub; read its port. Open `GET /events` (Server-Sent Events) and hold it, reading pushes, until the end of the case; note the first push that holds the runs (the first snapshot of the page, an event wait on the stream read, never a timer). Do not wait for it: request 1 of step 2 leaves right after the stream opens, on a cold hub. Why: a direct or reloaded run URL renders Run with no snapshot gate and asks for `GET /api/run/<run>` at once, so a cold first read (about 2 s on a 4-core CI runner, up to about 7 s on the real home) is inside AC1's "every probe".
 2. Until the 120 s deadline, one request at a time, back to back, in a fixed order: `GET /`, `GET /assets/<one built asset>`, and every GET route of the `serve` comment in `hub/server.ts` with a valid request: `/api/snapshot`, `/api/resources/history`, `/api/companions`, the health route of ARK-T700, `/api/conversation?since=&until=`, `/api/conversation/message/<id>` (id read from the run conversation answer), `/api/run/<open run>`, `/api/run/<closed run>`, `/api/run/<open run>/conversation`, `/api/run/<open run>/transcript?file=&cursor=`, `/api/run/<open run>/transcript/result?file=&call=`, `/api/run/<open run>/file?path=ticket.md`, `/api/run/<open run>/evidence`, `/api/run/<open run>/image?path=`, `/api/ticket/<project>/<ticket>`, `/api/ticket/<project>/<ticket>/cases`; and `POST /api/open-in-orca` with the page's own Origin (fake `orca` answers at once). Record route, status and duration; keep the largest duration of each route and a count, not every sample.
 3. At every health probe keep the largest loop lag it reports (the health lag is a 60 s window; reading it at every probe keeps a stall of the first minute from being forgotten).
 4. At the first and at the last health probe keep each source's last pass end time.
 5. After the deadline, read `/api/snapshot` and compare its usage total with the fixture's known total. Stop the hub with SIGTERM and await its exit.
+6. Page (Playwright, `test/pw/hub.pw.ts`, title starts `ARK-T699`): on a hub with one closed run, open the direct run URL `#/run/<run>` in a fresh page. The test answers the first three `GET /api/run/<run>` with 503 `loading` (the cold hub's answer; one ask can come from the first usage read changing the page's key, so the third 503 needs a retry) and holds the fourth ask until the page has shown its state; then it releases it to the hub.
 
 ## Expected results
 
-- Step 2: every request returns the status the route has for a valid request (200; 200 for the POST), and the largest duration of every route is at most `answerLimitMilliseconds` (1000). The failure message names the route and its largest duration. Every route in the list answered at least once.
+- Step 2: every request returns the status the route has for a valid request (200; 200 for the POST), and the largest duration of every route is at most `answerLimitMilliseconds` (1000). The failure message names the route and its largest duration. Every route in the list answered at least once. The one other status allowed is 503 with a body that starts with `loading`, only for a request that left before the first snapshot was published: it is the cold hub's answer and still has to arrive within 1 s. A 503 for a request that left after the first snapshot, and a 200 later than 1 s, fail.
 - Step 3: the largest lag seen is at most `lagLimitMilliseconds` (200), as reported by the hub.
 - Step 4: the end time of every source is later at the last probe than at the first (the readers keep running; speed was not bought by stopping them); `providerLimits` and `github` ended at least once.
 - Step 5: the usage total equals the fixture's known total, or the usage source reports unknown or stale. It is never a smaller number.
+- Step 6: after the 503s the page asks again (a fourth ask arrives), shows `Reading the run…` and no "could not read run" text while it waits, and then shows the run (its file links). A 503 `loading` is a loading state, not a failure.
 
 Not probed, with the reason: `POST /api/companions/approve|dismiss|ask` change the proposed-ticket files and run `ark companion ask`; they are page-driven writes, not reads the readers' passes can delay, and the soak's fixture must stay fixed. Their own cases own them.
 
@@ -48,4 +50,4 @@ Red on unfixed code: step 2 shows a route above 1 s (the stopgap evidence is 7 s
 
 ## Screenshot checkpoints
 
-none: HTTP durations and JSON fields only
+Step 6 only: `reading-after-503` (the page waits, no failure text) and `run-shown-after-retry` (the run is shown). Steps 1 to 5: none, HTTP durations and JSON fields only.

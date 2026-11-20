@@ -12728,3 +12728,46 @@ test("ARK-T660 a reason or question of 400 four-byte characters is accepted whol
   expect(project.fake.sent()).toHaveLength(1);
   expect(bodies).toHaveLength(2);
 });
+
+test("ARK-T699 a run URL opened on a cold hub keeps Reading the run while GET /api/run/<run> answers 503 loading, asks again, and then shows the run", async ({
+  page,
+}) => {
+  isolate();
+  const run = runId("ARK-882");
+  const directory = writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-882", title: "Cold run" },
+    phase: "closed",
+  });
+  writeFileSync(join(directory, "plan.md"), "# Plan\n");
+  installFakeTools({});
+  const baseUrl = await launch();
+
+  // The hub answers a route it cannot serve yet with 503 and the body `loading` (the cold first read of
+  // a large home). The first three asks get that; the fourth is held until the page has shown its state.
+  // A closed run's ask key changes once (the first usage read), so the third 503 needs a retry of the page.
+  const cold = 3;
+  let asks = 0;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(`**/api/run/${run}`, async (route) => {
+    asks += 1;
+    if (asks <= cold)
+      return route.fulfill({ status: 503, contentType: "text/plain", body: "loading" });
+    await held;
+    return route.continue();
+  });
+
+  // A direct run URL renders Run at once, with no snapshot gate: it asks for the run at the first paint.
+  await page.goto(`${baseUrl}/#/run/${run}`);
+  // The page asks again after each 503 and says nothing worse than that it is reading.
+  await expect.poll(() => asks).toBe(cold + 1);
+  await expect(page.getByText("Reading the run…")).toBeVisible();
+  await expect(page.getByText(/could not read run/)).toHaveCount(0);
+  await checkpoint(page, "reading-after-503");
+  release();
+  await expect(page.getByTestId("run-file-link").first()).toBeVisible();
+  await checkpoint(page, "run-shown-after-retry");
+  await expect(page.getByText(/could not read run/)).toHaveCount(0);
+});

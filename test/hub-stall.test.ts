@@ -254,13 +254,12 @@ async function startHub(
 }
 
 /**
- * One page: `GET /events` held open and read until `close()`. `firstSnapshot` settles at the first push that
- * holds the runs (a page asks for a run only after it has them), and never settles if the stream fails.
+ * One page: `GET /events` held open and read until `close()`. `seen()` turns true at the first push that holds
+ * the runs and stays true; it stays false if the stream fails.
  */
-function openPage(hub: Hub): { close(): void; firstSnapshot: Promise<void> } {
+function openPage(hub: Hub): { close(): void; seen(): boolean } {
   const controller = new AbortController();
-  let settle: () => void = () => {};
-  const firstSnapshot = new Promise<void>((resolve) => (settle = resolve));
+  let seen = false;
   void (async () => {
     try {
       const response = await fetch(`${hub.baseUrl()}/events`, { signal: controller.signal });
@@ -273,14 +272,14 @@ function openPage(hub: Hub): { close(): void; firstSnapshot: Promise<void> } {
         for (const message of messages)
           if (message.startsWith("data: ")) {
             const snapshot = JSON.parse(message.slice("data: ".length)) as { runs?: unknown };
-            if (Array.isArray(snapshot.runs)) settle();
+            if (Array.isArray(snapshot.runs)) seen = true;
           }
       }
     } catch {
       // The page was closed.
     }
   })();
-  const page = { close: () => controller.abort(), firstSnapshot };
+  const page = { close: () => controller.abort(), seen: () => seen };
   pages.push(page);
   return page;
 }
@@ -1010,8 +1009,8 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   const hub = await startHub(); // the default intervals: 2 s to 60 s
   const baseUrl = hub.baseUrl();
   const page = openPage(hub);
-  // The soak starts at the page's first snapshot: the page asks for a run only after it has one, and the cold first read is outside the 120 s of probes.
-  await page.firstSnapshot;
+  // Request 1 is cold: a direct run URL asks for its run at once, before any snapshot. The hub answers a route
+  // it cannot serve yet with 503 `loading` within 1 s; that is right only until the first snapshot is published.
 
   const probes = new Map<string, Probe>();
   const probe = async (
@@ -1032,6 +1031,7 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
         wrong: [],
       } satisfies Probe);
     probes.set(label, record);
+    const coldAtStart = !page.seen();
     const started = performance.now();
     const response = await fetch(`${baseUrl}${path}`, {
       method: options.method ?? "GET",
@@ -1047,6 +1047,8 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
     if (response.status === 200) {
       record.answered += 1;
       record.settled = true;
+    } else if (response.status === 503 && text.startsWith("loading") && coldAtStart) {
+      // The cold hub: no snapshot had been published when the request left.
     } else if (!(record.pending.includes(response.status) && !record.settled)) {
       record.wrong.push(`${response.status} ${text.slice(0, 80)}`);
     }
