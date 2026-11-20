@@ -18,7 +18,7 @@ Gate answers:
 1. Protects the bare path of AC1 and AC2 ("held by the same rule") and the exemptions of ARK-T684 (file argument, `ark test` child, nested run) on the CPU rule.
 2. A regression that fails it: `holdTestBudget` bypasses the CPU hold, still reads the load, or the owner ticket of a bare run is not handled by the idle exception; the CPU line prints once for each worker.
 3. ARK-T683 and ARK-T684 prove the bare wait on cores only; ARK-T709 and ARK-T710 prove the rule through `ark test`. Neither reaches the bare entry, which is a separate call site of `openTestBudget` with an `owner` ticket for the coordinator.
-4. No hook beyond the seams of ARK-T710: the child is a real `bun test` with the preload of the scratch repo, and `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD_ONE` are in its built environment. The preload of this repo sets them with `??=` only after `holdTestBudget()` has run (or not at all), so the value the case sets is the one the hold reads.
+4. No hook beyond the seams of ARK-T710: the child is a real `bun test` with the preload of the scratch repo, and `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD_ONE` are in its built environment. The preload of this repo sets only `ARK_FAKE_CPU_PERCENT`, with `??=` and only after `holdTestBudget()` has run (or not at all), so the value the case sets is the one the hold reads.
 
 ## Preconditions
 

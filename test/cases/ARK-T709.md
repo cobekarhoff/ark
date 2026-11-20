@@ -17,7 +17,7 @@ Gate answers:
 
 1. Protects the admission contract of AC1: the hold can delay a suite, never stop all of them.
 2. A regression that fails it: the CPU hold has no idle exception, or the exception is also taken for memory, or the waiting suite counts itself or a dead ticket as running.
-3. No case holds this. ARK-T710 owns the CPU rule (what the hold reads and its limit) and runs every row with a suite running, so it never reaches the idle path. ARK-T187 owns the memory hold with nothing running and does not set the CPU. ARK-T694 owns the hold's recovery and print cadence in process. ARK-T695 owns the bare path.
+3. No case holds this. ARK-T710 owns the CPU rule (what the hold reads and its limit) and runs every row with a suite running, so it never reaches the idle path. ARK-T187 owns the memory hold with nothing running and pins the CPU at 0. ARK-T694 owns the hold's recovery and print cadence in process. ARK-T695 owns the bare path.
 4. No new hook. The case sets `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD_ONE` in the environment of `ark test`: the seams are read by the production reader of `cli/host.ts` that the detached runner calls (ARK-T365 owns the `chief state` use of the same CPU seam). The holder is the real `openTestBudget` in a real child process (the holder of ARK-T683), and the case runs the real `ark test`.
 
 ## Preconditions

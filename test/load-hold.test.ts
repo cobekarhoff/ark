@@ -624,7 +624,7 @@ describe("ARK-T694", () => {
   const linesWith = (lines: string[], text: string) =>
     lines.filter((entry) => entry.includes(text));
 
-  test("ARK-T694 holds on CPU above the limit while a suite runs with one line and an unstarted ticket, then starts on the next fresh sample at the limit", async () => {
+  test("ARK-T694 holds on CPU above the limit while a suite runs with one line and an unstarted ticket, then starts once the CPU is at the limit", async () => {
     withCpu("95");
     const { budget, lines, line, close } = await startScenario();
     try {

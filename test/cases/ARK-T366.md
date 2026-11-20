@@ -23,7 +23,7 @@ Prove `ark chief state` ends the Host section with one `hold new runs:` line tha
 1. `ARK_FAKE_CPU_PERCENT=95`, `ARK_FAKE_LOAD=2`. Run the real `ark chief state`.
 2. `ARK_FAKE_CPU_PERCENT=90.1`, same load.
 3. `ARK_FAKE_CPU_PERCENT=95` and `ARK_FAKE_LOAD=500`.
-4. No seam variables: run `ark chief state` on the real host (smoke of the real ~1 s sample).
+4. No CPU seam: `ARK_FAKE_CPU_PERCENT` is unset, so the real ~1 s sample is taken; `ARK_FAKE_LOAD=2` stays set. Run `ark chief state`.
 
 ## Expected results
 

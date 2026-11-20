@@ -39,7 +39,7 @@ Gate answers:
 ## Expected results
 
 - Step 1: exactly one `ark test: waiting for CPU: ...` line however many polls pass; the ticket is waiting and has no `started` mark; `take()` has not resolved.
-- Step 2: `take()` resolves on the next fresh host reading after the rewrite (within the 1,000 ms cache plus one poll); the ticket is now started with its cores; no second CPU line printed.
+- Step 2: `take()` resolves once the CPU is at the limit (the wait is an event wait, not a time bound: only the start is asserted, not how soon after the rewrite); the ticket is now started with its cores; no second CPU line printed.
 - Step 3: the output names both reasons: a line with the CPU reason (`waiting for CPU`) and a line with the memory reason (`waiting for memory`); each is printed once.
 - Step 4: no new CPU line; the memory line stays; `take()` has not resolved (a recovered CPU does not release a memory hold).
 - Step 5: `take()` resolves; no further line.
