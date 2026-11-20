@@ -21,7 +21,7 @@
     "test/test-selection.test.ts": 30826,
     "test/companions-race.test.ts": 30803,
     "test/plan.test.ts": 27991,
-    "test/bare-test-budget.test.ts": 27632,
+    "test/bare-test-budget.test.ts": 50000,
     "test/resources-record.test.ts": 24775,
     "test/companions.test.ts": 22770,
     "test/gates.test.ts": 22142,

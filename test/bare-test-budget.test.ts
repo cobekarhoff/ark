@@ -1244,7 +1244,8 @@ test("ARK-T707 ARK-T715 a whole-suite bun test takes its own ticket under the ma
 
 // ARK-T714: the ARK-T707 test above, run as a real inner `bun test` with a preload that this case owns. The preload is a
 // `--preload` flag, so the `bun test` children of the inner run do not load it. It makes the chosen call of
-// `AbortSignal.timeout(20000)` (the `passLimit` of every wait) expire after 1 ms and records how many such calls it saw.
+// `AbortSignal.timeout(20000)` (the `passLimit` of every wait) expire in a microtask and records how many such calls it
+// saw. A microtask runs before any child exit is read, so a wait whose child is still running always rejects with its name.
 const expireLimitHook = `import { writeFileSync } from "node:fs";
 const realTimeout = AbortSignal.timeout.bind(AbortSignal);
 const expireCall = Number(process.env.EXPIRE_CALL);
@@ -1253,7 +1254,10 @@ AbortSignal.timeout = (milliseconds: number) => {
   if (milliseconds !== 20000) return realTimeout(milliseconds);
   calls += 1;
   writeFileSync(process.env.EXPIRE_CALL_COUNT_FILE!, String(calls));
-  return realTimeout(calls === expireCall ? 1 : milliseconds);
+  if (calls !== expireCall) return realTimeout(milliseconds);
+  const expired = new AbortController();
+  queueMicrotask(() => expired.abort());
+  return expired.signal;
 };
 `;
 const innerRunLimit: WaitLimit = { within: 60_000, name: "end of the inner run" };
@@ -1288,20 +1292,24 @@ test("ARK-T714 each wait for the exit of a child in the ARK-T707 test of an ende
     const waitCount = Number(readFileSync(countFile, "utf8"));
     expect(waitCount).toBeGreaterThanOrEqual(3);
 
+    // The k-th limit expires in a microtask, so a wait on a child that still runs always fails with its own name.
+    const runs = await Promise.all(
+      Array.from({ length: waitCount }, (_, index) => innerRun(index + 1)),
+    );
     const exitNames: string[] = [];
-    for (let expireCall = 1; expireCall <= waitCount; expireCall++) {
-      const { code, text } = await innerRun(expireCall);
+    runs.forEach(({ code, text }, index) => {
       // A wait that had already settled when its limit expired passes the race and prints no name: only failed runs are read.
-      if (code === 0) continue;
+      if (code === 0) return;
       const names = new Set(
         [...text.matchAll(/error: no (.+?) within 20000 ms/g)].map((match) => match[1]!),
       );
-      expect(names.size, `inner run with call ${expireCall} expired:\n${text}`).toBe(1);
+      expect(names.size, `inner run with call ${index + 1} expired:\n${text}`).toBe(1);
       const [name] = names;
       if (name!.startsWith("exit of")) exitNames.push(name!);
-    }
-    expect(exitNames.length).toBeGreaterThanOrEqual(2);
-    expect(new Set(exitNames).size, exitNames.join(" | ")).toBe(exitNames.length);
+    });
+    // The exit of the first run, of the run that takes the cores, of the waiting run and of the holder: four waits, four names.
+    expect(exitNames.length, exitNames.join(" | ")).toBe(4);
+    expect(new Set(exitNames).size, exitNames.join(" | ")).toBe(4);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

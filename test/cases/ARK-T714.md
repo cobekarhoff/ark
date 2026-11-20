@@ -17,15 +17,15 @@ One contract, one owner: the names of the exit waits in this one test. The `exit
 
 ## Preconditions
 
-- The scratch time-limit hook is a preload file that the case writes into a temp folder and passes to the inner run with `--preload`. It wraps `AbortSignal.timeout`: the k-th call with the argument 20000 (the `passLimit` of `test/bare-test-budget.test.ts`) is made with 1 ms instead; every other call is unchanged. It records the count of `AbortSignal.timeout(20000)` calls it saw in a file in the temp folder. The hook is in the case, in no product file and in no export of the test file. The preload is not inherited by the `bun test` children that the inner test starts (a preload is a command-line flag, not an environment variable).
+- The scratch time-limit hook is a preload file that the case writes into a temp folder and passes to the inner run with `--preload`. It wraps `AbortSignal.timeout`: the k-th call with the argument 20000 (the `passLimit` of `test/bare-test-budget.test.ts`) returns a signal that aborts in a microtask instead of after the limit; every other call is unchanged. It records the count of `AbortSignal.timeout(20000)` calls it saw in a file in the temp folder. The hook is in the case, in no product file and in no export of the test file. The preload is not inherited by the `bun test` children that the inner test starts (a preload is a command-line flag, not an environment variable).
 - The inner run is `bun test test/bare-test-budget.test.ts -t "takes its own ticket under the marker of a run that has ended"` in the worktree, started by the case as a child with its own process group and an environment that carries `K` (the call to expire). It reuses the temp `TMPDIR` and `ARK_HOME` rules of the file (the file's own fixture makes its temp folders).
 - The case starts every process itself, waits on process exit and on files, and stops a left-over inner run by its own pid (never by name).
-- A wait can already be settled when its 1 ms limit is made: `bounded` races the wait against the timer, so a settled wait passes and prints no `no <name>` line. The case therefore asserts only on the runs that failed. Two waits are always pending when they start, because the child still has work to do after the wait begins: the exit of the first run after the gate opens, and the exit of the run that takes the free cores after the writer is released. The case relies on those two and on no other.
+- A microtask runs before any exit of a child is read, so a wait on a child that still runs always rejects with its name. A wait that was already settled when its limit is made passes the race and prints no `no <name>` line, so the case asserts only on the runs that failed. The waits on the exit of a child that the test starts are all pending when they start: the exit of the first run after the gate opens, the exit of the run that takes the free cores after the writer is released, the exit of the waiting run right after the case kills its group (the kill and the wait are in one synchronous step, so the exit is not yet read), and the exit of the holder after its release.
 
 ## Steps
 
 1. Run the inner test with `K` = 0 (no call expires). It passes. Read the count N of `AbortSignal.timeout(20000)` calls that the hook recorded.
-2. For each k in 1..N run the inner test again with the k-th call expired. A run either fails or passes. For each run that fails, read the single line `no <name> within 20000 ms` from its output and keep the pair (k, `<name>`). A run that passes is not read: its wait had already settled.
+2. For each k in 1..N run the inner test again, all N runs together, with the k-th call expired. A run either fails or passes. For each run that fails, read the single line `no <name> within 20000 ms` from its output and keep the pair (k, `<name>`). A run that passes is not read: its wait had already settled.
 3. From the failed runs keep the pairs whose name starts with `exit of` (waits on the exit of a child or of a holder).
 4. Remove every temp folder and left-over process of the inner runs.
 
@@ -33,8 +33,8 @@ One contract, one owner: the names of the exit waits in this one test. The `exit
 
 - Step 1: exit 0 and N is 3 or more.
 - Step 2: every run that fails prints exactly one `no <name> within 20000 ms` line, and that line is the failure of the run.
-- Step 3: at least two failed runs carry an `exit of ...` name (the exit of the first run and the exit of the run that takes the free cores are pending when they start), and no `exit of ...` name appears for two different k. A name that says `exit of the child` alone on two or more k is a failure.
-- At the base commit only step 3 fails: the exit of the first run and the exit of the run that takes the free cores both print `no exit of the child within 20000 ms`, so that name appears for two different k. Step 2 holds at base.
+- Step 3: exactly four failed runs carry an `exit of ...` name (the first run, the run that takes the free cores, the waiting run and the holder), and the four names differ. A name that says `exit of the child` on two or more k is a failure.
+- At the base commit (c3be2c8, with the race of ARK-T715) step 1 fails first: the unexpired inner run hangs on the FIFO and exits 1, so no name is read. The check of the names is proved by a mutation at head (the FIFO fix kept, two names set back to the same string): step 3 fails with the duplicated name.
 
 ## Screenshot checkpoints
 
