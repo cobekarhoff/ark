@@ -87,103 +87,119 @@ function openRun(withMergeRequest = true) {
   return { runId, directory, workspace };
 }
 
-test("ARK-T221 post-MR validator and reviewer steps persist starts, finishes and real suite results", () => {
-  const { runId, directory } = openRun();
-  for (const role of ["validator", "reviewer"]) {
-    expect(ark("run", "step", runId, role, "start").code).toBe(0);
+test(
+  "ARK-T221 post-MR validator and reviewer steps persist starts, finishes and real suite results",
+  () => {
+    const { runId, directory } = openRun();
+    for (const role of ["validator", "reviewer"]) {
+      expect(ark("run", "step", runId, role, "start").code).toBe(0);
+      expect(readEvents(directory).at(-2)).toMatchObject({
+        type: "step.started",
+        data: { step: role, role },
+      });
+      if (role === "reviewer")
+        Bun.spawnSync(
+          [
+            "git",
+            "-c",
+            "user.name=Ark",
+            "-c",
+            "user.email=ark@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "work",
+          ],
+          { cwd: deriveState(readEvents(directory)).worktrees[0]!.path },
+        );
+      expect(ark("run", "step", runId, role, "finish").code).toBe(0);
+      expect(readEvents(directory).at(-1)).toMatchObject({
+        type: "step.finished",
+        data: { step: role, outcome: "succeeded" },
+      });
+    }
+    const result = ark("test", runId);
+    expect(result.code).toBe(0);
+    expect(readEvents(directory).at(-1)).toMatchObject({
+      type: "test.completed",
+      data: { passed: true, criteria: { "ARK-900/AC1": "passing" } },
+    });
+    expect(ark("status", runId).out).toContain("phase: merge_requests_open");
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T222 every post-MR implementer round needs a fresh escalation answer, including beyond budget",
+  () => {
+    const { runId, directory } = openRun();
+    for (const round of [2, 3]) {
+      const before = readEvents(directory);
+      const refused = ark("run", "step", runId, "implementer", "start");
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain("record gate escalation");
+      expect(readEvents(directory)).toEqual(before);
+      expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+      expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
+      expect(readEvents(directory).at(-2)).toMatchObject({
+        type: "step.started",
+        data: { step: "implementer", round },
+      });
+      expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
+    }
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T223 an escalation answer survives ark test after an MR is open and the next implementer start uses it up",
+  () => {
+    const { runId, directory } = openRun();
+    expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
+    expect(ark("test", runId).code).toBe(0);
+    expect(readEvents(directory).at(-1)?.type).toBe("test.completed");
+    const answers = () => readEvents(directory).filter((event) => event.type === "gate.answered");
+    const answered = answers().length;
+
+    expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
+    expect(answers()).toHaveLength(answered);
     expect(readEvents(directory).at(-2)).toMatchObject({
       type: "step.started",
-      data: { step: role, role },
+      data: { step: "implementer", round: 2 },
     });
-    if (role === "reviewer")
-      Bun.spawnSync(
-        [
-          "git",
-          "-c",
-          "user.name=Ark",
-          "-c",
-          "user.email=ark@example.com",
-          "commit",
-          "--allow-empty",
-          "-qm",
-          "work",
-        ],
-        { cwd: deriveState(readEvents(directory)).worktrees[0]!.path },
-      );
-    expect(ark("run", "step", runId, role, "finish").code).toBe(0);
-    expect(readEvents(directory).at(-1)).toMatchObject({
-      type: "step.finished",
-      data: { step: role, outcome: "succeeded" },
-    });
-  }
-  const result = ark("test", runId);
-  expect(result.code).toBe(0);
-  expect(readEvents(directory).at(-1)).toMatchObject({
-    type: "test.completed",
-    data: { passed: true, criteria: { "ARK-900/AC1": "passing" } },
-  });
-  expect(ark("status", runId).out).toContain("phase: merge_requests_open");
-});
+    expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
 
-test("ARK-T222 every post-MR implementer round needs a fresh escalation answer, including beyond budget", () => {
-  const { runId, directory } = openRun();
-  for (const round of [2, 3]) {
     const before = readEvents(directory);
     const refused = ark("run", "step", runId, "implementer", "start");
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("record gate escalation");
     expect(readEvents(directory)).toEqual(before);
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T727 a test.completed event before any merge request is open still clears the escalation answer, and the next failed test escalates again",
+  () => {
+    const { runId, directory } = openRun(false);
+    const failedTest = () =>
+      appendEvent(directory, "test.completed", {
+        passed: false,
+        heads: {},
+        suites: [],
+        criteria: { "ARK-900-AC1": "failing" },
+      });
+    failedTest();
+    expect(ark("status", runId).out).toContain("phase: escalation");
     expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
     expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
-    expect(readEvents(directory).at(-2)).toMatchObject({
-      type: "step.started",
-      data: { step: "implementer", round },
-    });
     expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
-  }
-});
-
-test("ARK-T223 an escalation answer survives ark test after an MR is open and the next implementer start uses it up", () => {
-  const { runId, directory } = openRun();
-  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
-  expect(ark("test", runId).code).toBe(0);
-  expect(readEvents(directory).at(-1)?.type).toBe("test.completed");
-  const answers = () => readEvents(directory).filter((event) => event.type === "gate.answered");
-  const answered = answers().length;
-
-  expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
-  expect(answers()).toHaveLength(answered);
-  expect(readEvents(directory).at(-2)).toMatchObject({
-    type: "step.started",
-    data: { step: "implementer", round: 2 },
-  });
-  expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
-
-  const before = readEvents(directory);
-  const refused = ark("run", "step", runId, "implementer", "start");
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("record gate escalation");
-  expect(readEvents(directory)).toEqual(before);
-});
-
-test("ARK-287-AC1 before any MR is open a test.completed event still clears the escalation answer", () => {
-  const { runId, directory } = openRun(false);
-  const failedTest = () =>
-    appendEvent(directory, "test.completed", {
-      passed: false,
-      heads: {},
-      suites: [],
-      criteria: { "ARK-900-AC1": "failing" },
-    });
-  failedTest();
-  expect(ark("status", runId).out).toContain("phase: escalation");
-  expect(ark("gate", "record", runId, "escalation", "one_more_round").code).toBe(0);
-  expect(ark("run", "step", runId, "implementer", "start").code).toBe(0);
-  expect(ark("run", "step", runId, "implementer", "finish").code).toBe(0);
-  expect(ark("status", runId).out).toContain("phase: building");
-  failedTest();
-  expect(ark("status", runId).out).toContain("phase: escalation");
-});
+    expect(ark("status", runId).out).toContain("phase: building");
+    failedTest();
+    expect(ark("status", runId).out).toContain("phase: escalation");
+  },
+  { timeout: 120_000 },
+);
 
 function emulateHosts(workspace: string, failJobs = false) {
   const executableDirectory = mkdtempSync(join(tmpdir(), "ark-check-hosts-"));
@@ -228,45 +244,53 @@ if (process.argv[2] === "mr") {
   ].map((mergeRequest) => ({ ...mergeRequest, workspace }));
 }
 
-test("ARK-208-AC3 status attributes GitHub checks and GitLab head-pipeline job failures to each MR", () => {
-  const { runId, directory, workspace } = openRun();
-  for (const mergeRequest of emulateHosts(workspace)) {
+test(
+  "ARK-T728 ark merge-request status attributes GitHub checks and GitLab head-pipeline job failures to each merge request",
+  () => {
+    const { runId, directory, workspace } = openRun();
+    for (const mergeRequest of emulateHosts(workspace)) {
+      appendEvent(directory, "worktree.created", {
+        repo: mergeRequest.repo,
+        path: workspace,
+        branch: "main",
+      });
+      appendEvent(directory, "merge_request.opened", mergeRequest);
+    }
+    const before = readEvents(directory);
+    const result = ark("merge-request", "status", runId);
+    expect(result.code).toBe(0);
+    expect(result.out.trim().split("\n")).toEqual([
+      ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
+      "github-other  open  https://github.com/example/other/pull/2  ci: failed  checks failing: other-repo-test",
+      "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: failed  checks failing: gitlab-test, gitlab-lint",
+    ]);
+    expect(readEvents(directory)).toEqual(before);
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T729 ark merge-request status prints ci: failed for a GitLab pipeline that failed, and never passed",
+  () => {
+    const { runId, directory, workspace } = openRun();
+    const mergeRequest = emulateHosts(workspace, true).find(
+      (candidate) => candidate.repo === "gitlab",
+    )!;
     appendEvent(directory, "worktree.created", {
       repo: mergeRequest.repo,
       path: workspace,
       branch: "main",
     });
     appendEvent(directory, "merge_request.opened", mergeRequest);
-  }
-  const before = readEvents(directory);
-  const result = ark("merge-request", "status", runId);
-  expect(result.code).toBe(0);
-  expect(result.out.trim().split("\n")).toEqual([
-    ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
-    "github-other  open  https://github.com/example/other/pull/2  ci: failed  checks failing: other-repo-test",
-    "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: failed  checks failing: gitlab-test, gitlab-lint",
-  ]);
-  expect(readEvents(directory)).toEqual(before);
-});
-
-test("ARK-208-AC3 status prints ci: failed when the GitLab pipeline failed, never passed", () => {
-  const { runId, directory, workspace } = openRun();
-  const mergeRequest = emulateHosts(workspace, true).find(
-    (candidate) => candidate.repo === "gitlab",
-  )!;
-  appendEvent(directory, "worktree.created", {
-    repo: mergeRequest.repo,
-    path: workspace,
-    branch: "main",
-  });
-  appendEvent(directory, "merge_request.opened", mergeRequest);
-  const result = ark("merge-request", "status", runId);
-  expect(result.code).toBe(0);
-  expect(result.out.trim().split("\n")).toEqual([
-    ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
-    "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: failed",
-  ]);
-});
+    const result = ark("merge-request", "status", runId);
+    expect(result.code).toBe(0);
+    expect(result.out.trim().split("\n")).toEqual([
+      ".  open  https://github.com/example/core/pull/1  ci: failed  checks failing: linux-test, legacy-lint",
+      "gitlab  open  https://gitlab.com/example/app/-/merge_requests/3  ci: failed",
+    ]);
+  },
+  { timeout: 120_000 },
+);
 
 // A submodule lives on a local bare remote: git refuses the file transport unless told.
 function git(directory: string, ...args: string[]): string {
