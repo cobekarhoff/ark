@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { isInside } from "../cli/paths.ts";
 import { type Harness, sessionRoots } from "../cli/usage/index.ts";
@@ -153,6 +153,23 @@ export class UsageIndex {
     return parents;
   }
 
+  /** `#parentsOf` for each folder without a blocking `realpath`: the hub calls it before `compose()` asks (a first call for 40 runs held the loop for 130 ms). */
+  async remember(directories: string[]): Promise<void> {
+    await Promise.all(
+      directories.map(async (directory) => {
+        if (this.#parents.has(directory)) return;
+        try {
+          const real = await realpath(directory);
+          if (this.#parents.has(directory)) return;
+          this.#parents.set(directory, [resolve(directory), real]);
+          this.#layout += 1;
+        } catch {
+          // The folder is gone: `#parentsOf` finds that out by itself.
+        }
+      }),
+    );
+  }
+
   #insideOf(directory: string): [string, Entry][] {
     const parents = this.#parentsOf(directory);
     // A folder that does not exist (yet) is not remembered: its entries are found by a plain scan.
@@ -263,7 +280,7 @@ export class UsageIndex {
       }),
     );
     const parses: Promise<void>[] = [];
-    for (const directory of directories) this.#parentsOf(directory); // all folders known before the one index pass
+    await this.remember(directories); // all folders known before the one index pass
     const insideOpen = new Set<Entry>(
       directories.flatMap((directory) => this.#insideOf(directory).map(([, entry]) => entry)),
     );

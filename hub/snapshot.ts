@@ -226,7 +226,10 @@ export function createSnapshotReader() {
 
   function costOf(run: ArkRun, closed: boolean): RunCost {
     const metrics = closed ? signatureOf(join(run.directory, "metrics.json")) : "";
-    const key = `${usage.version}|${run.state.events}|${metrics}|${slots.usage.readAt === null}`;
+    // A closed run's cost is its `metrics.json`: a new usage version never changes it (a re-read of every closed run on each version held the loop, ARK-533).
+    const key = closed
+      ? `${run.state.events}|${metrics}`
+      : `${usage.version}|${run.state.events}|${metrics}|${slots.usage.readAt === null}`;
     const known = costs.get(run.directory);
     if (known?.key === key) return known.cost;
     // Before the first full index build an open run's cost is unknown, not a partial sum.
@@ -621,7 +624,18 @@ export function createSnapshotReader() {
 
   const readers: Record<SourceName, () => Promise<void>> = {
     ark: async () => {
-      await read("ark", () => arkReader.read());
+      await read("ark", async () => {
+        const value = await arkReader.read();
+        // What `compose()` would read on its first call is read here, a few runs at a time, so no publish holds the loop for it (ARK-533).
+        const open = value.runs.filter((run) => run.state.phase !== "closed");
+        await usage.remember(open.map((run) => run.directory));
+        for (const [index, run] of value.runs.entries()) {
+          if (run.state.phase !== "closed") continue;
+          costOf(run, true);
+          if (index % 8 === 7) await new Promise((resolve) => setImmediate(resolve));
+        }
+        return value;
+      });
       if (!running) return;
       await syncWatchers();
       // A gate that this read saw wakes the Plannotator read at once, not at its next tick.
