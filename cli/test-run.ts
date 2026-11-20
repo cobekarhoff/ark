@@ -1444,6 +1444,8 @@ async function executeTest(
         );
         // A changed command that selects no test file passes with no test: a skip, never `passed`.
         if (changed && passed && results.length === 0) {
+          // runSuite recorded a cached empty set as reused; a skipped suite is not reused.
+          if (reused) headRun.reused.splice(headRun.reused.indexOf(suite.name), 1);
           headRun.skipped.set(suite.name, "no test files are affected");
           console.log(`suite      ${suite.name} head  skipped  (no test files are affected)`);
           continue;

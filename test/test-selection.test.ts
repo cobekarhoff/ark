@@ -993,6 +993,11 @@ describe("ark test changed_command", () => {
       expect(suiteLine(again.out, name)).toContain("files: a.test.ts");
       expect(marked(markers, `${name}-changed-ran`)).toBe(false);
     }
+    // A cached empty affected set is skipped, not reused: the record never lists it.
+    expect(again.out).toContain("none head  skipped  (no test files are affected)");
+    const secondCompleted = events(run.runDirectory, "test.completed").at(-1);
+    expect(secondCompleted.reused).toContain("head:unit");
+    expect(secondCompleted.reused).not.toContain("head:none");
   });
 
   test("ARK-T737 a quick run on the real bun runner selects the tests the base diff reaches, by import graph", () => {

@@ -93,12 +93,26 @@ Each suite needs a unique `name`, a `level` (`integration` or `e2e`), a `repo` (
 
 A suite may also have a `changed_command`: a quick `ark test` runs it in place of `command`, with `{base}` set to the run's worktree base commit and `{report}` as in `command`, so the quick run runs only the tests a change can reach. A full `ark test` never runs it, and a suite without one runs in full in a quick run. Ask the human before you add one; the choice is the project's. It must contain `{base}` and `{report}`, its report must name the `file` of each test, and it must exit 0 when nothing is affected:
 
-| Runner | `changed_command`                                                                                                                                                                                                                                                                                                   | `parser` |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| Bun    | `bun test --changed={base} --reporter=junit --reporter-outfile={report}`                                                                                                                                                                                                                                            | `bun`    |
-| Jest   | `JEST_JUNIT_OUTPUT_FILE={report} JEST_JUNIT_ADD_FILE_ATTRIBUTE=true jest --changedSince={base} --passWithNoTests --reporters=jest-junit` (untested here)                                                                                                                                                            | `bun`    |
-| Vitest | `vitest run --changed {base} --passWithNoTests --reporter=junit --outputFile={report}` (untested here)                                                                                                                                                                                                              | `bun`    |
-| pytest | no built-in selection: a plugin (pytest-testmon, pytest-picked) or `changed=$(git diff --name-only --diff-filter=d {base} -- '*.py' \| grep test); pytest -o junit_family=xunit1 --junitxml={report} $changed` (untested here; a command that selects no file writes no test case, which the pytest parser refuses) | `pytest` |
+| Runner | `changed_command`                                                                                                                                        | `parser` |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Bun    | `bun test --changed={base} --reporter=junit --reporter-outfile={report}`                                                                                 | `bun`    |
+| Jest   | `JEST_JUNIT_OUTPUT_FILE={report} JEST_JUNIT_ADD_FILE_ATTRIBUTE=true jest --changedSince={base} --passWithNoTests --reporters=jest-junit` (untested here) | `bun`    |
+| Vitest | `vitest run --changed {base} --passWithNoTests --outputFile={report}`, with the config below                                                             | `bun`    |
+| pytest | the command below, or a plugin (pytest-testmon, pytest-picked)                                                                                           | `pytest` |
+
+Vitest's JUnit reporter writes no `file` on a test unless `addFileAttribute` is on (default `false`), and only the config can set it. Without it the quick run records no files and retries no failed file. Put this in `vitest.config.ts`:
+
+```ts
+export default { test: { reporters: [["junit", { addFileAttribute: true }]] } };
+```
+
+The pytest `changed_command` (checked with pytest 8.4.2):
+
+```sh
+changed=$(git diff --name-only --diff-filter=d {base} -- '*.py' | grep test); pytest -o junit_family=xunit1 --junitxml={report} $changed
+```
+
+It selects the changed test files only, not the tests that a change to a source file reaches. When no changed file has `test` in its path, `$changed` is empty and pytest runs the whole suite. The pytest parser refuses an empty report, so exit 0 with no report is no way out; to run a cheap test file instead, add `[ -n "$changed" ] || changed=<that file>;` before `pytest`.
 
 Jest and Vitest have no parser of their own: use `parser: bun` on their JUnit report. Selection is by import graph or by changed files, so a quick run is not proof: the full run is the gate. See `docs/how-to/project-checks.md`, "Run only the affected tests in a quick run".
 
