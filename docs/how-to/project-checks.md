@@ -70,6 +70,7 @@ This selects the changed test files only, not the tests that a change to a sourc
 
 Selection is by the import graph (`bun test --changed`) or by the changed files, so a test that reads a Markdown file, a skill or a config file is not reached by a change to it. A quick run can pass where the full run fails: a quick run is never proof, and the full `ark test` stays the gate before the MR. On a dirty checkout the command also selects the tests that the uncommitted changes reach.
 
+- A behave report is JSON and has no root `time`, so `time_budget_s` is not judged for a behave suite (`ark test` prints `no suite time ... not judged`); `slow_test_s` works.
 ## Ticket kinds
 
 A ticket may set `kind` to `feature`, `bug`, `perf` or `refactor`. The default is `feature`. A kind changes what must exist before the run goes on.
