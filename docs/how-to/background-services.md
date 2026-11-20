@@ -30,11 +30,11 @@ ark services status --project ark
 ark services uninstall --project ark
 ```
 
-| Command                  | What it does                                                                                                                                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ark services install`   | Writes and loads one LaunchAgent for each service, named `dev.ark.<project>.<service>`. Run it again after a change: an unchanged service prints `... is already installed. Nothing changed.`                                                                 |
-| `ark services status`    | Prints one line for each service: `not installed`, `loaded` or `running` with its pid, and the last line of its log. Then one `Hub` line from the hub's `GET /api/health`: the answer time and the loop lag, `stalled: no answer in 5 s` or `no hub running`. |
-| `ark services uninstall` | Unloads and deletes all four LaunchAgents of the project. It leaves the logs and the git repository of the project folder. With none installed it prints `No services of project <project> are installed. Nothing changed.`                                   |
+| Command                  | What it does                                                                                                                                                                                                                                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ark services install`   | Writes and loads one LaunchAgent for each service, named `dev.ark.<project>.<service>`. Run it again after a change: an unchanged service prints `... is already installed. Nothing changed.`                                                                                                                           |
+| `ark services status`    | Prints one line for each service: `not installed`, `loaded` or `running` with its pid, and the last line of its log. Then one `Hub` line for each live hub from its `GET /api/health`: the answer time and the loop lag, `stalled: no answer in 5 s on port <port>` or, when no live hub gave a line, `no hub running`. |
+| `ark services uninstall` | Unloads and deletes all four LaunchAgents of the project. It leaves the logs and the git repository of the project folder. With none installed it prints `No services of project <project> are installed. Nothing changed.`                                                                                             |
 
 Example output of `ark services status`:
 
@@ -46,7 +46,14 @@ project-autocommit  running   pid 80130   last log: none
 Hub                 answered in 4 ms, loop lag 12 ms
 ```
 
-The `Hub` line comes from the hub's `GET /api/health`: how long it took to answer and the event loop lag. A hub that does not answer in 5 s reads `stalled: no answer in 5 s`; no hub at all reads `no hub running`. `ark chief state` prints the same line under Services.
+Each live hub (one for each clone) prints its own `Hub` line from its `GET /api/health`, so two clones print two lines. The line is one of four shapes:
+
+- `answered in <n> ms, loop lag <n> ms`: how long the hub took to answer and its event loop lag.
+- `answered in <n> ms, no loop lag measured (no page connected)`: the hub answered, but no page is connected, so it has no loop lag.
+- `stalled: no answer in 5 s on port <port>`: the hub did not answer in 5 s.
+- `no hub running`: printed only when no live hub gave a line (no lock, a dead pid, a refused connection or an answer that is not JSON), never beside the line of a live hub.
+
+`ark chief state` prints the same lines under Services.
 
 `merge_requests: none` in `ark.yml` means the project has no MRs. Install then skips the auto-merger, and removes one that an earlier setting loaded.
 
