@@ -494,3 +494,16 @@ export function afterHostReads(count: number): Promise<void> {
 
 /** The healthy host that the preload sets: 50 percent free, 2 GB of swap. */
 export const healthyHost = { freePercent: 50, swapGigabytes: 2 };
+
+/** A process that is alive and not a zombie: `kill -0` succeeds on a killed child that its parent has not reaped yet. */
+export function isLive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  const state = Bun.spawnSync(["ps", "-o", "stat=", "-p", String(pid)])
+    .stdout.toString()
+    .trim();
+  return state !== "" && !state.startsWith("Z");
+}
