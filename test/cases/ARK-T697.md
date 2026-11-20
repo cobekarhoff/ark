@@ -2,7 +2,7 @@
 id: ARK-T697
 title: ARK-T697 the CI workflow runs every Bun test file in exactly one of 4 timings-balanced shards, and the required check `test` fails unless every job succeeded
 level: integration
-technique: equivalence classes (each shard index, each needed-job result: success, failure, cancelled, skipped) and boundary values (a disk file missing from the timings file, a timings entry with no file) on the real ci.yml, the real timings file and the real `bun test`
+technique: "equivalence classes (each shard index, each needed-job result: success, failure, cancelled, skipped) and boundary values (a disk file missing from the timings file, a timings entry with no file) on the real ci.yml, the real timings file and the real `bun test`"
 priority: high
 risk: "a file is run by no shard or by two (the shard total and the matrix disagree, or a listed-but-deleted file hides a gap), or the committed timings map is empty so the shards are not balanced by recorded times, so a defect merges unseen or a suite is paid twice; or the matrix job is named `test` and reports `test (1)`..`test (4)`, so the required context `test` is never produced and every PR waits forever; or the aggregate `test` job runs only on success (no `always()`) or passes on a `skipped` or `cancelled` shard, so a red or missing shard merges; or the workflow loses the `push` to main or the `pull_request` trigger, or a path filter or `if:` skips the suite on some PRs (the human chose the full suite on every PR); or a shard job leaves out the Playwright browser install or the Bun pin, so the shard fails on the runner"
 status: active
