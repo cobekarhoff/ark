@@ -64,13 +64,18 @@ import { join } from "node:path";
 
 /**
  * A file that opens the write end of the pipe `alive-<name>` (a `cat` of the case reads it and ends with the worker),
- * records `<pid> <ppid>`, and then never finishes: its worker sits idle on its event loop, as an orphan does.
+ * records `<pid> <ppid>`, and then blocks the whole worker thread in a synchronous read of the pipe `gate-<name>`,
+ * which the case holds open and never writes to. A worker that is blocked like this runs no timer of its main thread,
+ * as the workers of the ARK-515 runs were.
  */
 const holdFile = (name: string) => (markers: string) =>
-  `${imports}test("FAKE-1-AC1 ${name}", async () => {
+  `import { test } from "bun:test";
+import { openSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+test("FAKE-1-AC1 ${name}", () => {
   openSync(join(${JSON.stringify(markers)}, "alive-${name}"), "w");
   writeFileSync(join(${JSON.stringify(markers)}, "pids-${name}"), process.pid + " " + process.ppid + "\\n");
-  await new Promise(() => {});
+  readFileSync(join(${JSON.stringify(markers)}, "gate-${name}"));
 }, 120_000);
 `;
 
@@ -133,6 +138,16 @@ test("ARK-T708 the workers of a bun test --parallel run whose coordinator was ki
     started.push(reader.pid);
     return reader.exited;
   });
+  // The case holds the write end of each `gate-<name>` pipe open and never writes: the worker blocks in its read of it
+  // until the case ends the holder. `sleep` inherits the descriptor from the shell that opened it.
+  for (const name of ["1", "2"]) {
+    const gate = join(markers, `gate-${name}`);
+    Bun.spawnSync(["mkfifo", gate]);
+    const holder = Bun.spawn(["sh", "-c", 'exec 3>"$0"; exec sleep 600', gate], {
+      stdout: "ignore",
+    });
+    started.push(holder.pid);
+  }
   const coordinator = Bun.spawn([process.execPath, "test", "--parallel=2"], {
     cwd: directory,
     env: environment(),

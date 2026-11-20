@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { type FakeProcess, fakeProcesses } from "./fake-ps";
 import { isLive, tempArkHome, tempGitRepo, writeProject } from "./helpers";
 
@@ -396,7 +396,7 @@ function orphanScratch() {
       ...environment,
     });
   };
-  return { scratch, folder, worker, rows, processes, firstSeen, recorded, clean };
+  return { workspace, scratch, folder, worker, rows, processes, firstSeen, recorded, clean };
 }
 
 test("ARK-T705 temp-cleaner stops an orphaned bun test worker on the first pass 10 minutes after it first saw it orphaned, not before", async () => {
@@ -507,30 +507,41 @@ test("ARK-T705 temp-cleaner leaves a pid alone whose command line changed betwee
   await stopped(worker);
 });
 
-test("ARK-T705 temp-cleaner finishes its pass, removes the aged folders and prunes when ps, lsof or kill fails", async () => {
+test("ARK-T705 temp-cleaner finishes its pass, removes the aged folders and prunes their worktrees when ps, lsof or kill fails", async () => {
   const cleaner = orphanScratch();
   const ended = `${await endedPid()}\n`;
-  const agedFolder = (name: string) => {
-    const directory = cleaner.folder(name);
+  const worktreeListed = (name: string) =>
+    Bun.spawnSync(["git", "-C", cleaner.workspace, "worktree", "list", "--porcelain"])
+      .stdout.toString()
+      .includes(name);
+  /** An aged `bun-test-*` folder that is a registered worktree of the workspace: `git worktree prune` is what unregisters it. */
+  const agedWorktree = (name: string) => {
+    const directory = join(cleaner.scratch, name);
+    Bun.spawnSync(["git", "-C", cleaner.workspace, "worktree", "add", "-q", "--detach", directory]);
+    expect(worktreeListed(name), `${name} was not registered`).toBe(true);
     writeFileSync(join(directory, "ark-owner.pid"), ended);
     const old = new Date(Date.now() - 13 * 60_000);
     utimesSync(directory, old, old);
     return directory;
   };
+  const expectRemovedAndPruned = (directory: string) => {
+    expect(existsSync(directory), `${directory} stayed`).toBe(false);
+    expect(worktreeListed(basename(directory)), `${directory} stayed registered`).toBe(false);
+  };
   const worker = cleaner.worker(cleaner.folder("bun-test-x", "ark-repo-y"));
   cleaner.firstSeen({ [worker.pid]: 1200 });
 
   cleaner.processes.psFails();
-  const noPs = agedFolder("bun-test-no-ps");
+  const noPs = agedWorktree("bun-test-no-ps");
   expect(cleaner.clean().code).toBe(0);
-  expect(existsSync(noPs)).toBe(false);
+  expectRemovedAndPruned(noPs);
   expect(isLive(worker.pid)).toBe(true);
   cleaner.processes.psFails(false);
 
   cleaner.processes.lsofFails();
-  const noLsof = agedFolder("bun-test-no-lsof");
+  const noLsof = agedWorktree("bun-test-no-lsof");
   expect(cleaner.clean().code).toBe(0);
-  expect(existsSync(noLsof)).toBe(false);
+  expectRemovedAndPruned(noLsof);
   expect(isLive(worker.pid)).toBe(true);
   cleaner.processes.lsofFails(false);
 
@@ -542,9 +553,9 @@ test("ARK-T705 temp-cleaner finishes its pass, removes the aged folders and prun
     workingFolder: cleaner.folder("bun-test-x", "ark-repo-y"),
   });
   cleaner.firstSeen({ [endedPidOutsideAnyTable]: 1200, [worker.pid]: 1200 });
-  const noKill = agedFolder("bun-test-no-kill");
+  const noKill = agedWorktree("bun-test-no-kill");
   expect(cleaner.clean().code).toBe(0);
-  expect(existsSync(noKill)).toBe(false);
+  expectRemovedAndPruned(noKill);
   await stopped(worker);
 });
 

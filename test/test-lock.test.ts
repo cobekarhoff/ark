@@ -991,9 +991,9 @@ describe("ark chief state host", () => {
       expect(text).toMatch(/^cpu: \d/m);
       expect(text).toMatch(/free disk: \d+ GB/);
       expect(text).toContain("tests: running 0, waiting 0");
-      // The count is the real host's here (ARK-T706 owns its value); the line sits before the last one.
+      // The count is the real host's here (ARK-T706 owns its value): `0` when none, else count and memory, or `unavailable`.
       const lines = text.trimEnd().split("\n");
-      expect(lines.at(-2)).toMatch(/^orphaned bun test workers: (\d+ \(\d+ MB\)|unavailable)$/);
+      expect(lines.at(-2)).toMatch(/^orphaned bun test workers: (0|\d+ \(\d+ MB\)|unavailable)$/);
       expect(lines.at(-1)).toMatch(/^hold new runs: /);
       expect(holdLines(text)).toHaveLength(1);
       // Load and disk are the real host's: the line is `no` only when they are clear.

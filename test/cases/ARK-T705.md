@@ -28,7 +28,7 @@ changed_by: 2026-11-19-ARK-569-1
 4. Worker with a path under `/var` while `$TMPDIR` is the `/private/var` form (and the reverse): it is stopped in both spellings.
 5. A worker that was seen with a live parent on pass 1 and orphaned only on pass 2: it is not stopped on pass 2 (the clock starts when the cleaner first sees it orphaned), and a pid that is no longer listed has its entry dropped from the state file (no growth, no stale age for a reused pid).
 6. Pid-reuse recheck: the fake `ps` lists W as a worker in the main listing, but the per-pid look the cleaner makes just before the kill (`ps -p <pid>`) reports a different command for W's pid. The case does not replace the process: W stays the real `sleep` child, and only what the fake `ps` reports changes. Pass.
-7. Failures of called commands: `ps` exits 1 and prints nothing; `lsof` exits 1; `kill` fails on a pid that has just ended. Each pass still exits 0, still removes the aged `bun-test-*` folders of ARK-T190 and prunes worktrees, and stops no other process.
+7. Failures of called commands: `ps` exits 1 and prints nothing; `lsof` exits 1; `kill` fails on a pid that has just ended. Each pass still exits 0, still removes the aged `bun-test-*` folders of ARK-T190 and prunes worktrees, and stops no other process. The case registers each aged `bun-test-*` folder as a real worktree of the scratch workspace before the pass and checks after the pass that the folder is gone and `git worktree list` no longer names it.
 8. Order: W's own temp root (`bun-test-x`) is aged to be removable (owner ended, over 12 minutes) in the same pass that stops W: W is stopped first, then the folder is removed.
 9. At the base commit (cleaner with no orphan pass), step 2 fails: W stays alive.
 

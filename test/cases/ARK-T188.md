@@ -32,7 +32,7 @@ The `no free-memory reason above the floor` contract (a free-memory reason is ne
 
 ## Expected results
 
-- Step 1: a `## Host` section with free memory in percent, swap used, the 5-minute load, the CPU use, free disk, `tests: running 0, waiting 0` (the section prints when no test is queued), the `orphaned bun test workers:` line owned by ARK-T706, and the line `hold new runs: no`.
+- Step 1: a `## Host` section with free memory in percent, swap used, the 5-minute load, the CPU use, free disk, `tests: running 0, waiting 0` (the section prints when no test is queued), the `orphaned bun test workers:` line owned by ARK-T706 (the real host's count, so `0`, `<n> (<MB> MB)` or `unavailable` all pass here), and the line `hold new runs: no`.
 - Step 2: the line names the disk and the limit.
 - Step 3: one `hold new runs:` line with the reasons joined in the fixed order free memory, swap, CPU. There is exactly one such line.
 - Step 4: the Host section says `running 1, waiting 1`, and the `## ark test budget` section still lists both.
