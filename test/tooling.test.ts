@@ -20,22 +20,29 @@ const packageConfiguration = JSON.parse(
 ) as {
   scripts: Record<string, string>;
 };
-const ciWorkflow = readFileSync(join(repositoryRoot, ".github/workflows/ci.yml"), "utf8");
-// The `test` job comes first; the `playwright` job has its own commands.
+type CiJob = { strategy?: { matrix?: Record<string, unknown> }; steps: { run?: string }[] };
+const ciJobs = (
+  Bun.YAML.parse(readFileSync(join(repositoryRoot, ".github/workflows/ci.yml"), "utf8")) as {
+    jobs: Record<string, CiJob>;
+  }
+).jobs;
+const runCommands = (job: CiJob): string[] =>
+  job.steps.flatMap((step) => (step.run ? [step.run] : []));
+// ARK-571: the old single `test` job is a static-checks job plus a Bun shard matrix. The shard
+// command runs as shard 1 of its real `--shard` and `--timings` flags.
+const staticChecksJob = Object.values(ciJobs).find((job) =>
+  runCommands(job).includes("bun run typecheck"),
+)!;
+const shardJob = Object.values(ciJobs).find((job) => job.strategy?.matrix)!;
 const ciCommands = [
-  ...ciWorkflow.split(/^ {2}playwright:$/m)[0].matchAll(/^ {6}- run: (.+)$/gm),
-].map((match) => match[1]);
+  ...runCommands(staticChecksJob),
+  ...runCommands(shardJob).map((command) => command.replaceAll("${{ matrix.shard }}", "1")),
+];
+const shardCommand = ciCommands.find((command) => command.startsWith("bun test "))!;
+const timingsPath = /--timings=(\S+)/.exec(shardCommand)![1];
 const setupCommands = [
   "bun install --frozen-lockfile",
   "bunx playwright install --with-deps chromium",
-];
-const expectedCiCommands = [
-  "bun install --frozen-lockfile",
-  "bunx playwright install --with-deps chromium",
-  "bun run typecheck",
-  "bun run lint",
-  "bun run format:check",
-  "bun test --parallel",
 ];
 const fixtureFiles = {
   "src/nested/valid.ts": "export const answer: number = 42;\n",
@@ -181,7 +188,13 @@ test("ARK-175-AC3 formatter rejects source and document drift and fixes both", (
 });
 
 test("ARK-T103 ARK-175-AC4 CI command sequence blocks each failed check", () => {
-  expect(ciCommands).toEqual(expectedCiCommands);
+  expect(ciCommands.filter((command) => !setupCommands.includes(command))).toEqual([
+    "bun run typecheck",
+    "bun run lint",
+    "bun run format:check",
+    shardCommand,
+  ]);
+  expect(shardCommand).toMatch(/^bun test --parallel --shard=1\/4 --timings=\S+$/);
   const defectCases = [
     {
       filePath: "src/nested/type-error.ts",
@@ -202,13 +215,19 @@ test("ARK-T103 ARK-175-AC4 CI command sequence blocks each failed check", () => 
       filePath: "test/smoke.test.ts",
       contents:
         'import { expect, test } from "bun:test";\ntest("failure", () => expect(1).toBe(2));\n',
-      failingCheck: "bun test --parallel",
+      failingCheck: shardCommand,
     },
   ];
   for (const defectCase of defectCases) {
     const projectDirectory = temporaryDirectory();
     try {
       createToolingProject(projectDirectory);
+      // The shard command reads its timings file; it lists the fixture's one test file.
+      writeProjectFile(
+        projectDirectory,
+        timingsPath,
+        `${JSON.stringify({ version: 1, files: { "test/smoke.test.ts": 1 } }, null, 2)}\n`,
+      );
       const valid = executeCiSequence(projectDirectory);
       if (valid.failedCommand !== null) throw new Error(valid.output);
 
