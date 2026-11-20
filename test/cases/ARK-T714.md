@@ -25,14 +25,14 @@ One contract, one owner: the names of the exit waits in this one test. The `exit
 ## Steps
 
 1. Run the inner test with `K` = 0 (no call expires). It passes. Read the count N of `AbortSignal.timeout(20000)` calls that the hook recorded.
-2. For each k in 1..N run the inner test again, all N runs together, with the k-th call expired. A run either fails or passes. For each run that fails, read the single line `no <name> within 20000 ms` from its output and keep the pair (k, `<name>`). A run that passes is not read: its wait had already settled.
+2. For each k in 1..N run the inner test again, one after another (never together: the load of N inner runs at once breaks the 5 s window of ARK-T715 inside an inner run), with the k-th call expired. A run either fails or passes. For each run that fails, read the single line `no <name> within 20000 ms` from its output and keep the pair (k, `<name>`). A run that passes is not read: its wait had already settled.
 3. From the failed runs keep the pairs whose name starts with `exit of` (waits on the exit of a child or of a holder).
 4. Remove every temp folder and left-over process of the inner runs.
 
 ## Expected results
 
 - Step 1: exit 0 and N is 3 or more.
-- Step 2: every run that fails prints exactly one `no <name> within 20000 ms` line, and that line is the failure of the run.
+- Step 2: every run that fails prints exactly one `no <name> within 20000 ms` line, and that line is the failure of the run. A failed run without such a line fails the case, and the failure message carries the whole text of that inner run.
 - Step 3: exactly four failed runs carry an `exit of ...` name (the first run, the run that takes the free cores, the waiting run and the holder), and the four names differ. A name that says `exit of the child` on two or more k is a failure.
 - At the base commit (c3be2c8, with the race of ARK-T715) step 1 fails first: the unexpired inner run hangs on the FIFO and exits 1, so no name is read. The check of the names is proved by a mutation at head (the FIFO fix kept, two names set back to the same string): step 3 fails with the duplicated name.
 
