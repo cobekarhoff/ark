@@ -1,6 +1,7 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { join, posix } from "node:path";
 import { isHubName } from "../cli/proxy.ts";
 import { outcomes, phases } from "../cli/lifecycle.ts";
 
@@ -185,6 +186,61 @@ test("ARK-T85 every link in principles.md and engineering.md points to a file an
       }
     }
   }
+});
+
+test("ARK-T717 every tracked link to skills/shared resolves from the file and through skill://<name>", () => {
+  // `-s` shows the mode: 120000 is a tracked symlink (skills/<skill>/shared), which is neither read as a file nor walked twice.
+  const tracked = execFileSync("git", ["ls-files", "-s", "skills"], { cwd: root, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => ({ mode: line.split(" ")[0]!, file: line.split("\t")[1]! }))
+    .filter(({ mode, file }) => mode !== "120000" && file.endsWith(".md"))
+    .map(({ file }) => file);
+  // omp opens skill://<name>/<link> inside the skill folder: a `..` at the skill root is dropped.
+  const clamp = (link: string) => {
+    const kept: string[] = [];
+    for (const part of link.split("/")) {
+      if (part === "..") kept.pop();
+      else if (part !== "." && part !== "") kept.push(part);
+    }
+    return kept.join("/");
+  };
+  const failures: string[] = [];
+  const skillsWithLink = new Set<string>();
+  let depthTwo = 0;
+  for (const file of tracked) {
+    const name = file.split("/")[1]!;
+    let fenced = false;
+    for (const line of read(file).split("\n")) {
+      if (line.startsWith("```")) fenced = !fenced;
+      if (fenced) continue;
+      for (const match of line.matchAll(/\]\(([^)\s]+)\)/g)) {
+        const link = match[1]!;
+        if (/^[a-z][a-z0-9+.-]*:/i.test(link)) continue;
+        const path = link.split("#")[0]!;
+        const target = posix.join(posix.dirname(file), path);
+        if (!target.startsWith("skills/shared/")) continue;
+        const label = `${file} ${link}`;
+        if (!existsSync(join(root, target)))
+          failures.push(`${label}: file-relative target ${target} missing`);
+        if (name === "shared") continue; // shared has no SKILL.md, so no skill://<name> owner
+        skillsWithLink.add(name);
+        if (posix.dirname(file) !== `skills/${name}`) depthTwo++;
+        const clamped = `skills/${name}/${clamp(path)}`;
+        if (!existsSync(join(root, clamped))) {
+          failures.push(`${label}: skill://${name}/${path} clamps to ${clamped}, which is missing`);
+        } else if (
+          existsSync(join(root, target)) &&
+          realpathSync(join(root, clamped)) !== realpathSync(join(root, target))
+        ) {
+          failures.push(`${label}: ${clamped} is not the same file as ${target}`);
+        }
+      }
+    }
+  }
+  expect(skillsWithLink.size, "skills with a link to skills/shared").toBeGreaterThanOrEqual(10);
+  expect(depthTwo, "links of depth 2 (rubrics/ and deeper)").toBeGreaterThanOrEqual(1);
+  expect(failures).toEqual([]);
 });
 
 test("ARK-303-AC8 package.json has typecheck, lint and format:check scripts that do not run bun test", () => {
