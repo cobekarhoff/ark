@@ -46,11 +46,11 @@ export function linkedArkHome(): string {
 export function initProjectRepo(projectFolder: string): void {
   mkdirSync(projectFolder, { recursive: true });
   writeFileSync(join(projectFolder, ".gitignore"), "runs/\n");
-  git(projectFolder, commandLimitMs, "init", "-q", "-b", "main");
-  git(projectFolder, commandLimitMs, "add", "-A");
+  git(projectFolder, limitOr(commandLimitMs), "init", "-q", "-b", "main");
+  git(projectFolder, limitOr(commandLimitMs), "add", "-A");
   git(
     projectFolder,
-    commandLimitMs,
+    limitOr(commandLimitMs),
     "-c",
     "user.name=t",
     "-c",
@@ -110,6 +110,17 @@ export function writeTicket(
 /** Per-command limit of the git and ark helpers; below the 60 s test timeout so a stalled command fails with its own message. */
 export const commandLimitMs = 45_000;
 
+/** ARK_TEST_LIMIT_MS when it is an integer from 1 to 2147483647 (a larger one makes setTimeout fire at 1 ms), else undefined. Read at each call, so a stall test sets it for the stall alone. */
+function testLimitMs(): number | undefined {
+  const limit = Number(process.env.ARK_TEST_LIMIT_MS);
+  return Number.isInteger(limit) && limit >= 1 && limit <= 2147483647 ? limit : undefined;
+}
+
+/** The limit of one git, ark or hub call: ARK_TEST_LIMIT_MS when set, else `defaultMs`. */
+export function limitOr(defaultMs: number): number {
+  return testLimitMs() ?? defaultMs;
+}
+
 function git(directory: string, limitMs: number, ...args: string[]): void {
   const result = Bun.spawnSync(["git", "-C", directory, ...args], { timeout: limitMs });
   const line = `git -C ${directory} ${args.join(" ")}`;
@@ -124,7 +135,7 @@ const repoTemplates = new Map<string, string>();
 /** `limitMs` bounds each git call that builds the template; a file under a shorter test timeout passes its own. */
 export function tempGitRepo(
   files: Record<string, string> = { "README.md": "# test\n" },
-  limitMs = commandLimitMs,
+  limitMs = limitOr(commandLimitMs),
 ): string {
   const key = JSON.stringify(Object.entries(files));
   let template = repoTemplates.get(key);
@@ -253,7 +264,7 @@ const pages = new WeakMap<object, { controller: AbortController; request: Promis
  * With `limitMs`, a hub that has not printed its address by then is killed and the call throws
  * with the command line, the limit and the stderr read so far; without it the wait has no limit.
  */
-export async function startHub(limitMs?: number): Promise<StartedHub> {
+export async function startHub(limitMs: number | undefined = testLimitMs()): Promise<StartedHub> {
   const hub = Bun.spawn(["bun", join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
     env: process.env,
     stdin: "ignore",

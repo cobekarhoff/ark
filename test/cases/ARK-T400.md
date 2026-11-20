@@ -1,19 +1,19 @@
 ---
 id: ARK-T400
-title: ARK-T400 a git or ark command that stalls in test/worktree-submodule.test.ts fails the case at its own time limit, below the 60 s test timeout, with the command line, the limit and what the command printed
+title: ARK-T400 a git or ark command that stalls in test/worktree-submodule.test.ts fails the case at the limit a test sets through ARK_TEST_LIMIT_MS (2 s or less, the case ends in under 5 s) with the command line, the limit and what the command printed, and the default limit stays below the 60 s test timeout
 level: integration
 technique: equivalence classes (stalled with stderr, stalled with no output, fails fast) over the two spawn helpers (the file's `git`, the shared `ark`), observed through real child processes behind a PATH shim
 priority: high
-risk: "a hung `git add` or `ark test` is not killed, so the case runs into the 60 s test timeout and CI reports only `timed out after 60000ms` with no command and no stderr (as on PR #224: 5 cases, 5 minutes, empty `git add ... failed:`); or the limit is at or above the per-test budget so the test timeout still wins; or the limit is set on `git` only and an `ark test` stall is still unbounded; or the error of a killed silent child has an empty stderr and names neither command nor limit; or a fast non-zero exit loses its command line, exit code or stderr"
+risk: "a stalled `git add`, `ark test` or `git init` of tempGitRepo is not killed, so the case runs into the 60 s test timeout and CI reports only `timed out after 60000ms` with no command and no stderr (PR #224); or the limit variable is read once at import, so a value set inside the test is ignored and the stall waits the 45 s default (the case then fails only by its Bun timeout, the symptom of ARK-572: ARK-T400 took 45 s three times on CI); or the variable reaches `git` only and an `ark test` stall is still unbounded; or the variable is not restored, so a later healthy `git init` or `ark` call of the file runs under 1.5 s and fails under CI load; or a junk value (empty, text, 0, negative) becomes a limit of 0 ms or 1 ms and kills every call; or the default drifts to 60 s or more while the stall tests (now short) still pass; or the error of a killed silent child has an empty stderr and names neither command nor limit; or a fast non-zero exit loses its command line, exit code or stderr"
 status: active
-changed_by: 2026-11-14-ARK-386-1
+changed_by: 2026-11-19-ARK-572-1
 ---
 
 ## Objective
 
-Prove that every command `test/worktree-submodule.test.ts` runs through the file's `git` helper or the shared `ark()` helper of `test/helpers.ts` has a time limit below the file's 60 s test timeout, and that a command that exceeds it fails the case with its command line, the limit and `shim-git-stderr-marker`.
+Prove that every command `test/worktree-submodule.test.ts` runs through the file's `git` helper or the shared `ark()` helper of `test/helpers.ts` has a default time limit below the file's 60 s test timeout; that `ARK_TEST_LIMIT_MS`, set to 1 500 inside a test after the modules are loaded, replaces that limit for the next call; and that a command that exceeds it fails the case within 5 s with its command line, the limit (1 500 ms) and `shim-git-stderr-marker`.
 
-The authoring gate: the contract is an observable failure message of the two helpers at the real process boundary (a child that does not exit). The existing cases ARK-T111 and ARK-T112 start only commands that finish, so they cannot show it. No export, flag or hook is needed for the proof: the case calls the helpers as the file calls them, and the stall is a program of the case's own on PATH. If the helpers get a limit parameter for speed, the case must still run the default limit at least once (steps 1 and 3), because the default is what the 60 s test timeout races.
+The authoring gate: the contract is an observable failure message of the two helpers at the real process boundary (a child that does not exit). The existing cases ARK-T111 and ARK-T112 start only commands that finish, so they cannot show it. No export, flag or hook is needed for the proof: the case calls the helpers as the file calls them, and the stall is a program of the case's own on PATH. The stall tests run under a short limit set through `ARK_TEST_LIMIT_MS`, so they no longer run the default limit. The default is what the 60 s test timeout races, so one cheap test (step 5) proves it with the variable unset and no stall. The variable is also the one test-only switch of ARK-572: `limitOr(defaultMs)` of `test/helpers.ts` returns it when it is a positive integer, else `defaultMs`, and reads `process.env` at each call.
 
 Out of scope, owned elsewhere: ARK-T111 and ARK-T112 own "the file passes under the bounded helpers" and with it the healthy path of both helpers: every other test of the file runs healthy `git` and `ark` commands and asserts on their output. The claim that the shared `ark()` limit kills no legitimate call of another test file is checked by the full `ark test` / `bun test` run in the validator step, not by this case. The case's tests live in `test/worktree-submodule.test.ts` and must never start that file or `bun test` (that would recurse, and a whole-suite run cannot finish inside the 60 s per-test budget).
 
@@ -24,23 +24,27 @@ Out of scope, owned elsewhere: ARK-T111 and ARK-T112 own "the file passes under 
   - `git` shim A: prints `shim-git-stderr-marker` to stderr, then `exec sleep 90`. The `exec` is required: a killed `sh` would leave a `sleep` that keeps the stderr pipe open, and `Bun.spawnSync` would wait for it.
   - `bun` shim B: prints nothing, then `exec sleep 90` (the `ark()` helper starts `bun cli/ark.ts`).
   - `git` shim C: prints `shim-fast-failure` to stderr and `exit 3`.
-- A scratch directory as the repo argument of `git`. No ark project is needed: shim B stalls before `ark` runs.
-- The sleep (90 s) is longer than the 60 s test timeout, so at the base commit (no limit) the case ends by the test timeout and fails; with the fix it ends at the limit.
+- Named constants in the test file: `testTimeoutMs = 60_000` (kept equal to the file's `setDefaultTimeout`), `stallLimitMs = 1_500` (the value set in the variable, 2 s or less) and `stallBudgetMs = 5_000` (the AC2 bound). The elapsed time is compared with `stallBudgetMs`, never with a literal: `test/wallclock.test.ts` (ARK-T126) rejects a new `toBeLessThan(<3 or more digits>)`.
+- The variable is set and restored in `try/finally` around the stall call alone (as `test/run.test.ts` does for `ARK_ORCA_TIMEOUT_MS`), never in `beforeEach`, never for a healthy call. It is set after the modules are imported.
+- A scratch directory as the repo argument of `git`, built with the real PATH before the shim and before the variable is set. No ark project is needed: shim B stalls before `ark` runs.
+- The sleep (90 s) is longer than the 60 s test timeout, so if the variable is ignored the case ends by the test timeout and fails; with the variable read at the call it ends at 1.5 s.
 
 ## Steps
 
-1. With shim A on PATH, call the file's `git(directory, "add", "--", "x.txt")` and catch the thrown error. Record the elapsed time.
-2. With shim A removed and shim C on PATH, call the same helper and catch the error. The new message shape is the contract: command line with `-C`, exit code, stderr.
-3. With shim B on PATH, call `ark("status")` as the file calls it (default limit) and record the elapsed time and the result or error. If `ark()` returns a result instead of throwing, read its `code` and `err`. (One `ark` stall is enough: every `ark` call goes through the one spawn in `helpers.ts`.)
-4. With shim A on PATH, call `tempGitRepo({ "stalled-template.txt": "x\n" })` of `test/helpers.ts` (a file set no other test builds, so no cached template hides the stall) and catch the error. Record the elapsed time.
+1. With the variable set to `1500` and shim A on PATH, call the file's `git(directory, "add", "--", "x.txt")` and catch the thrown error. Record the elapsed time.
+2. With the variable unset, shim A removed and shim C on PATH, call the same helper and catch the error. The message shape is the contract: command line with `-C`, exit code, stderr.
+3. With the variable set to `1500` and shim B on PATH, call `ark("status")` as the file calls it and record the elapsed time and the error. If `ark()` returns a result instead of throwing, read its `code` and `err`. (One `ark` stall is enough: every `ark` call goes through the one spawn in `helpers.ts`.)
+4. With the variable set to `1500` and shim A on PATH, call `tempGitRepo({ "stalled-template.txt": "x\n" })` of `test/helpers.ts` (a file set no other test builds, so no cached template hides the stall) and catch the error. Record the elapsed time.
+5. With no shim and no stall, delete the variable and read the default limit of each helper the file uses (`limitOr(commandLimitMs)` as `git`, `ark` and `tempGitRepo` resolve it). Then set the variable, after import, to `1500`, and read it again; then to each of `""`, `abc`, `0` and `-5`, and read it again; restore the variable.
 
 ## Expected results
 
-- Step 1: the helper shall throw before the 60 s test timeout (elapsed under 60 s, over 0 s). The message shall contain the command line (`git -C <directory> add -- x.txt`), the limit in seconds or milliseconds as the file defines it, and `shim-git-stderr-marker`.
+- Step 1: the helper shall throw. The message shall contain the command line (`git -C <directory> add -- x.txt`), `timed out after 1500 ms` and `shim-git-stderr-marker`. The elapsed time shall be below `stallBudgetMs`.
 - Step 2: the helper shall throw at once. The message shall contain the command line (`git -C <directory> add -- x.txt`), the exit code `3` and `shim-fast-failure`, and shall not mention a time limit.
-- Step 3: the `ark()` call shall end before the 60 s test timeout, shall carry the command line (`ark status`) and the limit in its failure, and, with no output from the child, shall not leave the failure as an empty string: a killed child (exit code `null` from `Bun.spawnSync`) shall not be reported as a plain code 1 with empty `err`.
-- Step 4: the call shall throw before the 60 s test timeout. The message shall contain `init -q -b main timed out after <limit> ms`, a limit below the 60 s test timeout, and `shim-git-stderr-marker`.
-- Steps 1 and 3 run as separate tests, each under its own 60 s budget, so the two stalls never add up to one test; a limit at or above 60 s shall fail the case.
+- Step 3: the `ark()` call shall end below `stallBudgetMs`, shall carry the command line (`ark status`) and `timed out after 1500 ms` in its failure, and, with no output from the child, shall not leave the failure as an empty string: a killed child (exit code `null` from `Bun.spawnSync`) shall not be reported as a plain code 1 with empty `err`.
+- Step 4: the call shall throw below `stallBudgetMs`. The message shall contain `init -q -b main timed out after 1500 ms` and `shim-git-stderr-marker`.
+- Step 5: with the variable unset the limit shall be below `testTimeoutMs` (production default 45 000 ms: a limit of 60 000 or more shall fail the case, though every stall test of the file still passes). With `1500` it shall be 1 500, and with each junk value it shall be the default again, not 0, 1 or NaN. A variable read once at import fails the 1 500 row.
+- Steps 1, 3 and 4 run as separate tests, each under its own 60 s budget, so the three stalls never add up to one test. After each stall test the variable has its earlier value (unset).
 
 ## Screenshot checkpoints
 
