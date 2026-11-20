@@ -4,7 +4,8 @@ title: ARK-T735 When the fake orca fails run-list, inbox, or worker-list or task
 level: integration
 technique: equivalence classes (no failure, failing run-list, failing inbox, failing worker-list of one of three runs, failing task-list of one run, failing worker-list of Master Chief) and state transition (ok, failed, ok again with changed data)
 priority: medium
-risk: a change to the orca pass (yields between runs, bounded spawns, a worker) turns a failure of one call into a partial value: the run whose call failed vanishes from the agents, or its good neighbours show a half-read list, or the pass publishes an empty list of waits, so the page shows no one waiting when Orca could not answer; or a failure leaves the slot not ok forever after the call works again; or a failure of Master Chief's worker-list, which today only hides a run lead that nothing else lists, fails the whole pass, or leaves the run lead of a run in the agents from a stale read
+risk: >-
+  a change to the orca pass (yields between runs, bounded spawns, a worker) turns a failure of one call into a partial value: the run whose call failed vanishes from the agents, or its good neighbours show a half-read list, or the pass publishes an empty list of waits, so the page shows no one waiting when Orca could not answer; or a failure leaves the slot not ok forever after the call works again; or a failure of Master Chief's worker-list, which today only hides a run lead that nothing else lists, fails the whole pass, or leaves the run lead of a run in the agents from a stale read
 status: active
 changed_by: 2026-11-20-ARK-606-1
 ---
