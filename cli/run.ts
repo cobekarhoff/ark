@@ -927,7 +927,7 @@ function printRun(runId: string, inProject?: string): void {
     ...(statusMergeRequestsMode(project) === "none"
       ? localOnlyLines(project, directory, state)
       : [
-          `merge requests: ${state.merge_requests.length === 0 ? "none" : ""}`,
+          `merge requests: ${state.merge_requests.length === 0 ? "not opened yet" : ""}`,
           ...state.merge_requests.map((request) => `  ${request.repo} ${request.url}`),
         ]),
     costLine(directory),
