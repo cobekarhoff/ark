@@ -3868,8 +3868,9 @@ async function conversationWhen<Reply extends ConversationHead>(
   baseUrl: string,
   ready: (reply: Reply) => boolean,
   path = "/api/conversation",
+  timeoutMs = 15_000,
 ): Promise<Reply> {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const response = await fetch(`${baseUrl}${path}`);
     const body = await response.text();
@@ -3906,7 +3907,8 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
   const { baseUrl } = await start();
   delete process.env.ARK_HUB_INTERVAL_MS;
   // Keep the delay until the loading reply is read, then speed Orca up so the directory read finishes.
-  await conversationWhen<ProjectReply>(baseUrl, () => true);
+  // The slow Orca calls (about 5.5 s before the first reply) stay out of the default 15 s wait.
+  await conversationWhen<ProjectReply>(baseUrl, () => true, "/api/conversation", 45_000);
   writeFileSync(join(state, "orca.sleep"), "0");
   // The liveness read is `--limit 200 --full`; the conversation read names a larger limit.
   const fullReads = () =>
