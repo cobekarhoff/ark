@@ -1,6 +1,7 @@
 import type { Subprocess } from "bun";
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,6 +24,7 @@ import {
 } from "./helpers.ts";
 import { macOnly, recordStartedRun, stopStartedRuns } from "./orphan-runners.ts";
 import { installFakeOrca, removeFakeOrca } from "./fake-orca.ts";
+import { readEvents } from "../cli/events.ts";
 
 // ARK-366: real `ark test` callers, detached runners and suite processes. Waits are events (a file appears, a
 // stream prints, a process exits), never sleeps: see test/wallclock.test.ts and test/timeouts.test.ts.
@@ -957,12 +959,13 @@ describe("ark test result cache", () => {
     rmSync(join(fixture.directory, "fail-head"));
     const passed = await run();
     expect(passed.code, passed.err).toBe(0);
-    expect(heads()).toBe(3);
+    // ARK-551: the failed run recorded its failed file, so this run starts it through the base_command first, then the suite
+    expect(heads()).toBe(4);
     expect(passed.out).not.toMatch(/passed {2}reused/);
 
     const reused = await run();
     expect(reused.out).toMatch(/passed {2}reused/);
-    expect(heads()).toBe(3);
+    expect(heads()).toBe(4);
 
     // a failing base is data for a feature run, and it is never stored
     commitFiles(fixture.mirrorOf("repoA"), {
@@ -1504,6 +1507,285 @@ exit 1
     } finally {
       removeFakeOrca();
     }
+  });
+});
+
+// ARK-551: the pre-run of the files that failed in the last test. Every suite command goes through `log.sh`, which
+// appends `<suite> <kind> <side> <argv>` to `commands` (kind `normal` for the suite command, `files` for the
+// `base_command`, which is what the pre-run, the retry and the red-on-main check run).
+const prerunSuites = (directory: string, withoutBase = false): Suite[] => {
+  const suite = (name: string, files: string[]): Suite => ({
+    name,
+    level: "integration",
+    repo: ".",
+    command: `sh ${directory}/log.sh ${directory} ${name} normal {report} ${files.join(" ")}`,
+    parser: "bun",
+    ...(withoutBase
+      ? {}
+      : {
+          base_files: "test/*.test.ts",
+          base_command: `sh ${directory}/log.sh ${directory} ${name} files {report} {files}`,
+        }),
+  });
+  return [
+    suite("a", ["test/fails-a.test.ts"]),
+    suite("b", ["test/fails-b.test.ts", "test/red.test.ts", "test/flaky.test.ts"]),
+  ];
+};
+
+function writeLogScript(directory: string): void {
+  writeFileSync(
+    join(directory, "log.sh"),
+    `#!/bin/sh
+# usage: log.sh <directory> <suite> <kind> <report> <test files...>
+directory=$1; suite=$2; kind=$3; report=$4; shift 4
+side=head
+case "$PWD" in *ark-base-*) side=base;; esac
+case "$report" in */census/*) side=census;; esac
+if [ $side = head ]; then
+  case "$(git symbolic-ref -q HEAD)" in refs/heads/ark/*) ;; *) side=main;; esac
+fi
+echo "$suite $kind $side $*" >> "$directory/commands"
+bun test "$@" --reporter=junit --reporter-outfile="$report"
+`,
+  );
+}
+
+/** A test file that fails at head while `fail-<name>` exists in the fixture folder. */
+const flaggedFile = (directory: string, name: string) => `import { existsSync } from "node:fs";
+import { test } from "bun:test";
+const base = process.cwd().includes("/ark-base-");
+test(${JSON.stringify(name)}, () => {
+  if (!base && existsSync(${JSON.stringify(`${directory}/fail-${name}`)})) throw new Error("fails");
+});
+`;
+
+const commandsOf = (fixture: Fixture) => lines(join(fixture.directory, "commands"));
+const headCommands = (all: string[]) => all.filter((line) => / (head|main) /.test(line));
+
+/** The lines `ark test` ran after `before` lines of the command log. */
+const ranSince = (fixture: Fixture, before: number) => commandsOf(fixture).slice(before);
+
+/** Appends a `test.completed` event as an older or a hand-written run left it. */
+function appendCompleted(fixture: Fixture, data: Record<string, unknown>): void {
+  const seq = readEvents(fixture.runDirectory).length + 1;
+  appendFileSync(
+    join(fixture.runDirectory, "events.ndjson"),
+    `${JSON.stringify({ seq, time: new Date().toISOString(), type: "test.completed", data })}\n`,
+  );
+}
+
+const suiteEntry = (name: string, failedFiles?: string[]) => ({
+  name,
+  level: "integration",
+  passed: failedFiles === undefined,
+  loadAtStart: null,
+  loadPeak: null,
+  ...(failedFiles === undefined ? {} : { failed_files: failedFiles }),
+});
+const completed = (passed: boolean, suites: unknown[], mode = "full") => ({
+  passed,
+  mode,
+  checks: [],
+  heads: {},
+  criteria: {},
+  suites,
+  duration: 1,
+});
+
+describe("ark test pre-run of the failed files", () => {
+  const aFile = "test/fails-a.test.ts";
+  const bFile = "test/fails-b.test.ts";
+
+  /** Suites `a` and `b` over `fails-a`, `fails-b`, `flaky` (fails its first start) and `red` (fails at the tip of main). */
+  function failingFixture(): Fixture {
+    const fixture = makeFixture({ forge: true, suites: (directory) => prerunSuites(directory) });
+    writeLogScript(fixture.directory);
+    runFromTip(fixture, { red: redBody }, "DET-2");
+    commitFiles(fixture.mirrorOf("."), {
+      [aFile]: flaggedFile(fixture.directory, "a"),
+      [bFile]: flaggedFile(fixture.directory, "b"),
+      "test/flaky.test.ts": countedFile(fixture.directory, "flaky", flakyBody),
+    });
+    for (const name of ["a", "b"]) writeFileSync(join(fixture.directory, `fail-${name}`), "");
+    return fixture;
+  }
+
+  test("ARK-T723 a full ark test runs the files that failed in the last test first with the base_command and {files}, stops with exit 1 and one line for each suite when they still fail, and the next full run runs them again", async () => {
+    const fixture = failingFixture();
+
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(1);
+    // no earlier test.completed, so the first run starts no pre-run
+    expect(commandsOf(fixture)[0]).toBe(`a normal head ${aFile}`);
+    const recorded = completedEvents(fixture).at(-1);
+    expect(recorded.passed).toBe(false);
+    const filesOf = (event: typeof recorded, name: string) =>
+      event.suites.find((suite: { name: string }) => suite.name === name)?.failed_files;
+    // flaky.test.ts passed on its retry and red.test.ts fails at the tip of main: neither is recorded
+    expect(filesOf(recorded, "a")).toEqual([aFile]);
+    expect(filesOf(recorded, "b")).toEqual([bFile]);
+    expect(recorded.red_on_main).toEqual(["test/red.test.ts"]);
+
+    for (const attempt of [2, 3]) {
+      const before = commandsOf(fixture).length;
+      const stopped = await arkDone(fixture, "test", fixture.runId);
+      expect(stopped.code, stopped.err + stopped.out).toBe(1);
+      // the pre-run of each suite with its failed files only, one retry each, and nothing after: no normal
+      // command, no flaky or red file, no base run
+      expect(ranSince(fixture, before), `attempt ${attempt}`).toEqual([
+        `a files head ${aFile}`,
+        `a files head ${aFile}`,
+        `b files head ${bFile}`,
+        `b files head ${bFile}`,
+      ]);
+      const out = stopped.out;
+      expect(out).toContain("ark test: failed files of the last test, run first");
+      expect(out.indexOf(`  a: ${aFile}`)).toBeGreaterThan(-1);
+      expect(out.indexOf(`  b: ${bFile}`)).toBeGreaterThan(out.indexOf(`  a: ${aFile}`));
+      expect(stopped.err).toContain("the files of the last test still fail");
+
+      const event = completedEvents(fixture).at(-1);
+      expect(event.passed).toBe(false);
+      expect(event.mode).toBe("full");
+      expect(event.suites).toEqual([
+        expect.objectContaining({ name: "a", passed: false, failed_files: [aFile] }),
+        expect.objectContaining({ name: "b", passed: false, failed_files: [bFile] }),
+      ]);
+      expect(Object.values(event.criteria)).toEqual(["missing"]);
+    }
+    // the stop removed its staging folder
+    expect(
+      readdirSync(join(fixture.runDirectory, "results")).filter(
+        (entry) => entry.startsWith("evidence") && entry !== "evidence",
+      ),
+    ).toEqual([]);
+
+    // the readers of the stopped event take it as a failed test
+    const status = await arkDone(fixture, "status", fixture.runId);
+    expect(status.out).toContain("last test: failed");
+    writeEvidenceFile(fixture.runDirectory, "DET-2-AC1");
+    const refused = await arkDone(fixture, "merge-request", "open", fixture.runId);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("the last test run did not pass");
+  });
+
+  describe("ARK-T724", () => {
+    const cFile = "test/ok-c.test.ts";
+    /** Suites `a` and `b` (with a `base_command`) and `c` (none), all of whose files pass. */
+    function passingFixture(): Fixture {
+      const fixture = makeFixture({
+        suites: (directory) => {
+          const [a, b] = prerunSuites(directory);
+          const [c] = prerunSuites(directory, true);
+          return [
+            a!,
+            { ...b!, command: `sh ${directory}/log.sh ${directory} b normal {report} ${bFile}` },
+            {
+              ...c!,
+              name: "c",
+              command: `sh ${directory}/log.sh ${directory} c normal {report} ${cFile}`,
+            },
+          ];
+        },
+      });
+      writeLogScript(fixture.directory);
+      commitFiles(fixture.mirrorOf("."), {
+        [aFile]: flaggedFile(fixture.directory, "a"),
+        [bFile]: flaggedFile(fixture.directory, "b"),
+        [cFile]: flaggedFile(fixture.directory, "c"),
+      });
+      return fixture;
+    }
+    const normal = [`a normal head ${aFile}`, `b normal head ${bFile}`, `c normal head ${cFile}`];
+    const lastFailed = (...entries: ReturnType<typeof suiteEntry>[]) => completed(false, entries);
+
+    test("ARK-T724 a full ark test goes on with the normal suites after the pre-run files pass and the pre-run leaves no trace in the head run, the cache or resources.json", async () => {
+      const fixture = passingFixture();
+      appendCompleted(fixture, lastFailed(suiteEntry("a", [aFile]), suiteEntry("b", [bFile])));
+      const before = commandsOf(fixture).length;
+
+      const result = await arkDone(fixture, "test", fixture.runId);
+      expect(result.code, result.err + result.out).toBe(0);
+      // the files first (a file that passes needs no retry), then the normal suites in the same run
+      const ran = headCommands(ranSince(fixture, before));
+      expect(ran).toEqual([`a files head ${aFile}`, `b files head ${bFile}`, ...normal]);
+      expect(result.out).not.toContain("the files of the last test still fail");
+      expect(result.out).not.toMatch(/passed {2}reused/);
+
+      const event = completedEvents(fixture).at(-1);
+      expect(event.passed).toBe(true);
+      // each test counts once: a pre-run that added its results to the head run would give 5
+      expect(event.passed_count).toBe(3);
+      expect(event.suites.map((suite: { name: string }) => suite.name)).toEqual(["a", "b", "c"]);
+      expect(event.suites.every((suite: { failed_files?: string[] }) => !suite.failed_files)).toBe(
+        true,
+      );
+      const resources = readJson(join(fixture.runDirectory, "results", "resources.json"));
+      expect(Object.keys(resources.suites).sort()).toEqual(["a", "b", "c"]);
+      expect(resources.suites.a.head).toBeDefined();
+      // the normal suite stored the entry of its own key: the next run reuses it, and the pre-run stored none of its own
+      const again = await arkDone(fixture, "test", fixture.runId);
+      expect(again.out).toMatch(/passed {2}reused/);
+      expect(headCommands(ranSince(fixture, before))).toEqual(ran);
+    });
+
+    const skipRows: {
+      title: string;
+      events: (() => Record<string, unknown>)[];
+      flags?: string[];
+      expected?: string[];
+    }[] = [
+      { title: "no earlier test.completed", events: [] },
+      {
+        title: "the last test.completed passed",
+        events: [() => completed(true, [suiteEntry("a", [aFile])])],
+      },
+      {
+        title: "the last has no failed_files, an empty list, or was written before this ticket",
+        events: [() => lastFailed({ ...suiteEntry("a"), passed: false }, suiteEntry("b", []))],
+      },
+      { title: "the last is a failed-check stop", events: [() => lastFailed()] },
+      {
+        title: "the suite has no base_command",
+        events: [() => lastFailed(suiteEntry("c", [cFile]))],
+      },
+      {
+        title: "--keep-going is set",
+        events: [() => lastFailed(suiteEntry("a", [aFile]), suiteEntry("b", [bFile]))],
+        flags: ["--keep-going"],
+      },
+      {
+        title: "a passing quick run is the last event after a failed full run",
+        events: [
+          () => lastFailed(suiteEntry("a", [aFile])),
+          () => completed(true, [suiteEntry("a")], "quick"),
+        ],
+      },
+      {
+        title: "every failed file of a suite is gone at head, and one of two files of another",
+        events: [
+          () =>
+            lastFailed(
+              suiteEntry("a", ["test/gone-a.test.ts"]),
+              suiteEntry("b", ["test/gone-b.test.ts", bFile]),
+            ),
+        ],
+        expected: [`b files head ${bFile}`, ...normal],
+      },
+    ];
+    test.each(skipRows)(
+      "ARK-T724 starts no pre-run when $title",
+      async ({ events, flags = [], expected = normal }) => {
+        const fixture = passingFixture();
+        for (const event of events) appendCompleted(fixture, event());
+        const before = commandsOf(fixture).length;
+
+        const result = await arkDone(fixture, "test", fixture.runId, ...flags);
+        expect(result.code, result.err + result.out).toBe(0);
+        expect(headCommands(ranSince(fixture, before))).toEqual(expected);
+      },
+    );
   });
 });
 
