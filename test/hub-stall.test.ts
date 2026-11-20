@@ -253,18 +253,34 @@ async function startHub(
   };
 }
 
-/** One page: `GET /events` held open and read until `close()`. */
-function openPage(hub: Hub): { close(): void } {
+/**
+ * One page: `GET /events` held open and read until `close()`. `firstSnapshot` settles at the first push that
+ * holds the runs (a page asks for a run only after it has them), and never settles if the stream fails.
+ */
+function openPage(hub: Hub): { close(): void; firstSnapshot: Promise<void> } {
   const controller = new AbortController();
+  let settle: () => void = () => {};
+  const firstSnapshot = new Promise<void>((resolve) => (settle = resolve));
   void (async () => {
     try {
       const response = await fetch(`${hub.baseUrl()}/events`, { signal: controller.signal });
-      for await (const chunk of response.body!) void chunk;
+      const decoder = new TextDecoder();
+      let buffered = "";
+      for await (const chunk of response.body!) {
+        buffered += decoder.decode(chunk, { stream: true });
+        const messages = buffered.split("\n\n");
+        buffered = messages.pop() ?? "";
+        for (const message of messages)
+          if (message.startsWith("data: ")) {
+            const snapshot = JSON.parse(message.slice("data: ".length)) as { runs?: unknown };
+            if (Array.isArray(snapshot.runs)) settle();
+          }
+      }
     } catch {
       // The page was closed.
     }
   })();
-  const page = { close: () => controller.abort() };
+  const page = { close: () => controller.abort(), firstSnapshot };
   pages.push(page);
   return page;
 }
@@ -993,7 +1009,9 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   fake.set("orca.inbox", JSON.stringify({ result: { messages: [inboxMessage(openRun)] } }));
   const hub = await startHub(); // the default intervals: 2 s to 60 s
   const baseUrl = hub.baseUrl();
-  openPage(hub);
+  const page = openPage(hub);
+  // The soak starts at the page's first snapshot: the page asks for a run only after it has one, and the cold first read is outside the 120 s of probes.
+  await page.firstSnapshot;
 
   const probes = new Map<string, Probe>();
   const probe = async (
@@ -1040,6 +1058,7 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   let asset: string | undefined;
   let messageId: string | undefined;
   let largestLag = 0;
+  let largestLagAt = 0;
   const firstEnds = new Map<string, number>();
   const lastEnds = new Map<string, number>();
   const run = encodeURIComponent(openRun);
@@ -1076,7 +1095,10 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
     const healthText = await probe("GET /api/health", "/api/health");
     try {
       const answer = JSON.parse(healthText) as Health;
-      largestLag = Math.max(largestLag, answer.lag_ms ?? 0);
+      if ((answer.lag_ms ?? 0) > largestLag) {
+        largestLag = answer.lag_ms ?? 0;
+        largestLagAt = Math.round(deadline - performance.now());
+      }
       for (const [name, pass] of Object.entries(answer.sources ?? {})) {
         const ended = endedAt(pass);
         if (ended === null) continue;
@@ -1167,9 +1189,10 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
     "routes slower than 1 s",
   ).toEqual([]);
   // No pass held the loop for more than 200 ms, as the hub reports it.
-  expect(largestLag <= lagLimitMilliseconds, `the largest loop lag was ${largestLag} ms`).toBe(
-    true,
-  );
+  expect(
+    largestLag <= lagLimitMilliseconds,
+    `the largest loop lag was ${largestLag} ms, ${soakMilliseconds - largestLagAt} ms into the soak`,
+  ).toBe(true);
   // Speed was not bought by stopping the readers: every reader ended a pass and then another one.
   for (const sourceName of Object.keys(sourceAffects)) {
     expect(lastEnds.has(sourceName), `${sourceName} ended no pass`).toBe(true);
