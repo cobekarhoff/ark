@@ -12,7 +12,11 @@ export type SideUse = (SuiteUse & { cached?: true }) | { cached: true };
  * its own keys only (see `updateResources`).
  */
 export type ResourcesFile = {
-  suites?: Record<string, { head?: SideUse; base?: SideUse }>;
+  /**
+   * `pristine`: a full refactor run only, the wall time of the base commit's own test files (the census) beside `head` and
+   * `base`, which both time the head's test files. It has no `peak_mb`, so `resourcesMetrics` skips it. Absent when the census failed or did not run.
+   */
+  suites?: Record<string, { head?: SideUse; base?: SideUse; pristine?: { wall_s: number } }>;
   /** By Orca terminal handle: the largest memory and the largest cumulative CPU time seen. */
   agents?: Record<string, { peak_mb: number; cpu_s: number }>;
   /** Spans of an open run with no hub sample. */
