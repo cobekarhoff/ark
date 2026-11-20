@@ -129,7 +129,7 @@ gates answered:
   criteria accept by human
   plan approve by auto
 last test: passed
-merge requests: none
+merge requests: not opened yet
 cost: $5.20 (17196569 tokens)
 ```
 
