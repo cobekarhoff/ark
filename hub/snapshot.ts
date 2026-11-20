@@ -1082,7 +1082,7 @@ export function createSnapshotReader() {
       return session ? usage.transcriptResult(file, session.harness, callId) : null;
     },
     /**
-     * The conversation of one run or of a window, built in the usage worker thread from the last good inbox read. Waits only for the
+     * The conversation of one run or of a window, built in the usage worker thread from the last good inbox read. Waits at most 250 ms for the
      * first read of a connected page. Null when no read has succeeded (no page connected, or Orca down), or for a run with no events.
      */
     async conversation(query: ConversationQuery): Promise<ConversationReply | null> {

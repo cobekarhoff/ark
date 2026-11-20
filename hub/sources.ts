@@ -264,6 +264,8 @@ export function createArkReader() {
         plan,
         repos,
         windows: stepWindows(events),
+        metrics:
+          state.phase === "closed" ? await signatureOfAsync(join(directory, "metrics.json")) : null,
       };
       runCache.set(directory, { signature, run });
       return run;
