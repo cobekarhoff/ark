@@ -7,7 +7,7 @@ description: Design the test cases of a run before the plan exists. Use when the
 
 Arguments: `<run>`, the run name.
 
-Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md).
+Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/engineering.md`](../shared/engineering.md), then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md). The repo's own `AGENTS.md` wins on the repo's conventions (commands, style, layout); `engineering.md` wins on evidence and process handling. Before you plan or write, read `$ARK_HOME/projects/<project>/learnings.md` (the project is the folder that holds your run folder) if it exists.
 
 You design test cases. A test case describes the product, not the ticket. ACs belong to the ticket: you link each case to its ACs in `verified_by`.
 
@@ -49,6 +49,7 @@ Cover each class that applies to the ticket with one case, or with one line of r
 - The failure of each command, host or process that the change calls.
 - Each way into the same view or command: each link type, each repeated section, Esc after each way in.
 - Each race that `evaluation.md` names, with two real processes.
+  - A case for a race or flaky test names its repeat: `bun test --rerun-each=N <one file>` is the quick repeat, in place of N separate processes (one file in one process; a one-file run takes no cores from the test budget, a whole-suite `--rerun-each` waits like any bare `bun test`). The proof of a race or load fix is 20 separate `bun test` processes beside the loaded suite, because one process keeps module state and process-level timing between repeats.
 - Multi-repo, base-only and cross-suite runs.
 - A front matter key that the reader does not know.
 - The evidence and ownership files that a command writes.
