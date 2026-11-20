@@ -14,7 +14,7 @@ export default defineConfig({
   testDir: "test/pw",
   testMatch: "**/*.pw.ts",
   fullyParallel: true,
-  workers: 2,
+  workers: process.env.CI ? 4 : 2,
   retries: 0,
   // Slow Linux CI runners timed out the Bun.WebView tests (ARK-180, ARK-235).
   timeout: 60_000,
