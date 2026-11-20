@@ -621,11 +621,17 @@ export async function readOrca(
     );
   };
   // Each run spawns two Orca commands in one tick; a spawn blocks the loop, so launch them in
-  // slices with a yield between (ARK-606). The reads still run together once launched.
+  // slices with a yield between (ARK-606). The reads still run together once launched. A read that
+  // rejects while the loop waits in a yield has no other handler yet, so each read gets its own:
+  // the failure marks the pass failed, as `read()` would have caught it at base.
   const yieldIfLong = yielder();
   const reads: Promise<void>[] = [];
   for (const openRun of openRuns) {
-    reads.push(readRun(openRun));
+    reads.push(
+      readRun(openRun).catch(() => {
+        failed = true;
+      }),
+    );
     await yieldIfLong();
   }
   await Promise.all(reads);

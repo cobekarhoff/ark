@@ -154,6 +154,8 @@ if [ -e "$S/orca.fail" ]; then
   esac
   [ -n "$failKey" ] && grep -qxF -- "$failKey" "$S/orca.fail" && exit 1
 fi
+# A line "<verb> <orca run id>" of orca.null (ARK-T735, worker-list or task-list) answers {"result":null}: exit 0, no rows.
+if [ -e "$S/orca.null" ] && grep -qxF -- "$2 $orcaRunId" "$S/orca.null"; then echo '{"result":null}'; exit 0; fi
 case "$1 $2" in
   "terminal switch") echo '{"result":{}}' ;;
   "orchestration run-list") cat "$S/orca.runs" ;;
@@ -1698,4 +1700,32 @@ test("ARK-T735 When the fake orca fails run-list, inbox, or worker-list or task-
   );
   hub.child.kill("SIGTERM");
   await hub.exited;
+
+  // Steps 8 and 9: a pass large enough to yield between launches, where one run answers worker-list with no result.
+  // That read rejects while the launch loop still waits in a yield; the hub must stay up and read the source not ok.
+  const manyRuns = Array.from({ length: 150 }, (_, number) => {
+    const run = `${today()}-ARK-${4000 + number}-1`;
+    writeRun({
+      project,
+      run,
+      ticket: { id: `ARK-${4000 + number}`, title: `Many ${number}` },
+      phase: "building",
+    });
+    return run;
+  });
+  const many = orcaHome({ runs: manyRuns, workers: 1, messages: 1, perRun: true });
+  fake.set("orca.terminals", many.terminals);
+  fake.set("orca.inbox", many.inbox);
+  for (const [file, text] of Object.entries({ ...many.light, ...many.load })) fake.set(file, text);
+  fake.set("orca.runs", many.runList);
+  fake.set("orca.null", manyRuns.map((run) => `worker-list ${many.orcaRunOf(run)}\n`).join(""));
+  const noResultHub = await startHub({ interval: 2000 });
+  openPage(noResultHub);
+  await healthProber(noResultHub).untilOrcaPasses(2);
+  expect(
+    (await snapshotOf(noResultHub)).sources.orca.ok,
+    "worker-list with no result: sources.orca.ok",
+  ).toBe(false);
+  noResultHub.child.kill("SIGTERM");
+  await noResultHub.exited;
 }, 60_000);
