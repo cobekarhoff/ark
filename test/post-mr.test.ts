@@ -289,11 +289,13 @@ function git(directory: string, ...args: string[]): string {
 /**
  * ARK-599, opt-in load condition: every git ref update waits `seconds`, in this process and in each `ark` and `git`
  * child (a reference-transaction hook through GIT_CONFIG_*, the shape of syncDelaySeconds in test/sync.test.ts), so a
- * test that sits near the 30 s default limit on a quiet host runs past it. Off unless a test asks. The hook is appended
- * after the entries of test/tmpdir-preload.ts, and the `afterEach` below takes it out again.
+ * test that sits near the 30 s default limit on a quiet host runs past it. Off unless ARK_T142_REF_DELAY=1 is set, so
+ * a normal run, CI and `ark test` pay no sleep. The hook is appended after the entries of test/tmpdir-preload.ts, and
+ * the `afterEach` below takes it out again.
  */
 let gitConfigCountBeforeDelay: string | undefined;
 function slowRefUpdates(seconds: number): void {
+  if (process.env.ARK_T142_REF_DELAY !== "1") return;
   const hooksDirectory = mkdtempSync(join(tmpdir(), "ark-ref-hooks-"));
   const hook = join(hooksDirectory, "reference-transaction");
   writeFileSync(hook, `#!/bin/sh\n[ "$1" = prepared ] && sleep ${seconds}\nexit 0\n`);
