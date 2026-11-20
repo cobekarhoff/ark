@@ -1,4 +1,5 @@
-import { beforeEach, expect, setDefaultTimeout, test } from "bun:test";
+import type { Subprocess } from "bun";
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -6,12 +7,14 @@ import {
   mkdtempSync,
   rmSync,
   readFileSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { tempArkHome, tempGitRepo, writeProject } from "./helpers";
+import { type FakeProcess, fakeProcesses } from "./fake-ps";
+import { isLive, tempArkHome, tempGitRepo, writeProject } from "./helpers";
 
 // ARK-292: bun resets the default timeout per file, so each file sets it.
 setDefaultTimeout(30_000);
@@ -319,6 +322,273 @@ test("ARK-T193 temp-cleaner treats an empty, non-numeric or unreadable owner fil
   } finally {
     owner.kill();
   }
+});
+
+// --- ARK-569: the cleaner stops an orphaned bun test worker, by its pid, 10 minutes after it first saw it orphaned ---
+
+// The workers are real `sleep` children of this test; a fake `ps` and `lsof` give each pid the parent, command and
+// working folder the case names (a real orphan needs a double fork, which ARK-T708 does). Age comes from the cleaner's
+// first-seen record `<state dir>/temp-cleaner.orphans`, one line `<pid> <epoch seconds>` each, never from sleeping.
+const sleepers: Subprocess[] = [];
+afterEach(() => {
+  // Only the sleepers this file started, by pid.
+  for (const sleeper of sleepers.splice(0)) sleeper.kill();
+});
+
+const workerCommand =
+  "/Users/dev/.bun/bin/bun test --test-worker --isolate --timeout=5000 --preload /repo/test/tmpdir-preload.ts";
+const endedPidOutsideAnyTable = 4_194_303;
+
+/** Resolves when the sleeper has ended; rejects with its pid after 5 s, the guard against a worker the cleaner left alone. */
+async function stopped(sleeper: Subprocess): Promise<void> {
+  const deadline = Promise.withResolvers<never>();
+  AbortSignal.timeout(5_000).addEventListener("abort", () =>
+    deadline.reject(new Error(`pid ${sleeper.pid} was not stopped`)),
+  );
+  await Promise.race([sleeper.exited, deadline.promise]);
+}
+
+function orphanScratch() {
+  const workspace = tempGitRepo();
+  const scratch = mkdtempSync(join(tmpdir(), "ark-scratch-tmp-"));
+  const stateDirectory = mkdtempSync(join(tmpdir(), "ark-state-"));
+  const stateFile = join(stateDirectory, "temp-cleaner.orphans");
+  const processes = fakeProcesses();
+  const rows: FakeProcess[] = [];
+  const folder = (...parts: string[]) => {
+    const directory = join(scratch, ...parts);
+    mkdirSync(directory, { recursive: true });
+    return directory;
+  };
+  /** A real child with a table row; `command` defaults to a bun test worker, `parentPid` to pid 1. */
+  const worker = (
+    workingFolder: string | undefined,
+    options: { parentPid?: number; command?: string } = {},
+  ) => {
+    const sleeper = Bun.spawn(["sleep", "300"]);
+    sleepers.push(sleeper);
+    rows.push({
+      pid: sleeper.pid,
+      parentPid: options.parentPid ?? 1,
+      command: options.command ?? workerCommand,
+      workingFolder,
+    });
+    return sleeper;
+  };
+  /** Writes the first-seen record: each pid first seen that many seconds ago. */
+  const firstSeen = (secondsAgo: Record<number, number>) => {
+    const now = Math.floor(Date.now() / 1000);
+    writeFileSync(
+      stateFile,
+      Object.entries(secondsAgo)
+        .map(([pid, ago]) => `${pid} ${now - ago}`)
+        .join("\n") + "\n",
+    );
+  };
+  const recorded = () => (existsSync(stateFile) ? readFileSync(stateFile, "utf8") : "");
+  const clean = (environment: Record<string, string> = {}) => {
+    processes.set(rows);
+    return runScript("temp-cleaner.sh", [workspace, "1", "--once"], {
+      TMPDIR: scratch,
+      ARK_STATE_DIR: stateDirectory,
+      PATH: `${processes.bin}:${bin}:${process.env.PATH}`,
+      ...processes.environment,
+      ...environment,
+    });
+  };
+  return { scratch, folder, worker, rows, processes, firstSeen, recorded, clean };
+}
+
+test("ARK-T705 temp-cleaner stops an orphaned bun test worker on the first pass 10 minutes after it first saw it orphaned, not before", async () => {
+  const cleaner = orphanScratch();
+  const worker = cleaner.worker(cleaner.folder("bun-test-x", "ark-repo-y"));
+
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+  expect(cleaner.recorded()).toContain(String(worker.pid));
+
+  // 10 s under the limit, not 1 s: the stamp has second precision and the script reads the clock a little later.
+  cleaner.firstSeen({ [worker.pid]: 590 });
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+
+  cleaner.firstSeen({ [worker.pid]: 600 });
+  expect(cleaner.clean().code).toBe(0);
+  await stopped(worker);
+});
+
+test("ARK-T705 temp-cleaner stops no worker with a live parent, no bun run without --test-worker, no process that is not bun, no worker outside the test temp roots, and stops one in a nested root", async () => {
+  const cleaner = orphanScratch();
+  const inRoot = cleaner.folder("bun-test-x", "ark-repo-y");
+  const outsideFolders = [
+    "/",
+    homedir(),
+    // A string prefix of $TMPDIR is not inside it.
+    join(`${cleaner.scratch}-other`, "bun-test-x", "ark-repo-y"),
+    // Inside $TMPDIR, but not under a temp root folder.
+    join(cleaner.scratch, "unrelated", "ark-repo-y"),
+  ];
+  mkdirSync(outsideFolders[2]!, { recursive: true });
+  mkdirSync(outsideFolders[3]!, { recursive: true });
+  const controls = [
+    cleaner.worker(inRoot, { parentPid: process.pid }),
+    cleaner.worker(inRoot, { command: "/Users/dev/.bun/bin/bun test test/a.test.ts" }),
+    cleaner.worker(inRoot, { command: "/usr/local/bin/node script.js --test-worker" }),
+    ...outsideFolders.map((outside) => cleaner.worker(outside)),
+  ];
+  const nested = cleaner.worker(cleaner.folder("ark-suite-x", "bun-test-y", "ark-repo-z"));
+  const bare = cleaner.worker(inRoot, { command: "bun test --test-worker --isolate" });
+  cleaner.firstSeen(
+    Object.fromEntries([...controls, nested, bare].map((sleeper) => [sleeper.pid, 1200])),
+  );
+
+  expect(cleaner.clean().code).toBe(0);
+  await Promise.all([stopped(nested), stopped(bare)]);
+  for (const control of controls) expect(isLive(control.pid), `pid ${control.pid}`).toBe(true);
+});
+
+test("ARK-T705 temp-cleaner finds a worker whose working folder is spelled through a symlink of $TMPDIR, in both directions", async () => {
+  const cleaner = orphanScratch();
+  // As macOS /var is to /private/var: the same folder under two spellings.
+  const link = `${cleaner.scratch}-link`;
+  symlinkSync(cleaner.scratch, link);
+  const real = cleaner.folder("bun-test-x", "ark-repo-y");
+
+  const throughReal = cleaner.worker(real);
+  cleaner.firstSeen({ [throughReal.pid]: 600 });
+  expect(cleaner.clean({ TMPDIR: link }).code).toBe(0);
+  await stopped(throughReal);
+
+  const throughLink = cleaner.worker(join(link, "bun-test-x", "ark-repo-y"));
+  cleaner.rows.splice(0, cleaner.rows.length - 1);
+  cleaner.firstSeen({ [throughLink.pid]: 600 });
+  expect(cleaner.clean({ TMPDIR: cleaner.scratch }).code).toBe(0);
+  await stopped(throughLink);
+});
+
+test("ARK-T705 temp-cleaner starts the age when it first sees the worker orphaned, and forgets a pid that left the listing", () => {
+  const cleaner = orphanScratch();
+  const worker = cleaner.worker(cleaner.folder("bun-test-x", "ark-repo-y"), {
+    parentPid: process.pid,
+  });
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+
+  // Orphaned only now: this is the first sight, so there is no age to stop it on.
+  cleaner.rows[0]!.parentPid = 1;
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+  expect(cleaner.recorded()).toContain(String(worker.pid));
+
+  // The pid leaves the listing (the worker ended): its record goes, so a process that reuses the pid starts at age 0.
+  cleaner.firstSeen({ [worker.pid]: 1200 });
+  const row = cleaner.rows.pop()!;
+  expect(cleaner.clean().code).toBe(0);
+  expect(cleaner.recorded()).not.toContain(String(worker.pid));
+  cleaner.rows.push(row);
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+});
+
+test("ARK-T705 temp-cleaner leaves a pid alone whose command line changed between the listing and the kill", async () => {
+  const cleaner = orphanScratch();
+  const worker = cleaner.worker(cleaner.folder("bun-test-x", "ark-repo-y"));
+  cleaner.firstSeen({ [worker.pid]: 1200 });
+
+  // `ps -p <pid>` right before the kill names another command: the pid was taken over. The sleeper itself stays.
+  cleaner.processes.recheckAs(worker.pid, "/usr/bin/vim notes.txt");
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+
+  // Control: the same pass with an unchanged command line stops it, so the recheck alone spared it.
+  cleaner.firstSeen({ [worker.pid]: 1200 });
+  cleaner.processes.recheckAs(worker.pid, null);
+  expect(cleaner.clean().code).toBe(0);
+  await stopped(worker);
+});
+
+test("ARK-T705 temp-cleaner finishes its pass, removes the aged folders and prunes when ps, lsof or kill fails", async () => {
+  const cleaner = orphanScratch();
+  const ended = `${await endedPid()}\n`;
+  const agedFolder = (name: string) => {
+    const directory = cleaner.folder(name);
+    writeFileSync(join(directory, "ark-owner.pid"), ended);
+    const old = new Date(Date.now() - 13 * 60_000);
+    utimesSync(directory, old, old);
+    return directory;
+  };
+  const worker = cleaner.worker(cleaner.folder("bun-test-x", "ark-repo-y"));
+  cleaner.firstSeen({ [worker.pid]: 1200 });
+
+  cleaner.processes.psFails();
+  const noPs = agedFolder("bun-test-no-ps");
+  expect(cleaner.clean().code).toBe(0);
+  expect(existsSync(noPs)).toBe(false);
+  expect(isLive(worker.pid)).toBe(true);
+  cleaner.processes.psFails(false);
+
+  cleaner.processes.lsofFails();
+  const noLsof = agedFolder("bun-test-no-lsof");
+  expect(cleaner.clean().code).toBe(0);
+  expect(existsSync(noLsof)).toBe(false);
+  expect(isLive(worker.pid)).toBe(true);
+  cleaner.processes.lsofFails(false);
+
+  // `kill` fails on the first row (no such process); the pass goes on and stops the next one.
+  cleaner.rows.unshift({
+    pid: endedPidOutsideAnyTable,
+    parentPid: 1,
+    command: workerCommand,
+    workingFolder: cleaner.folder("bun-test-x", "ark-repo-y"),
+  });
+  cleaner.firstSeen({ [endedPidOutsideAnyTable]: 1200, [worker.pid]: 1200 });
+  const noKill = agedFolder("bun-test-no-kill");
+  expect(cleaner.clean().code).toBe(0);
+  expect(existsSync(noKill)).toBe(false);
+  await stopped(worker);
+});
+
+test("ARK-T705 temp-cleaner stops the worker before it removes the aged temp root that holds its working folder", async () => {
+  const cleaner = orphanScratch();
+  const root = cleaner.folder("bun-test-x");
+  const worker = cleaner.worker(cleaner.folder("bun-test-x", "ark-repo-y"));
+  writeFileSync(join(root, "ark-owner.pid"), `${await endedPid()}\n`);
+  const old = new Date(Date.now() - 13 * 60_000);
+  utimesSync(root, old, old);
+  cleaner.firstSeen({ [worker.pid]: 1200 });
+  // A fake rm records the state of the worker at the moment the root is removed, then removes it.
+  const rmBin = mkdtempSync(join(tmpdir(), "ark-fake-rm-"));
+  const log = join(rmBin, "worker-state");
+  writeFileSync(
+    join(rmBin, "rm"),
+    `#!/bin/sh
+for argument; do
+  case "$argument" in
+    *bun-test-x*)
+      i=0
+      while [ $i -lt 20 ]; do
+        state=$(/bin/ps -o stat= -p ${worker.pid} 2>/dev/null)
+        case "$state" in ""|Z*) break ;; esac
+        sleep 0.1
+        i=$((i + 1))
+      done
+      echo "\${state:-gone}" >> "${log}"
+      break ;;
+  esac
+done
+exec /bin/rm "$@"
+`,
+  );
+  chmodSync(join(rmBin, "rm"), 0o755);
+
+  const result = cleaner.clean({
+    PATH: `${rmBin}:${cleaner.processes.bin}:${bin}:${process.env.PATH}`,
+  });
+
+  expect(result.code).toBe(0);
+  await stopped(worker);
+  expect(existsSync(root)).toBe(false);
+  expect(readFileSync(log, "utf8").trim()).toMatch(/^(gone|Z)/);
 });
 
 // --- ARK-281: the auto-merger waits for retro.md and skips a PR whose ticket is not live ---
