@@ -363,7 +363,7 @@ Rules for the plan:
 
     When a point cannot be checked, the file says `inconclusive` and names the gap.
 
-  - `refactor`: the suites must pass at the base commit. `ark test` runs them there on every run (as it does for every `kind`), records `base_passed` and exits 1 when they fail. `ark merge-request open` refuses unless `base_passed` and the last head test both passed. Plan no step for it.
+  - `refactor`: the suites must pass at the base commit. `ark test` runs them there on every run (as it does for every `kind`), records `base_passed` and exits 1 when they fail. It also records the wall time of the base commit's own test files (the census) beside the head's, as `pristine_s` and `head_s` of `suites[]` in `test.completed`, so a refactor can show a test-time saving against base. `ark merge-request open` refuses unless `base_passed` and the last head test both passed. Plan no step for it.
   - `feature`: no extra step.
 
 Then check it:

@@ -168,7 +168,7 @@ const quickStatus = (status: Status, quick: boolean): Status =>
 
 type Suite = ProjectConfig["suites"][number];
 
-/** `census`: the run's own test files that exist at the pristine base commit, run only to list and count their tests. */
+/** `census`: the pristine base, run to list and count its tests and, for a refactor run, to time the base's own test files. */
 type Side = "base" | "head" | "census";
 /** What one side knows of a case: the winning result of every suite that carries it, and the suites that did. */
 type CaseEntry = {
@@ -199,6 +199,8 @@ type SideRun = {
   listed: Map<string, TestResult[]>;
   /** A pre-run side: its logs go to `prerun-<suite>.log`, its evidence to a folder that is removed, and it writes no row in `resources.json`. */
   throwaway?: boolean;
+  /** Wall seconds of each passed suite command that ran or was replayed with its stored figure (read for the census). */
+  wallSeconds: Map<string, number>;
 };
 
 /** A test that the base has and the head lacks. `file` is absent when the report names none. */
@@ -214,6 +216,7 @@ const newSide = (side: Side): SideRun => ({
   flaky: [],
   redOnMain: [],
   listed: new Map(),
+  wallSeconds: new Map(),
 });
 
 const countStatus = (results: TestResult[], status: TestResult["status"]) =>
@@ -373,6 +376,9 @@ type SuiteRecord = {
   reused?: boolean;
   flaky?: string[];
   failed_files?: string[];
+  /** A full refactor run only: wall seconds of the head's and of the pristine base's whole suite. Absent when unknown. */
+  head_s?: number;
+  pristine_s?: number;
 };
 
 /** The failed files of each suite in the run's last `test.completed` event, whatever its mode; empty when there is none or it passed. A suite row without `failed_files` has none. */
@@ -514,6 +520,7 @@ async function runSuite(
         code: 0,
         failedFiles: [] as string[],
         load: { start: null, peak: null },
+        wall_s: cached.wall_s,
       };
     }
     // ARK-390: a cached suite takes no cores; a suite that runs waits for its cores in the host budget.
@@ -533,10 +540,12 @@ async function runSuite(
       },
       true,
     );
+    // the suite command only: not a retry or a main check that follows it
+    const wall_s = Math.round((Date.now() - started) / 100) / 10;
     if (sideRun.side !== "census" && !sideRun.throwaway)
       recordSide(resultsDirectory, suite.name, sideRun.side, {
         ...outcome.use!,
-        wall_s: Math.round((Date.now() - started) / 100) / 10,
+        wall_s,
         wait_s: Math.round(taken.waitMilliseconds / 100) / 10,
       });
     let output = outcome.stdout + outcome.stderr;
@@ -606,7 +615,7 @@ async function runSuite(
       storeCached(
         cache.project,
         cache.key,
-        { results, output, log, flaky, ...(redOnMain.length > 0 ? { redOnMain } : {}) },
+        { results, output, log, flaky, wall_s, ...(redOnMain.length > 0 ? { redOnMain } : {}) },
         scratch,
       );
     return {
@@ -617,6 +626,7 @@ async function runSuite(
       reused: false,
       code: outcome.code,
       load: { start: loadSampler.start, peak: loadSampler.stop() },
+      wall_s,
     };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -1062,7 +1072,7 @@ async function runAtBase(
           copyHeadTests(join(mirror, repo), join(root, repo), copied.get(repo)!);
       for (const { suite, command, files, cache } of keyed[index]!) {
         checkBase();
-        const { results, passed, reused } = await runSuite(
+        const { results, passed, reused, wall_s } = await runSuite(
           suite,
           join(root ?? "", suite.repo),
           phase.directory,
@@ -1074,6 +1084,9 @@ async function runAtBase(
           cache,
         );
         phase.run.listed.set(suite.name, results);
+        // a failed census may be a partial run: no figure
+        if (phase.run.side === "census" && passed && wall_s !== undefined)
+          phase.run.wallSeconds.set(suite.name, wall_s);
         if (reused && phase.copyHead)
           console.log(`suite      ${suite.name} base  reused  base key ${cache.key.slice(0, 6)}`);
         if (phase.copyHead) allPassed &&= passed;
@@ -1297,6 +1310,8 @@ async function executeTest(
       )
     ).some(Boolean);
     const mode = quick ? "quick" : "full";
+    // ARK-598: a full refactor run records the wall time of the head's and of the pristine base's whole suite
+    const timed = state.kind === "refactor" && !quick;
     const suites: SuiteRecord[] = [];
     const headKeys = new Map<string, string>();
     // ARK-333: the exit code of each head suite, printed with a failed suite; not part of the recorded `suites`.
@@ -1407,7 +1422,7 @@ async function executeTest(
           compose: config.compose,
         });
         headKeys.set(suite.name, key.slice(0, 6));
-        const { results, passed, flaky, failedFiles, reused, code, load } = await runSuite(
+        const { results, passed, flaky, failedFiles, reused, code, load, wall_s } = await runSuite(
           suite,
           join(mirror, suite.repo),
           resultsDirectory,
@@ -1432,6 +1447,7 @@ async function executeTest(
           ...(reused ? { reused } : {}),
           ...(flaky.length > 0 ? { flaky } : {}),
           ...(failedFiles.length > 0 ? { failed_files: failedFiles } : {}),
+          ...(timed && wall_s !== undefined ? { head_s: wall_s } : {}),
         });
       }
     } finally {
@@ -1486,6 +1502,21 @@ async function executeTest(
         censusRun,
         state.kind === "refactor",
       ));
+    if (timed) {
+      for (const entry of suites) {
+        const pristine = censusRun.wallSeconds.get(entry.name);
+        if (pristine !== undefined) entry.pristine_s = pristine;
+      }
+      // a key without peak_mb: resourcesMetrics skips it, so ark retro counts no CPU twice
+      updateResources(dirname(resultsDirectory), (file) => {
+        for (const [name, sides] of Object.entries(file.suites ?? {}))
+          if (!censusRun.wallSeconds.has(name)) delete sides.pristine;
+        for (const [name, wall_s] of censusRun.wallSeconds) {
+          file.suites ??= {};
+          file.suites[name] = { ...file.suites[name], pristine: { wall_s } };
+        }
+      });
+    }
     // What the base lists comes from the pristine census alone, never from the base run, which holds the head's
     // copy of the test files. A suite with no census (only added test files, no changed test file, a quick run)
     // contributes nothing.
@@ -1538,7 +1569,7 @@ async function executeTest(
     if (!quick) console.log(`base      ${basePassed ? "passed" : "failed"}`);
     for (const suite of suites) {
       console.log(
-        `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}${suite.reused ? `  reused  head key ${headKeys.get(suite.name)}` : ""}${suite.flaky ? `  flaky: ${suite.flaky.join(", ")} (failed once, passed on retry)` : ""}`,
+        `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}${suite.head_s !== undefined ? `  head ${suite.head_s}s` : ""}${suite.pristine_s !== undefined ? `  pristine base ${suite.pristine_s}s` : ""}${suite.reused ? `  reused  head key ${headKeys.get(suite.name)}` : ""}${suite.flaky ? `  flaky: ${suite.flaky.join(", ")} (failed once, passed on retry)` : ""}`,
       );
       if (suite.passed) continue;
       // ARK-333: why the suite failed, as a failed check prints it: the exit code, the log, its last 20 lines.
