@@ -24,7 +24,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Subprocess } from "bun";
-import type { Snapshot } from "../hub/types.ts";
+import { sourceAffects, type Snapshot } from "../hub/types.ts";
 import {
   ompSessionText,
   runDirectoryOf,
@@ -619,7 +619,20 @@ const hubLinesOf = (text: string) => linesOf(text).filter((line) => /^Hub\b/.tes
 const shapeOf = (line: string) => line.replace(/\d+(?:\.\d+)?/g, "N");
 /** A Hub line of a live hub: an answer time, then a loop lag, no word stalled. */
 const isLiveLine = (line: string) => !/stalled/i.test(line) && durationsOf(line).length >= 2;
-const isStalledLine = (line: string) => /stalled/i.test(line) && !/answered/i.test(line);
+const isStalledLine = (line: string) =>
+  /stalled/i.test(line) && !/answered/i.test(line) && !/lag/i.test(line);
+/** The loop lag a live Hub line reports, in ms (the second duration of the line). */
+const lagOfLine = (line: string) => durationsOf(line)[1];
+/**
+ * Both commands run between two reads of the health route. The route's lag is the largest of a 60 s
+ * window, so it can only hold or grow in between: the lag a command prints lies between the reads.
+ */
+async function commandsBetweenReads(hub: Hub, home: string) {
+  const before = (await health(hub)).health.lag_ms!;
+  const outputs = await bothCommands(home);
+  const after = (await health(hub)).health.lag_ms!;
+  return { before, after, outputs };
+}
 
 test("ARK-T702 ark chief state and ark services status print a Hub line with the answer time and lag, say stalled after 5 s, and read a missing or dead hub as no hub, not as stalled", async () => {
   const fake = stage();
@@ -673,13 +686,17 @@ test("ARK-T702 ark chief state and ark services status print a Hub line with the
   const [lockName] = lockFiles(home);
   expect(lockName, "the hub made a lock file in its home").toBeDefined();
   await pollHealth(hub, (answer) => typeof answer.health.lag_ms === "number", 2000);
-  const live = await bothCommands(home);
+  const { before, after, outputs: live } = await commandsBetweenReads(hub, home);
   for (const output of live) {
     expect(output.code, output.err).toBe(0);
     const lines = hubLinesOf(output.out);
     expect(lines, "one Hub line").toHaveLength(1);
     expect(isLiveLine(lines[0]), lines[0]).toBe(true);
     expect(durationsOf(lines[0])[0] <= answerLimitMilliseconds, lines[0]).toBe(true);
+    expect(
+      lagOfLine(lines[0]) >= before && lagOfLine(lines[0]) <= after,
+      `${lines[0]}: the route read ${before} ms before and ${after} ms after`,
+    ).toBe(true);
   }
   expect(shapeOf(hubLinesOf(live[0].out)[0])).toBe(shapeOf(hubLinesOf(live[1].out)[0]));
   const rowsOf = (text: string) => linesOf(text).filter((line) => !/^Hub\b/.test(line));
@@ -741,11 +758,24 @@ test("ARK-T702 ark chief state and ark services status print a Hub line with the
 
   // Step 6: the hub runs again and answers again.
   process.kill(hub.pid, "SIGCONT");
-  for (const output of await bothCommands(home)) {
+  // The hub's timer saw the freeze: the route reports a lag of about the stall, and both commands print it.
+  const recovered = await pollHealth(
+    hub,
+    (answer) => (answer.health.lag_ms ?? 0) >= stallLimitMilliseconds - 1000,
+    2000,
+  );
+  const frozenLag = recovered.health.lag_ms!;
+  const afterFreeze = await commandsBetweenReads(hub, home);
+  expect(afterFreeze.before >= frozenLag).toBe(true);
+  for (const output of afterFreeze.outputs) {
     expect(output.code, output.err).toBe(0);
     const lines = hubLinesOf(output.out);
     expect(lines).toHaveLength(1);
     expect(isLiveLine(lines[0]), lines[0]).toBe(true);
+    expect(
+      lagOfLine(lines[0]) >= frozenLag && lagOfLine(lines[0]) <= afterFreeze.after,
+      `${lines[0]}: the route read ${frozenLag} ms after the freeze and ${afterFreeze.after} ms after the commands`,
+    ).toBe(true);
   }
 
   // Step 2: a lock of a dead hub (the hub that ended, its port closed) reads as no hub.
@@ -921,6 +951,8 @@ type Probe = {
   count: number;
   answered: number;
   slowest: number;
+  /** The number of the request (from 1) that was the slowest, to tell a first read from a steady one. */
+  slowestRequest: number;
   /** Statuses that are right before the first read of the data this route depends on. */
   pending: number[];
   settled: boolean;
@@ -976,6 +1008,7 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
         count: 0,
         answered: 0,
         slowest: 0,
+        slowestRequest: 0,
         pending: options.pending ?? [],
         settled: false,
         wrong: [],
@@ -989,8 +1022,10 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
       body: options.body,
     });
     const text = await response.text();
-    record.slowest = Math.max(record.slowest, performance.now() - started);
     record.count += 1;
+    const took = performance.now() - started;
+    if (took > record.slowest) record.slowestRequest = record.count;
+    record.slowest = Math.max(record.slowest, took);
     if (response.status === 200) {
       record.answered += 1;
       record.settled = true;
@@ -1009,6 +1044,27 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   const lastEnds = new Map<string, number>();
   const run = encodeURIComponent(openRun);
   const base = `/api/run/${run}`;
+  const plannedProbes = [
+    "GET /",
+    "GET /assets/*",
+    "GET /api/snapshot",
+    "GET /api/resources/history",
+    "GET /api/companions",
+    "GET /api/health",
+    "GET /api/conversation",
+    "GET /api/conversation/message/*",
+    "GET /api/run/<open>",
+    "GET /api/run/<closed>",
+    "GET /api/run/<open>/conversation",
+    "GET /api/run/<open>/transcript",
+    "GET /api/run/<open>/transcript/result",
+    "GET /api/run/<open>/file",
+    "GET /api/run/<open>/evidence",
+    "GET /api/run/<open>/image",
+    "GET /api/ticket/<project>/<ticket>",
+    "GET /api/ticket/<project>/<ticket>/cases",
+    "POST /api/open-in-orca",
+  ];
   const deadline = performance.now() + soakMilliseconds;
   while (performance.now() < deadline) {
     const index = await probe("GET /", "/");
@@ -1085,6 +1141,11 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   }
 
   const results = [...probes.values()];
+  // Every planned probe was built: a fixture that cannot supply a message id or an asset fails here, by name.
+  expect(
+    plannedProbes.filter((label) => !probes.has(label)),
+    "planned probes never built",
+  ).toEqual([]);
   // Every route answered, within 1 s at every probe, with the status of a valid request.
   expect(
     results.filter((entry) => entry.answered === 0).map((entry) => entry.label),
@@ -1099,18 +1160,24 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   expect(
     results
       .filter((entry) => entry.slowest > answerLimitMilliseconds)
-      .map((entry) => `${entry.label}: ${Math.round(entry.slowest)} ms`),
+      .map(
+        (entry) =>
+          `${entry.label}: ${Math.round(entry.slowest)} ms at request ${entry.slowestRequest} of ${entry.count}`,
+      ),
     "routes slower than 1 s",
   ).toEqual([]);
   // No pass held the loop for more than 200 ms, as the hub reports it.
   expect(largestLag <= lagLimitMilliseconds, `the largest loop lag was ${largestLag} ms`).toBe(
     true,
   );
-  // Speed was not bought by stopping the readers: each source that ended a pass ended another one.
-  for (const name of ["providerLimits", "github"])
-    expect(lastEnds.has(name), `${name} ended no pass`).toBe(true);
-  for (const [name, last] of lastEnds)
-    expect(last > firstEnds.get(name)!, `${name} ended one pass in 120 s`).toBe(true);
+  // Speed was not bought by stopping the readers: every reader ended a pass and then another one.
+  for (const sourceName of Object.keys(sourceAffects)) {
+    expect(lastEnds.has(sourceName), `${sourceName} ended no pass`).toBe(true);
+    expect(
+      lastEnds.get(sourceName)! > firstEnds.get(sourceName)!,
+      `${sourceName} ended one pass in 120 s`,
+    ).toBe(true);
+  }
   // Nor by dropping data: a cost is the fixture's or unknown, never a smaller number.
   const snapshot = await snapshotOf(hub);
   if (snapshot.runs !== "unknown")
