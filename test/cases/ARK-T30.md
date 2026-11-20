@@ -46,7 +46,8 @@ Expected: If a test that starts a run or builds a scenario through `startRun(`, 
   - Deleting `submoduleRun(`: fixture 2's names check turns red; fixture 4 exits 0, so its refusal check turns red.
   - Deleting `openRun(`: fixture 2 still exits non-zero (its other two tests have no limit), only its names check turns red; fixture 6 stops naming `beta loop without a limit`. Fixtures 3 and 4 do not call `openRun(` and do not change.
   - Deleting the constant resolution (a name reads as 0): fixture 3's `limit 10000` check turns red and fixture 5 exits non-zero (`timeout: LONG` reads 0). Fixture 4 stays refused.
-  - Reading the first `timeout:` of the whole chunk (no per-test split): fixture 6 exits 0 for `alpha`, or stops naming it, so its names check turns red.
+  - Splitting only at the top-level `^test(` (no split of loop-declared tests): fixture 6 is one chunk, `alpha` and both loops. That chunk reads gamma's `30_000`, so nothing is flagged and the child exits 0. Three assertions turn red: the non-zero exit, the `alpha borrows a later limit` name and the `beta loop without a limit` name.
+  - Deleting the definition cut (a chunk ends at a helper definition): fixture 5 exits non-zero, because the `scenario(` in the `testedRun()` body is read into the chunk of the pure test before it and that test is flagged. Its `1 pass` check turns red.
 
 ## Screenshot checkpoints
 
