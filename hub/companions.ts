@@ -2,7 +2,8 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from
 import { join } from "node:path";
 import { now } from "../cli/clock.ts";
 import { companionDirectory, isRunning, type WorkerRecord } from "../cli/companions.ts";
-import { loadConfig, type ProjectConfig } from "../cli/config.ts";
+import type { ProjectConfig } from "../cli/config.ts";
+import { hubConfig, primeHubConfig } from "./config.ts";
 import { execResult } from "../cli/exec.ts";
 import {
   findChiefRun,
@@ -221,8 +222,9 @@ export async function readCompanions(usage: UsageIndex): Promise<CompanionsReply
   const projects: CompanionsProject[] = [];
   for (const project of listProjects()) {
     if (!existsSync(join(projectDirectory(project), "ark.yml"))) continue;
+    await primeHubConfig(project); // the config of a request is not older than the file
     try {
-      const configuration = loadConfig(project);
+      const configuration = hubConfig(project);
       if (configuration.companions) loaded.push({ project, configuration });
     } catch (error) {
       projects.push({ project, error: (error as Error).message });
@@ -292,7 +294,7 @@ function companionOf(body: Record<string, unknown>): {
   if (!listProjects().includes(project)) throw new HubRefusal(404, `no project ${project}`);
   let companions: ProjectConfig["companions"];
   try {
-    companions = loadConfig(project).companions;
+    companions = hubConfig(project).companions;
   } catch (error) {
     throw new HubRefusal(409, (error as Error).message);
   }
@@ -335,6 +337,7 @@ export async function writeCompanion(
   action: CompanionWrite,
   body: Record<string, unknown>,
 ): Promise<{ ok: true }> {
+  if (listProjects().includes(String(body.project))) await primeHubConfig(String(body.project));
   const { project, name, directory } = companionOf(body);
   if (action === "approve") {
     const id = stringField(body, "id");

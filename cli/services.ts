@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { installAgent, launchctl, plistPath, removeAgent } from "./agent.ts";
@@ -121,6 +121,57 @@ export function servicesStatusText(project: string): string {
     .join("\n");
 }
 
-export function servicesStatus(inProject: string | undefined): void {
-  console.log(servicesStatusText(resolveProject(inProject)));
+const hubProbeMilliseconds = 5000;
+
+/** The port of each live hub in `ARK_HOME`: its `hub-<hash>.lock` holds `{pid, port}` (hub/lock.ts), one per clone. */
+function liveHubPorts(): number[] {
+  const home = arkHome();
+  if (!existsSync(home)) return [];
+  return readdirSync(home)
+    .filter((name) => /^hub-[0-9a-f]+\.lock$/.test(name))
+    .flatMap((name) => {
+      try {
+        const held = JSON.parse(readFileSync(join(home, name), "utf8")) as {
+          pid: number;
+          port: number;
+        };
+        process.kill(held.pid, 0); // Throws for a dead pid: a stale lock is no hub.
+        return Number.isInteger(held.port) ? [held.port] : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
+/**
+ * One `Hub` line for the live hub in `ARK_HOME`: the time `GET /api/health` took to answer and the loop
+ * lag, or `stalled` when it does not answer within 5 s. No lock, a dead pid or a refused connection is
+ * no hub (a laptop without one is normal). With two live hubs (two clones), one line each.
+ */
+export async function hubLines(): Promise<string[]> {
+  const noHub = "Hub                 no hub running";
+  const lines = await Promise.all(
+    liveHubPorts().map(async (port) => {
+      const started = performance.now();
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+          signal: AbortSignal.timeout(hubProbeMilliseconds),
+        });
+        const { lag_ms } = (await response.json()) as { lag_ms: number | null };
+        const answered = Math.round(performance.now() - started);
+        return `Hub                 answered in ${answered} ms, ${lag_ms === null ? "no loop lag measured (no page connected)" : `loop lag ${lag_ms} ms`}`;
+      } catch (error) {
+        return (error as Error).name === "TimeoutError"
+          ? `Hub                 stalled: no answer in ${hubProbeMilliseconds / 1000} s on port ${port}`
+          : noHub;
+      }
+    }),
+  );
+  const found = lines.filter((line) => line !== noHub);
+  return found.length > 0 ? found : [noHub];
+}
+
+export async function servicesStatus(inProject: string | undefined): Promise<void> {
+  const project = resolveProject(inProject);
+  console.log([servicesStatusText(project), ...(await hubLines())].join("\n"));
 }

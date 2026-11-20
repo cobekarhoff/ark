@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { now } from "../cli/clock.ts";
-import { loadConfig } from "../cli/config.ts";
+import { hubConfig } from "./config.ts";
 import { waitingGate, type ArkEvent } from "../cli/events.ts";
 import { gateWaits, splitRunTime } from "../cli/time-split.ts";
 import {
@@ -17,7 +17,6 @@ import {
   readProviderLimits,
   readQueues,
   readChiefUnreads,
-  signatureOf,
   type InboxRead,
   type RunWorkers,
   type QueueRead,
@@ -91,6 +90,8 @@ const repoFactsIntervalMilliseconds = allIntervalMilliseconds || 3000;
 const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
 
 const usageTimeoutMilliseconds = 30_000;
+/** Folder watchers made between two yields to the event loop. */
+const watchBatch = 16;
 
 /** Harness and model of `roles.<role>` in the project's `ark.yml`, or null when unset or unreadable. */
 function roleConfig(
@@ -98,7 +99,7 @@ function roleConfig(
   role: "chief" | "evaluator" | "designer",
 ): { harness: string; model: string } | null {
   try {
-    return loadConfig(project).roles[role] ?? null;
+    return hubConfig(project).roles[role] ?? null;
   } catch {
     return null;
   }
@@ -115,6 +116,22 @@ const configRole = (role: string): "chief" | "evaluator" | "designer" =>
  */
 type Slot<T> = { ok: boolean; since: string | null; readAt: string | null; value: T | null };
 const emptySlot = <T>(): Slot<T> => ({ ok: false, since: null, readAt: null, value: null });
+
+/** The most recent finished pass of a source: how long it took and when it ended (ms since the epoch). */
+type Pass = { durationMilliseconds: number; endedAt: number };
+/** `GET /api/health` (ARK-533): a reader pass longer than its interval is slow; lag is null while no page is connected. */
+export type Health = {
+  lag_ms: number | null;
+  sources: Record<SourceName, { last_ms: number | null; ended_at: string | null; slow: boolean }>;
+  slow: SourceName[];
+};
+/** The event loop lag is the largest delay of a timer of this period over the last minute. */
+const lagTimerMilliseconds = 100;
+const lagWindowMilliseconds = 60_000;
+/** The hub logs a loop lag above this. */
+const lagLogMilliseconds = 1000;
+/** The longest a request waits for the first inbox read (ARK-533: every route answers within 1 s). */
+const firstConversationWaitMilliseconds = 250;
 
 const questions: Record<GateKind, (title: string) => string> = {
   criteria: (title) => `Approve the acceptance criteria for "${title}"?`,
@@ -168,6 +185,11 @@ export function createSnapshotReader() {
     chiefUnread: emptySlot<true>(),
     resources: emptySlot<ResourcesView>(),
   };
+  // Health (ARK-533), outside `slots` and `compose()` so it never makes a push. Both parts exist only while a page is connected:
+  // `pause()` clears them, so a hub with no page reports no lag and no pass.
+  const passes = new Map<SourceName, Pass>();
+  let lagSamples: { at: number; delay: number }[] = [];
+  let lagTimer: NodeJS.Timeout | undefined;
   const resourcesReader = createResourcesReader();
   const evidenceReader = createEvidenceReader();
   let githubFacts = new Map<string, MergeRequestFacts>();
@@ -176,6 +198,8 @@ export function createSnapshotReader() {
   // The latest unread read of each project, failures included: like `queueReads`, so a failing inbox is an `unavailable` entry and never a 0.
   let chiefUnreadReads: ProjectUnread[] | null = null;
   const costs = new Map<string, { key: string; cost: RunCost }>();
+  // The model of each owner's newest session, by run directory: `modelsOf` maps every session file of the run, so it is read again only when the index or the run's events moved.
+  const sessionModelsOf = new Map<string, { key: string; models: Map<string, string> }>();
   // Git facts of multi-repo runs (branch commits ahead, submodule pointers), by run directory. Read by `repoFactsLoop`, never in `viewOf`.
   // `key` is the event count: a closed run is read once; an open run's branches move without an event, so its entry is read again each tick.
   const repoFacts = new Map<string, { key: number; facts: RepoFacts }>();
@@ -204,8 +228,11 @@ export function createSnapshotReader() {
   let lastJson = "";
 
   function costOf(run: ArkRun, closed: boolean): RunCost {
-    const metrics = closed ? signatureOf(join(run.directory, "metrics.json")) : "";
-    const key = `${usage.version}|${run.state.events}|${metrics}|${slots.usage.readAt === null}`;
+    const metrics = closed ? run.metrics : "";
+    // A closed run's cost is its `metrics.json`: a new usage version never changes it (a re-read of every closed run on each version held the loop, ARK-533).
+    const key = closed
+      ? `${run.state.events}|${metrics}`
+      : `${usage.version}|${run.state.events}|${metrics}|${slots.usage.readAt === null}`;
     const known = costs.get(run.directory);
     if (known?.key === key) return known.cost;
     // Before the first full index build an open run's cost is unknown, not a partial sum.
@@ -249,12 +276,21 @@ export function createSnapshotReader() {
     }
     // A model that Orca does not report comes from the last message of the agent's session file
     // (the parse the cost already holds), then from the plan or `roles.chief`, labelled.
-    const sessionModels = usage.modelsOf(
-      run.directory,
-      run.windows,
-      Date.parse(run.events[0].time),
-      stageTimes(run.events),
-    );
+    const modelsKey = `${usage.version}|${run.state.events}`;
+    let modelsMemo = sessionModelsOf.get(run.directory);
+    if (modelsMemo?.key !== modelsKey) {
+      modelsMemo = {
+        key: modelsKey,
+        models: usage.modelsOf(
+          run.directory,
+          run.windows,
+          Date.parse(run.events[0].time),
+          stageTimes(run.events),
+        ),
+      };
+      sessionModelsOf.set(run.directory, modelsMemo);
+    }
+    const sessionModels = modelsMemo.models;
     return agents.map((agent) => {
       const owner =
         agent.step ??
@@ -569,13 +605,18 @@ export function createSnapshotReader() {
   ): Promise<void> {
     const slot = slots[name] as Slot<unknown>;
     const started = generation;
+    const began = performance.now();
     let value: unknown = null;
     try {
       value = await reader();
     } catch {
       // A failed read leaves the slot's value and shows its last good read time.
     }
-    if (started !== generation) return;
+    if (started !== generation) return; // a pass that a pause dropped is no pass
+    const durationMilliseconds = Math.round(performance.now() - began);
+    passes.set(name, { durationMilliseconds, endedAt: now() });
+    if (durationMilliseconds > intervalMilliseconds[name])
+      console.log(`slow pass: ${name} took ${durationMilliseconds} ms`);
     if (value === null) slot.ok = false;
     else {
       const time = new Date(now()).toISOString();
@@ -595,9 +636,20 @@ export function createSnapshotReader() {
 
   const readers: Record<SourceName, () => Promise<void>> = {
     ark: async () => {
-      await read("ark", () => arkReader.read());
+      await read("ark", async () => {
+        const value = await arkReader.read();
+        // What `compose()` would read on its first call is read here, a few runs at a time, so no publish holds the loop for it (ARK-533).
+        const open = value.runs.filter((run) => run.state.phase !== "closed");
+        await usage.remember(open.map((run) => run.directory));
+        for (const [index, run] of value.runs.entries()) {
+          if (run.state.phase !== "closed") continue;
+          costOf(run, true);
+          if (index % 8 === 7) await new Promise((resolve) => setImmediate(resolve));
+        }
+        return value;
+      });
       if (!running) return;
-      syncWatchers();
+      await syncWatchers();
       // A gate that this read saw wakes the Plannotator read at once, not at its next tick.
       const open = gateOpen();
       if (armed && open && !gateWasOpen) void readers.plannotator();
@@ -754,15 +806,22 @@ export function createSnapshotReader() {
 
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
   let arkSoon: ReturnType<typeof setTimeout> | undefined;
-  function syncWatchers(): void {
+  /** Yields after every few `watch` calls: the first pass on 250 run folders held the loop for 270 ms (ARK-533). A pause during a yield ends it. */
+  async function syncWatchers(): Promise<void> {
+    const started = generation;
     const wanted = new Set(arkReader.watchPaths());
     for (const [path, watcher] of watchers) {
       if (wanted.has(path)) continue;
       watcher.close();
       watchers.delete(path);
     }
+    let created = 0;
     for (const path of wanted) {
       if (watchers.has(path)) continue;
+      if (created++ % watchBatch === watchBatch - 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (generation !== started) return;
+      }
       try {
         watchers.set(
           path,
@@ -775,6 +834,20 @@ export function createSnapshotReader() {
         // No watcher for this folder: the 2 s timer still sees its changes.
       }
     }
+  }
+
+  /** One timer of 100 ms while a page is connected: how late it fires is the event loop lag. */
+  function startLagTimer(): void {
+    let expected = performance.now() + lagTimerMilliseconds;
+    lagTimer = setInterval(() => {
+      const at = performance.now();
+      const delay = Math.max(0, Math.round(at - expected));
+      expected = at + lagTimerMilliseconds;
+      while (lagSamples.length > 0 && lagSamples[0].at < at - lagWindowMilliseconds)
+        lagSamples.shift();
+      lagSamples.push({ at, delay });
+      if (delay > lagLogMilliseconds) console.log(`loop lag: ${delay} ms`);
+    }, lagTimerMilliseconds);
   }
 
   function loop(read: () => Promise<void>, intervalMilliseconds: number, started: number): void {
@@ -796,6 +869,7 @@ export function createSnapshotReader() {
   async function resume(): Promise<void> {
     if (running) return;
     running = true;
+    startLagTimer();
     const started = ++generation;
     firstArkRead = readers.ark();
     await firstArkRead;
@@ -830,6 +904,9 @@ export function createSnapshotReader() {
   function pause(): void {
     if (!running) return;
     running = false;
+    clearInterval(lagTimer);
+    lagSamples = [];
+    passes.clear();
     armed = false;
     generation++;
     for (const timer of timers) clearTimeout(timer);
@@ -853,6 +930,26 @@ export function createSnapshotReader() {
       if (slots.ark.value) return;
       await readers.ark();
       if (!slots.ark.value && firstArkRead) await firstArkRead;
+    },
+    /** What `GET /api/health` sends, from memory: the lag of the last minute and the last pass of each source. */
+    health(): Health {
+      const cutoff = performance.now() - lagWindowMilliseconds;
+      const delays = lagSamples
+        .filter((sample) => sample.at >= cutoff)
+        .map((sample) => sample.delay);
+      const sources = {} as Health["sources"];
+      const slow: SourceName[] = [];
+      for (const name of Object.keys(slots) as SourceName[]) {
+        const pass = passes.get(name);
+        const isSlow = pass !== undefined && pass.durationMilliseconds > intervalMilliseconds[name];
+        if (isSlow) slow.push(name);
+        sources[name] = {
+          last_ms: pass?.durationMilliseconds ?? null,
+          ended_at: pass ? new Date(pass.endedAt).toISOString() : null,
+          slow: isSlow,
+        };
+      }
+      return { lag_ms: delays.length === 0 ? null : Math.max(...delays), sources, slow };
     },
     stop(): void {
       stopped = true;
@@ -985,13 +1082,17 @@ export function createSnapshotReader() {
       return session ? usage.transcriptResult(file, session.harness, callId) : null;
     },
     /**
-     * The conversation of one run or of a window, built in the usage worker thread from the last good inbox read. Waits only for the
+     * The conversation of one run or of a window, built in the usage worker thread from the last good inbox read. Waits at most 250 ms for the
      * first read of a connected page. Null when no read has succeeded (no page connected, or Orca down), or for a run with no events.
      */
     async conversation(query: ConversationQuery): Promise<ConversationReply | null> {
-      if (!conversation) await conversationFirst;
+      // A cold hub waits for the first Ark read (250 runs) and the first inbox read (an Orca call, up to two seconds for the handle
+      // directory): wait a short bound for both together, then answer "no read yet" (503). The reads keep running.
+      const bound = Bun.sleep(firstConversationWaitMilliseconds);
+      if (!slots.ark.value) await Promise.race([this.ready(), bound]);
+      if (!conversation && conversationFirst) await Promise.race([conversationFirst, bound]);
       const held = conversation;
-      if (!held) return null;
+      if (!held || !slots.ark.value) return null;
       const wanted = (slots.ark.value?.runs ?? []).filter(
         (run) => query.kind === "project" || run.state.run === query.run,
       );

@@ -21,7 +21,7 @@ import {
   type WorkerRow,
 } from "./orca.ts";
 import { holdReasons, readHost, sampleCpuPercent } from "./host.ts";
-import { servicesStatusText } from "./services.ts";
+import { hubLines, servicesStatusText } from "./services.ts";
 import { readTestLock } from "./test-lock.ts";
 import { projectDirectory, resolveProject, runsDirectory } from "./paths.ts";
 
@@ -265,7 +265,7 @@ export async function chiefState(inProject?: string): Promise<void> {
     `- concurrency: ${config.concurrency} (${openRuns.length} open${unreadable.length > 0 ? `, ${unreadable.length} unreadable: ${unreadable.join(", ")}` : ""})`,
   );
 
-  sections.push("## Services", servicesStatusText(project));
+  sections.push("## Services", servicesStatusText(project), ...(await hubLines()));
 
   const interviews = join(projectDirectory(project), "interviews");
   const lastInterview = existsSync(interviews)
