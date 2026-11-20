@@ -730,6 +730,10 @@ describe("ark test checks", () => {
           { id: "AC2", method: "test", verified_by: ["FAKE-T2"] },
         ],
         testCases: [planCase("FAKE-T1"), planCase("FAKE-T2")],
+        steps: [validatorStep, implementerStep].map((step) => ({
+          ...step,
+          criteria: ["FAKE-1/AC1", "FAKE-1/AC2"],
+        })),
       };
       const commitFiles = (runDirectory: string, files: Record<string, string>) => {
         const worktree = join(runDirectory, "workspace");
