@@ -23,8 +23,6 @@ const originalPath = process.env.PATH;
 afterEach(() => {
   removeFakeOrca();
   process.env.PATH = originalPath;
-  for (const name of ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"])
-    delete process.env[name];
 });
 
 /** A building run; every step in plan.yml starts its worker through the fake Orca (ARK-359). */
@@ -291,17 +289,29 @@ function git(directory: string, ...args: string[]): string {
 /**
  * ARK-599, opt-in load condition: every git ref update waits `seconds`, in this process and in each `ark` and `git`
  * child (a reference-transaction hook through GIT_CONFIG_*, the shape of syncDelaySeconds in test/sync.test.ts), so a
- * test that sits near the 30 s default limit on a quiet host runs past it. Off unless a test asks; `afterEach` removes it.
+ * test that sits near the 30 s default limit on a quiet host runs past it. Off unless a test asks. The hook is appended
+ * after the entries of test/tmpdir-preload.ts, and the `afterEach` below takes it out again.
  */
+let gitConfigCountBeforeDelay: string | undefined;
 function slowRefUpdates(seconds: number): void {
-  const hooks = mkdtempSync(join(tmpdir(), "ark-ref-hooks-"));
-  const hook = join(hooks, "reference-transaction");
+  const hooksDirectory = mkdtempSync(join(tmpdir(), "ark-ref-hooks-"));
+  const hook = join(hooksDirectory, "reference-transaction");
   writeFileSync(hook, `#!/bin/sh\n[ "$1" = prepared ] && sleep ${seconds}\nexit 0\n`);
   chmodSync(hook, 0o755);
-  process.env.GIT_CONFIG_COUNT = "1";
-  process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
-  process.env.GIT_CONFIG_VALUE_0 = hooks;
+  gitConfigCountBeforeDelay = process.env.GIT_CONFIG_COUNT ?? "0";
+  const index = Number(gitConfigCountBeforeDelay);
+  process.env[`GIT_CONFIG_KEY_${index}`] = "core.hooksPath";
+  process.env[`GIT_CONFIG_VALUE_${index}`] = hooksDirectory;
+  process.env.GIT_CONFIG_COUNT = String(index + 1);
 }
+
+afterEach(() => {
+  if (gitConfigCountBeforeDelay === undefined) return;
+  delete process.env[`GIT_CONFIG_KEY_${gitConfigCountBeforeDelay}`];
+  delete process.env[`GIT_CONFIG_VALUE_${gitConfigCountBeforeDelay}`];
+  process.env.GIT_CONFIG_COUNT = gitConfigCountBeforeDelay;
+  gitConfigCountBeforeDelay = undefined;
+});
 
 /**
  * Repo `lib` (the upstream) and repo `app` (holds lib as the submodule libs/lib), each with a bare remote. The run has
