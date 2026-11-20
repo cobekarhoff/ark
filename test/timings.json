@@ -3,7 +3,6 @@
   "files": {
     "test/worktree-submodule.test.ts": 152789,
     "test/worker-start.test.ts": 130504,
-    "test/playwright-parallel.test.ts": 127585,
     "test/test-run.test.ts": 117926,
     "test/run.test.ts": 115997,
     "test/command-table.test.ts": 92667,

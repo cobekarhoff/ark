@@ -88,19 +88,13 @@ bun scripts/cli-reference.ts
 
 The generator rewrites only the text between `<!-- generated:commands:start -->` and `<!-- generated:commands:end -->`. A hand edit of that text fails the check named `cli-reference` and `ARK-302-AC10`; see [Ark's own check that writes](project-checks.md#arks-own-check-that-writes).
 
-The command table snapshot, `test/command-table.snapshot.json`, is regenerated with:
-
-```sh
-UPDATE_COMMAND_TABLE=1 bun test test/command-table.test.ts
-```
-
 ## `ark test --quick` and `ark test`
 
 `ark test <run>` takes a run, so it works only inside a run. `--quick` runs at head only, with no base run, and only the changed test files of the run's own commits in each suite that `paths` selects. It records `mode: quick` and is never a gate. `ark merge-request open` refuses unless the last test at head is a full `ark test <run>`. A failed check (`format:check`, `typecheck`, `lint`, old-id, plan membership) stops either run after the last check, with no suite and exit 1; `--keep-going` runs the suites anyway. See [`ark test`](../reference/cli.md#test). Outside a run, use the commands above.
 
 ## Tests
 
-- A test starts its title with its test case id, for example `ARK-T100 ...`. A test case is the file `test/cases/<id>.md`, made by `ark test-case new <KEY>` (in a git repo, or with `--run <run>`).
+- A test starts its title with its test case id, for example `ARK-T704 ...`. A test case is the file `test/cases/<id>.md`, made by `ark test-case new <KEY>` (in a git repo, or with `--run <run>`).
 - A UI test calls `checkpoint(page, "<name>")` from `test/pw/helpers.ts` before each assertion, so the screenshot exists when the assertion fails. It writes only when `ARK_EVIDENCE_DIR` is set, as `ark test` does.
 - A test that builds a git origin names its branch: `git init --initial-branch=main`, then push `HEAD:refs/heads/main`. The default branch comes from `init.defaultBranch`: `main` on a host that sets it, `master` on the Linux CI runner, so a fixture that relies on the default can pass here and fail in CI.
 - A test of a time limit sets `ARK_TEST_LIMIT_MS` (test-only, read at each call by `limitOr` in `test/helpers.ts`) to the limit of the git, ark and hub calls of the stall, and sets and restores it in `try/finally` around the stall alone. Unset, `tempGitRepo` and the `ark` of `test/worktree-submodule.test.ts` keep 45 s (`commandLimitMs`), `test/worker-start.test.ts` keeps 25 s (`processLimitMs`), and `startHub` has no limit.

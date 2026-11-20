@@ -5,8 +5,9 @@ level: integration
 technique: equivalence classes of execution mode (serial process vs parallel worker) on one Playwright-spawning test
 priority: high
 risk: bun test --parallel workers set a Jest-style worker variable that a child Playwright run inherits and refuses ("excluded from Jest test runs"), so every Playwright-spawning test passes serially and fails in parallel; or the fix covers only one spawn site and another (ark test ui suite, checkpoint tests) still fails
-status: active
-changed_by: 2026-11-07-ARK-330-1
+status: retired
+retired_reason: "the full `bun test --parallel` run of the `test` script, the pre-commit hook and CI is the guard: a Playwright-spawning test that fails in a parallel worker fails that run, and ARK-T3 and ARK-T4 of test/evidence-test-run.test.ts stay"
+changed_by: 2026-11-19-ARK-456-1
 ---
 
 ## Objective

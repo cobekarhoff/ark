@@ -41,13 +41,16 @@ for (const [tool, script] of Object.entries(cleanScanners)) {
 }
 
 // ARK-423: background `git maintenance` and `gc --auto` race the template copy and the tests' own commits.
+// ARK-456: `git init` names its branch `main` on every host, as the Linux CI runner defaults to `master`.
 // Every git process of a test inherits these through process.env.
 Object.assign(process.env, {
-  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_COUNT: "3",
   GIT_CONFIG_KEY_0: "maintenance.auto",
   GIT_CONFIG_VALUE_0: "false",
   GIT_CONFIG_KEY_1: "gc.auto",
   GIT_CONFIG_VALUE_1: "0",
+  GIT_CONFIG_KEY_2: "init.defaultBranch",
+  GIT_CONFIG_VALUE_2: "main",
 });
 
 // Removing the root after a full run can outlast bun's 5s default hook timeout.

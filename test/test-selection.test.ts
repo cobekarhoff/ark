@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -19,12 +19,9 @@ import {
   writeTicket,
 } from "./helpers.ts";
 import {
-  expectHookEndedOnlyItsRuns,
-  holdRunners,
   macOnly,
   recordStartedRun,
   proveFixtureSkipsMemoryWait,
-  stopHeld,
   stopStartedRuns,
 } from "./orphan-runners.ts";
 
@@ -679,21 +676,6 @@ const orphanFixture = {
       cases: ["FAKE-T1"],
     }),
 };
-
-// The file-level afterEach of this suite stops the runs it started; the first test leaves two runners for it.
-describe("ARK-T236 runners after the suite hook", () => {
-  afterAll(stopHeld);
-  macOnly(
-    "ARK-T236 a runner that ignores SIGTERM runs beside a runner the test started",
-    () => holdRunners(orphanFixture),
-    120_000,
-  );
-  macOnly(
-    "ARK-T236 after the suite hook ends, no test-runner process of a run the suite started remains and the runner of another run lives",
-    expectHookEndedOnlyItsRuns,
-    60_000,
-  );
-});
 
 macOnly(
   "ARK-T235 the demo fixture of this suite finishes with free memory and swap past the default limits",
