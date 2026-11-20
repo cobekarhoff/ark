@@ -1,5 +1,13 @@
 import { expect, setDefaultTimeout, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -270,6 +278,106 @@ console.log("OWNER " + JSON.stringify({ pid: process.pid, roots, content }));
     const owner = JSON.parse(output.match(/OWNER (.*)/)![1]!);
     expect(owner.roots).toHaveLength(4);
     expect(owner.content).toEqual(owner.roots.map(() => `${owner.pid}\n`));
+  },
+  { timeout: 60_000 },
+);
+
+// --- ARK-578: `bun test --rerun-each=N <file>` repeats one file in one process ---
+
+// Reads state the preload makes once per process. Every repeat of the fixture must still find all of it.
+const usesRootsAndShims = `
+import { expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+test("fixture", () => {
+  const root = process.env.TMPDIR!;
+  const host = process.env.ARK_FAKE_HOST!;
+  expect(existsSync(join(root, "ark-owner.pid"))).toBe(true);
+  expect(existsSync(join(host, "bin", "memory_pressure"))).toBe(true);
+  expect(existsSync(join(host, "bin", "sysctl"))).toBe(true);
+  expect(existsSync(join(root, "refusing-shims", "gh"))).toBe(true);
+  expect(process.env.PATH!.startsWith(join(host, "bin") + ":" + join(root, "refusing-shims"))).toBe(true);
+  const result = Bun.spawnSync(["gh", "--version"], { stdout: "pipe", stderr: "pipe" });
+  expect(result.exitCode).not.toBe(0);
+  expect(result.stdout.toString() + result.stderr.toString()).toContain("gh");
+});
+`;
+
+test(
+  "ARK-T712 bun test --rerun-each=5 on one file that uses the temp root and the shims passes 5 of 5 repeats in one process",
+  async () => {
+    const fixturePath = writeFixture("rerun-roots-and-shims", usesRootsAndShims);
+    const repeated = await runBunTest(fixturePath, scratchDirectory(), ["--rerun-each=5"]);
+    expect(repeated.exitCode, repeated.output).toBe(0);
+    expect(repeated.output).toContain(" 5 pass");
+    expect(repeated.output).toContain(" 0 fail");
+    // Control: the fix must not break the single run.
+    const single = await runBunTest(fixturePath, scratchDirectory());
+    expect(single.exitCode, single.output).toBe(0);
+    expect(single.output).toContain(" 1 pass");
+  },
+  { timeout: 60_000 },
+);
+
+// One line per repeat in the record file the case owns (outside both roots): the two root paths and whether both
+// existed while the repeat ran. With FAIL_EVERY_SECOND set, the repeat that finds an even number of earlier lines fails.
+const recordsRoots = `
+import { expect, test } from "bun:test";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+test("fixture", () => {
+  const root = process.env.TMPDIR!;
+  const host = process.env.ARK_FAKE_HOST!;
+  const record = process.env.ROOT_RECORD!;
+  const earlier = existsSync(record) ? readFileSync(record, "utf8").split("\\n").filter(Boolean).length : 0;
+  appendFileSync(record, [root, host, existsSync(root) && existsSync(host)].join("|") + "\\n");
+  if (process.env.FAIL_EVERY_SECOND && earlier % 2 === 0) expect(1).toBe(2);
+});
+`;
+
+test.each([
+  { label: "no flag", flags: [], repeats: 1, failEverySecond: false, exitCode: 0 },
+  {
+    label: "--rerun-each=5",
+    flags: ["--rerun-each=5"],
+    repeats: 5,
+    failEverySecond: false,
+    exitCode: 0,
+  },
+  {
+    label: "--rerun-each=4 with failing repeats",
+    flags: ["--rerun-each=4"],
+    repeats: 4,
+    failEverySecond: true,
+    exitCode: 1,
+  },
+])(
+  "ARK-T713 after a bun test process ends normally, with or without --rerun-each, and after repeats that fail, its bun-test-* root and its host root no longer exist ($label)",
+  async ({ flags, repeats, failEverySecond, exitCode }) => {
+    const fixturePath = writeFixture("rerun-records-roots", recordsRoots);
+    const scratch = scratchDirectory();
+    const record = join(scratchDirectory(), "roots.txt");
+    const child = spawnBunTest(fixturePath, scratch, [...flags], {
+      ROOT_RECORD: record,
+      FAIL_EVERY_SECOND: failEverySecond ? "1" : "",
+    });
+    const output =
+      (await new Response(child.stdout).text()) + (await new Response(child.stderr).text());
+    expect(await child.exited, output).toBe(exitCode);
+    if (failEverySecond) {
+      expect(output).toContain(" 2 pass");
+      expect(output).toContain(" 2 fail");
+    }
+    const lines = readFileSync(record, "utf8").split("\n").filter(Boolean);
+    expect(lines).toHaveLength(repeats);
+    // Every repeat reports the process's one pair of roots, and found both while it ran.
+    expect(new Set(lines).size).toBe(1);
+    const [root, host, presentWhileRunning] = lines[0]!.split("|");
+    expect(presentWhileRunning).toBe("true");
+    expect(dirname(root!)).toBe(realpathSync(scratch));
+    expect(root!).toMatch(/\/bun-test-[^/]+$/);
+    expect(host!).toMatch(/^\/tmp\/ark-fake-host-/);
+    expect(existsSync(root!)).toBe(false);
+    expect(existsSync(host!)).toBe(false);
   },
   { timeout: 60_000 },
 );
