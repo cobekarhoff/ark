@@ -283,11 +283,10 @@ export async function chiefState(inProject?: string): Promise<void> {
       : `${sinceInterview}${sinceInterview >= 10 ? " (due)" : ""}`;
   sections.push("## Interview", `- Closed runs since the last interview: ${interviewCount}`);
 
-  // The fake seam: a test sets these to give `ark chief state` a known CPU and load.
-  const fakeCpu = process.env.ARK_FAKE_CPU_PERCENT;
+  // The fake seam: a test sets ARK_FAKE_LOAD to give `ark chief state` a known load; the CPU seam sits in `sampleCpuPercent`.
   const fakeLoad = process.env.ARK_FAKE_LOAD;
   const host = await readHost({
-    cpuPercent: () => (fakeCpu === undefined ? sampleCpuPercent() : Number(fakeCpu)),
+    cpuPercent: sampleCpuPercent,
     ...(fakeLoad === undefined ? {} : { loadAverages: () => [0, Number(fakeLoad), 0] }),
   });
   const reasons = holdReasons(host, {
