@@ -1710,6 +1710,13 @@ describe("ark test pre-run of the failed files", () => {
       // the files first (a file that passes needs no retry), then the normal suites in the same run
       const ran = headCommands(ranSince(fixture, before));
       expect(ran).toEqual([`a files head ${aFile}`, `b files head ${bFile}`, ...normal]);
+      // the base run of the run's own test files still follows: the pre-run did not replace it
+      const baseRuns = ranSince(fixture, before).filter((line) => / base /.test(line));
+      expect(baseRuns.map((line) => line.split(" ").slice(0, 3).join(" ")).sort()).toEqual([
+        "a files base",
+        "b files base",
+        "c normal base",
+      ]);
       expect(result.out).not.toContain("the files of the last test still fail");
       expect(result.out).not.toMatch(/passed {2}reused/);
 

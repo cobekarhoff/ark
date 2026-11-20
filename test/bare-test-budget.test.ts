@@ -1359,7 +1359,7 @@ test("ARK-T707 a whole-suite bun test that a test of a single-file run starts wa
   expect(readFileSync(join(markers, "nested-code"), "utf8")).toBe("0");
 });
 
-// ARK-551: a whole-suite `bun test` takes its ticket with no mode, so it counts as `full`: it never passes a blocked
+// ARK-551: a whole-suite `bun test` passes no mode to `openTestBudget`, which defaults it to `full`: it never passes a blocked
 // full ticket, although its core fits the 6-core budget next to the 4 held cores. A serial run asks 1 core and prints
 // its waiting line on stderr.
 test("ARK-T721 a bun test with no mode does not pass a blocked full ticket whose cores do not fit, and starts once the cores are free", async () => {
