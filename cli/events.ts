@@ -113,6 +113,8 @@ export type StepWorker = {
   dispatch: string;
   terminal: string;
   harness: string;
+  /** Absent on a worker recorded before the model was. */
+  model?: string;
   session: string;
 };
 export function lastWorker(events: ArkEvent[], step: string): StepWorker | null {
