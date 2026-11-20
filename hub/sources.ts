@@ -497,129 +497,129 @@ export async function readOrca(
   const waits = new Map<string, Wait[]>();
   let failed = false;
   const readRun = async ({ run, project }: { run: string; project: string }): Promise<void> => {
-      const orcaRun = leadOf.get(run);
-      if (!orcaRun) return;
-      const [workers, tasks] = await Promise.all([
-        orcaPages<OrcaWorker>("worker-list", "workers", ["--run", orcaRun.id, "--include-remote"]),
-        orcaOrchestration<{ tasks?: OrcaTask[] }>("task-list", "--run", orcaRun.id),
-      ]);
-      if (!workers.ok || !tasks) {
-        failed = true;
-        return;
-      }
-      const titles = new Map(
-        (tasks.tasks ?? []).map((task) => [task.id, task.title ?? task.task_title]),
-      );
-      const list: Agent[] = [];
-      const chief = chiefOf(project);
-      const chiefTerminal = chief?.coordinator_handle
-        ? byHandle.get(chief.coordinator_handle)
-        : undefined;
-      if (chiefTerminal?.connected)
-        list.push({
-          role: "Master Chief",
-          harness: chiefTerminal.agentIdentity ?? null,
-          model: chiefTerminal.model ?? null,
-          title: chief!.objective ?? chief!.id,
-          step: null,
-          planned: null,
-          terminal: chief!.coordinator_handle ?? null,
-          presence: "live",
-          activity: unknownActivity,
-        });
-      const leadHandle = orcaRun.coordinator_handle;
-      const leadTerminal = leadHandle ? byHandle.get(leadHandle) : undefined;
-      const leadConnected = leadTerminal?.connected === true;
-      // Orca lists a run lead started as a worker (`structworker_*`) only in Master Chief's
-      // worker-list: it runs, but `terminal switch` cannot address it.
-      const leadRunning =
-        !leadConnected &&
-        (chiefWorkers.get(project) ?? []).some(
-          (worker) => worker.terminal === leadHandle && isLive(worker),
-        );
-      if (leadConnected || leadRunning)
-        list.push({
-          role: "run lead",
-          harness: leadTerminal?.agentIdentity ?? null,
-          model: leadTerminal?.model ?? null,
-          title: orcaRun.objective ?? orcaRun.id,
-          step: null,
-          planned: null,
-          terminal: leadHandle ?? null,
-          presence: leadConnected ? "live" : "running",
-          activity: unknownActivity,
-        });
-      // A released or disconnected worker stays in the list as `ended`: the page says
-      // "ended, not in Orca" instead of hiding it.
-      for (const worker of workers.value) {
-        const handle = worker.agentTerminalHandle ?? worker.terminal ?? null;
-        const terminal = byHandle.get(handle ?? "");
-        const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
-        const presence =
-          handle !== null && isLive(worker) && terminal?.connected === true
-            ? "live"
-            : isLive(worker)
-              ? "running"
-              : "ended";
-        list.push({
-          role: roleOfTask(title),
-          harness: terminal?.agentIdentity ?? null,
-          model: worker.projection?.provider?.model ?? terminal?.model ?? null,
-          title,
-          step: title.match(stepTask)?.[1] ?? null,
-          planned: null,
-          terminal: handle,
-          presence,
-          activity: unknownActivity,
-        });
-      }
-      agents.set(run, list);
-
-      const stepOf = (handle: string | undefined): string | null => {
-        const worker = workers.value.find(
-          (candidate) =>
-            handle !== undefined &&
-            (candidate.dispatchId === handle ||
-              candidate.terminal === handle ||
-              candidate.agentTerminalHandle === handle),
-        );
-        const title = worker ? (titles.get(worker.taskId ?? "") ?? worker.taskId) : undefined;
-        return title?.match(stepTask)?.[1] ?? null;
-      };
-      const pending = (inbox.messages ?? []).filter((message) => {
-        const sender = message.from_handle?.replace(/^dispatch:/, "");
-        const worker = workers.value.find(
-          (candidate) =>
-            sender !== undefined &&
-            (candidate.dispatchId === sender ||
-              candidate.terminal === sender ||
-              candidate.agentTerminalHandle === sender),
-        );
-        return (
-          (message.type === "question" || message.type === "escalation") &&
-          message.to_handle === `run:${orcaRun.id}` &&
-          !message.read &&
-          message.created_at &&
-          // A worker that finished no longer waits for an answer.
-          !(worker && !isLive(worker))
-        );
+    const orcaRun = leadOf.get(run);
+    if (!orcaRun) return;
+    const [workers, tasks] = await Promise.all([
+      orcaPages<OrcaWorker>("worker-list", "workers", ["--run", orcaRun.id, "--include-remote"]),
+      orcaOrchestration<{ tasks?: OrcaTask[] }>("task-list", "--run", orcaRun.id),
+    ]);
+    if (!workers.ok || !tasks) {
+      failed = true;
+      return;
+    }
+    const titles = new Map(
+      (tasks.tasks ?? []).map((task) => [task.id, task.title ?? task.task_title]),
+    );
+    const list: Agent[] = [];
+    const chief = chiefOf(project);
+    const chiefTerminal = chief?.coordinator_handle
+      ? byHandle.get(chief.coordinator_handle)
+      : undefined;
+    if (chiefTerminal?.connected)
+      list.push({
+        role: "Master Chief",
+        harness: chiefTerminal.agentIdentity ?? null,
+        model: chiefTerminal.model ?? null,
+        title: chief!.objective ?? chief!.id,
+        step: null,
+        planned: null,
+        terminal: chief!.coordinator_handle ?? null,
+        presence: "live",
+        activity: unknownActivity,
       });
-      waits.set(
-        run,
-        pending.map((message) => ({
-          step: stepOf(message.from_handle?.replace(/^dispatch:/, "")),
-          reason: `${message.type === "question" ? "asked the run lead" : "blocked"}: ${(
-            message.subject ||
-            message.body ||
-            ""
-          )
-            .trim()
-            .split("\n")[0]
-            .slice(0, 140)}`,
-          since: message.created_at!,
-        })),
+    const leadHandle = orcaRun.coordinator_handle;
+    const leadTerminal = leadHandle ? byHandle.get(leadHandle) : undefined;
+    const leadConnected = leadTerminal?.connected === true;
+    // Orca lists a run lead started as a worker (`structworker_*`) only in Master Chief's
+    // worker-list: it runs, but `terminal switch` cannot address it.
+    const leadRunning =
+      !leadConnected &&
+      (chiefWorkers.get(project) ?? []).some(
+        (worker) => worker.terminal === leadHandle && isLive(worker),
       );
+    if (leadConnected || leadRunning)
+      list.push({
+        role: "run lead",
+        harness: leadTerminal?.agentIdentity ?? null,
+        model: leadTerminal?.model ?? null,
+        title: orcaRun.objective ?? orcaRun.id,
+        step: null,
+        planned: null,
+        terminal: leadHandle ?? null,
+        presence: leadConnected ? "live" : "running",
+        activity: unknownActivity,
+      });
+    // A released or disconnected worker stays in the list as `ended`: the page says
+    // "ended, not in Orca" instead of hiding it.
+    for (const worker of workers.value) {
+      const handle = worker.agentTerminalHandle ?? worker.terminal ?? null;
+      const terminal = byHandle.get(handle ?? "");
+      const title = titles.get(worker.taskId ?? "") ?? worker.taskId ?? "worker";
+      const presence =
+        handle !== null && isLive(worker) && terminal?.connected === true
+          ? "live"
+          : isLive(worker)
+            ? "running"
+            : "ended";
+      list.push({
+        role: roleOfTask(title),
+        harness: terminal?.agentIdentity ?? null,
+        model: worker.projection?.provider?.model ?? terminal?.model ?? null,
+        title,
+        step: title.match(stepTask)?.[1] ?? null,
+        planned: null,
+        terminal: handle,
+        presence,
+        activity: unknownActivity,
+      });
+    }
+    agents.set(run, list);
+
+    const stepOf = (handle: string | undefined): string | null => {
+      const worker = workers.value.find(
+        (candidate) =>
+          handle !== undefined &&
+          (candidate.dispatchId === handle ||
+            candidate.terminal === handle ||
+            candidate.agentTerminalHandle === handle),
+      );
+      const title = worker ? (titles.get(worker.taskId ?? "") ?? worker.taskId) : undefined;
+      return title?.match(stepTask)?.[1] ?? null;
     };
+    const pending = (inbox.messages ?? []).filter((message) => {
+      const sender = message.from_handle?.replace(/^dispatch:/, "");
+      const worker = workers.value.find(
+        (candidate) =>
+          sender !== undefined &&
+          (candidate.dispatchId === sender ||
+            candidate.terminal === sender ||
+            candidate.agentTerminalHandle === sender),
+      );
+      return (
+        (message.type === "question" || message.type === "escalation") &&
+        message.to_handle === `run:${orcaRun.id}` &&
+        !message.read &&
+        message.created_at &&
+        // A worker that finished no longer waits for an answer.
+        !(worker && !isLive(worker))
+      );
+    });
+    waits.set(
+      run,
+      pending.map((message) => ({
+        step: stepOf(message.from_handle?.replace(/^dispatch:/, "")),
+        reason: `${message.type === "question" ? "asked the run lead" : "blocked"}: ${(
+          message.subject ||
+          message.body ||
+          ""
+        )
+          .trim()
+          .split("\n")[0]
+          .slice(0, 140)}`,
+        since: message.created_at!,
+      })),
+    );
+  };
   // Each run spawns two Orca commands in one tick; a spawn blocks the loop, so launch them in
   // slices with a yield between (ARK-606). The reads still run together once launched.
   const yieldIfLong = yielder();
