@@ -53,7 +53,7 @@ You need:
    2. Set it to 2.
    3. Tell Master Chief. It tests again.
 
-7. Master Chief writes `~/.ark/projects/ark/ark.yml` and validates it with `ark status`. For Ark, the file has one `bun` integration suite and every role. The keys and an example file are in [the `ark.yml` fields](../reference/cli.md#arkyml-fields).
+7. Master Chief writes `~/.ark/projects/ark/ark.yml` and validates it with `ark status`. For Ark, the file has one `bun` integration suite and every role. The keys and an example file are in [the `ark.yml` fields](../reference/cli.md#arkyml-fields). To let a quick `ark test` run only the affected tests, add a `changed_command` to a suite; [Run only the affected tests in a quick run](project-checks.md#run-only-the-affected-tests-in-a-quick-run) gives it for Bun, Jest, Vitest and pytest. A suite without one runs in full in a quick run.
 
    `generated` lists files that a command writes. When `ark worktree sync` finds conflicts only in those files, it runs the command, commits the result as the merge and succeeds, with no merge worker. Conflicts in the hand-written parts of such a file still reach a worker: the sync checks that no conflict marker is left, and aborts as before when one is. Add the list to your own `ark.yml` by hand: bootstrap does not write it.
 
@@ -84,7 +84,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
 
 4. Ark makes the workspace's own skills reachable. Clara keeps skills in `.claude/skills`, and OMP does not find them from a run's nested worktrees. `ark worktree anchor` and `ark worktree create` write `skills.customDirectories` into each nested worktree's `.omp/config.yml`, with the mirror path of each of `.claude/skills`, `.agents/skills` and `.omp/skills` that the workspace root has. Your global OMP config does not change. Master Chief only checks that each `SKILL.md` has a `description`. For Claude Code and Codex workers, the run lead passes the skill paths in each worker's prompt.
 
-5. Check the written `ark.yml`. For a meta-repo, it has one suite for each integration or E2E suite, and each suite names its repo, as `repos/platform`. Your detected values differ from Ark's. Its `command` is the runner's own command with the report path in `{report}`: `pytest` takes `--junitxml={report}`, `behave` takes `-o {report}`. The [`ark.yml` fields](../reference/cli.md#arkyml-fields) hold the keys and an example. Set the same roles as for a single repo.
+5. Check the written `ark.yml`. For a meta-repo, it has one suite for each integration or E2E suite, and each suite names its repo, as `repos/platform`. Your detected values differ from Ark's. Its `command` is the runner's own command with the report path in `{report}`: `pytest` takes `--junitxml={report}`, `behave` takes `-o {report}`. The [`ark.yml` fields](../reference/cli.md#arkyml-fields) hold the keys and an example. A suite may add a `changed_command` for the quick run, as [Run only the affected tests in a quick run](project-checks.md#run-only-the-affected-tests-in-a-quick-run) describes; a suite without one runs in full. Set the same roles as for a single repo.
 
    `ark test` runs each suite from `<run folder>/workspace/<repo>`. Before the suites it runs `docker compose --project-directory <run folder>/workspace -p <run id in lowercase> up -d --wait`, so the compose file resolves every `./repos/*` path to the run's worktrees. After the suites it runs `down`.
 
@@ -120,7 +120,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
 
    Install both once, with `brew install gitleaks` and `brew install osv-scanner`. osv-scanner reads vulnerabilities and licences from osv.dev and deps.dev, so a scan needs the network. To let a finding through, list it under `security.accepted` in `ark.yml` with a reason, as the [`ark.yml` fields](../reference/cli.md#arkyml-fields) describe.
 
-   A key that Ark does not know is an error too, and it names the nearest valid key: `merge_request is not a key; did you mean merge_requests?`. A suite `command` with no `{report}` is refused with `suites[0].command must write its JUnit report to {report}`.
+   A key that Ark does not know is an error too, and it names the nearest valid key: `merge_request is not a key; did you mean merge_requests?`. A suite `command` with no `{report}` is refused with `suites[0].command must write its JUnit report to {report}`, and a `changed_command` with no `{base}` or no `{report}` with `suites[0].changed_command must contain {base}`.
 
    A role that cannot run prints the project, each role and the reason, then exits 1. Here a role names a harness that is not installed:
 
