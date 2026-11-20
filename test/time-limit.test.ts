@@ -329,31 +329,43 @@ const overBudget = (mark: "warning" | "failure", seconds: string, budget = 10) =
   `${word(mark)}suite e2e  ${seconds}  over time_budget_s ${budget}`;
 const suiteTime = (seconds: string) => `${word("time")}suite e2e  ${seconds}`;
 
-/** What a keyless run prints that does not move with the figures: the suite, tests and criterion lines. */
-const stable = (out: string): string[] =>
-  out.split("\n").filter((line) => /^(suite|tests|criterion|deleted)\s/.test(line));
+/** The stdout of a run without its time lines: a time check only adds those, so the rest must read as in a keyless run. */
+const withoutTimeLines = (output: string): string[] =>
+  output.split("\n").filter((line) => !/^(time|slow|warning|failure)\s/.test(line));
 
 describe("ARK-T741 a full ark test judges each suite's time by its own keys", () => {
   let fixture: Fixture;
+  // The keyless run every later step is read against. Nothing in the stdout of a fresh keyless run changes from run to
+  // run in this fixture (no refactor head figure, no reuse line), so no line is dropped when two of them are compared.
+  let keyless: TestRun;
   beforeAll(() => {
     fixture = buildFixture();
     fixture.commitMarker();
-  });
-
-  test("ARK-T741 step 1: with none of the keys the output has no time line and does not depend on the times in the report", () => {
     fixture.keys({});
     fixture.report("e2e", junit(standard, 900));
-    const slow = fixture.run();
+    keyless = fixture.run();
+  });
+
+  test("ARK-T741 step 1: with none of the keys the whole output is the same whatever times the report holds", () => {
+    fixture.keys({});
     fixture.report("e2e", junit(standard.map(({ time: _time, ...spec }) => spec)));
     const untimed = fixture.run();
 
-    expect(slow.code).toBe(0);
-    expect(slow.event.passed).toBe(true);
-    expect(timeLines(slow.out)).toEqual([]);
-    expect(slow.out).not.toMatch(/time_budget_s|slow_test_s|slow_reason|not judged/);
-    expect(stable(slow.out)).toEqual(stable(untimed.out));
-    expect(stable(slow.out)).toContain("tests      3 passed, 0 skipped (base 0), 0 deleted");
+    expect(keyless.code).toBe(0);
+    expect(keyless.event.passed).toBe(true);
+    expect(timeLines(keyless.out)).toEqual([]);
+    expect(keyless.out).not.toMatch(/time_budget_s|slow_test_s|slow_reason|not judged/);
+    expect(keyless.out).toContain("tests      3 passed, 0 skipped (base 0), 0 deleted");
+    // Every line a keyless run prints starts with a prefix `ark test` printed before this ticket: a new line fails here.
+    for (const line of keyless.out.split("\n").filter((text) => text !== ""))
+      expect(line).toMatch(/^(old id|plan-membership|base|suite|tests|criterion|evidence)\s/);
+    expect(keyless.out).toContain(
+      "\nsuite      unit (unit)  passed\nsuite      e2e (e2e)  passed\n",
+    );
+    // The whole stdout, line for line, whatever the times in the report: nothing varies from run to run, so no line is dropped.
+    expect(untimed.out).toBe(keyless.out);
     expect(untimed.code).toBe(0);
+    expect(untimed.event.passed).toBe(true);
   });
 
   // Steps 2 to 10: one fresh full run each. `mark` is what the run prints and does: warn passes, fail exits 1.
@@ -455,9 +467,8 @@ describe("ARK-T741 a full ark test judges each suite's time by its own keys", ()
       if (row.code === 1)
         expect(result.err).toContain("suite e2e is over its time limit (on_over: fail)");
       else expect(result.err).not.toContain("time limit");
-      // The suite rows, the tests line and the criteria read as in a keyless run: a time check only adds lines.
-      expect(stable(result.out)).toContain("tests      3 passed, 0 skipped (base 0), 0 deleted");
-      expect(result.out).toContain("criterion  FAKE-1/AC1  passing");
+      // Everything but the time lines (suite rows, tests line, criteria, evidence) reads as in the keyless run.
+      expect(withoutTimeLines(result.out)).toEqual(withoutTimeLines(keyless.out));
       expect(result.event.suites).toEqual([
         { name: "unit", level: "unit", passed: true, loadAtStart: 0, loadPeak: 0 },
         { name: "e2e", level: "e2e", passed: true, loadAtStart: 0, loadPeak: 0 },
@@ -487,6 +498,10 @@ describe("ARK-T741 a full ark test judges each suite's time by its own keys", ()
     expect(timeLines(result.out)).toEqual([suiteTime("4 s")]);
     expect(result.out).not.toMatch(/30 s|9 s|^deleted/m);
     expect(result.out).toContain("tests      4 passed, 0 skipped (base 0), 0 deleted");
+    // The suite rows read as in the keyless run (the tests line differs: the fixture holds one more test).
+    expect(result.out.split("\n").filter((line) => /^suite\s/.test(line))).toEqual(
+      keyless.out.split("\n").filter((line) => /^suite\s/.test(line)),
+    );
     // The base side did run (and read the slower report), so the case cannot pass because the base never ran.
     expect(fixture.count("e2e", "base")).toBeGreaterThan(before);
   });
@@ -521,7 +536,7 @@ describe("ARK-T741 each suite is judged by its own keys", () => {
       slowT3("warning"),
     ]);
     expect(result.out).not.toMatch(/^failure/m);
-    expect(stable(result.out)).toEqual(stable(reference.out));
+    expect(withoutTimeLines(result.out)).toEqual(withoutTimeLines(reference.out));
   });
 
   test("ARK-T741 step 12b: a keyed suite with nothing over beside an unkeyed suite with a slow test lists nothing for either", () => {
@@ -543,7 +558,7 @@ describe("ARK-T741 each suite is judged by its own keys", () => {
     expect(timeLines(result.out)).toEqual([suiteTime("4 s")]);
     expect(result.out).not.toContain("FAKE-T5 slower  6 s");
     expect(result.out).not.toContain("20 s");
-    expect(stable(result.out)).toEqual(stable(reference.out));
+    expect(withoutTimeLines(result.out)).toEqual(withoutTimeLines(reference.out));
   });
 });
 

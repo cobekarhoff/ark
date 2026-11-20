@@ -26,10 +26,10 @@ As ARK-T741: the times come from a fixture report written by the fake suite comm
 
 ## Preconditions
 
-- The fixture of ARK-T741 (the `e2e` suite with the fake command, `head.marker` committed on the run's branch) with `slow_test_s: 2`, `on_over: fail`, no `time_budget_s`.
+- The fixture of ARK-T741 (`buildFixture` of `test/time-limit.test.ts`: the `e2e` suite with the fake command, `head.marker` committed on the run's branch; the `unit` suite has an empty report and no key) with `slow_test_s: 2`, `on_over: fail`, no `time_budget_s`.
 - Entries in `test/cases/` of the repo the suite runs in, valid case files:
   - Committed in the workspace before the run starts (so they are at the base commit and in the workspace's own checkout): `FAKE-T1` with `slow_reason: base reason`; `FAKE-T2` with no `slow_reason`.
-  - Committed on the run's branch (`commitFiles`): `FAKE-T1` changed to `slow_reason: head reason`; `FAKE-T3` added with a `slow_reason` (the test is not over the limit).
+  - Committed on the run's branch (`commit` of `buildFixture`, into the run's worktree): `FAKE-T1` changed to `slow_reason: head reason`; `FAKE-T3` added with a `slow_reason` (the test is not over the limit).
 - `ark test` reads the entries of the run's worktree (`readCaseEntries` of each repo of the mirror, as `cli/test-run.ts:1163`). The base checkout holds a head copy of the files that the run's branch added or changed under `test/`, and the old file where the branch deleted one; the workspace's own checkout holds the base files only.
 
 ## Steps
@@ -38,9 +38,9 @@ As ARK-T741: the times come from a fixture report written by the fake suite comm
 2. All four tests as in the Time source rule. Run `ark test <run>`.
 3. Same as step 2 with `on_over: warn`.
 4. A head commit changes `FAKE-T1`'s entry to `status: retired` (with its `retired_reason`). Run step 1 again.
-5. Three head commits in turn (each restores the entry first), each followed by step 1: `slow_reason: ""`; the field removed; the file deleted.
+5. Three head commits in turn, each followed by step 1; each writes the whole `FAKE-T1` entry again (or deletes the file), so no change of an earlier step stays: `slow_reason: ""`; the field removed; the file deleted.
 6. A test titled with two ids (`FAKE-T1 FAKE-T2 both`, 4 s): once with `FAKE-T2` still without a reason, and once with a head commit that gives `FAKE-T2` a reason too. Run `ark test <run>`.
-7. Two repos. The fixture of `repoFilterRun` in `test/test-run.test.ts` (ARK-416: `repos/a`, `repos/b`, both in the run), with the keyed suite in `repos/b` and the report of step 1. Run 7a: a head commit in `repos/b` gives `FAKE-T1` a reason, and `repos/a` has no `FAKE-T1`. Run 7b: `repos/b` has `FAKE-T1` with no reason, and a head commit in `repos/a` gives `FAKE-T1` a reason.
+7. Two repos. `buildFixture({ nested: true })`: the workspace holds `repos/a` and `repos/b`, two git repos, each with its own worktree in the run (the `unit` suite runs in `.`, the keyed `e2e` suite runs in `repos/b`), with `head.marker` committed in `repos/b` and the report of step 1. Run 7a: a head commit in `repos/b` gives `FAKE-T1` a reason, and `repos/a` has no `FAKE-T1`. Run 7b: a head commit in `repos/b` gives `FAKE-T1` no reason, and a head commit in `repos/a` gives `FAKE-T1` a reason.
 
 ## Expected results
 
