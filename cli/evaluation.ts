@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { wakeCompanions } from "./companions.ts";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent } from "./events.ts";
@@ -49,7 +50,7 @@ export function parseEvaluation(content: string): {
   return { blockers: lists.blockers, risks: lists.risks, surfaces };
 }
 
-export function evaluationRecord(runId: string, inProject?: string): void {
+export async function evaluationRecord(runId: string, inProject?: string): Promise<void> {
   const { project, directory } = findRun(runId, inProject);
   if (!loadConfig(project).roles.evaluator) {
     throw new ArkError(
@@ -63,4 +64,5 @@ export function evaluationRecord(runId: string, inProject?: string): void {
   console.log(
     `recorded evaluation: ${blockers.length} blocker${blockers.length === 1 ? "" : "s"}, ${risks.length} risk${risks.length === 1 ? "" : "s"}, surfaces ${surfaces.join(", ")}`,
   );
+  await wakeCompanions(project, basename(directory));
 }

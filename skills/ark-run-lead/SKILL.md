@@ -95,6 +95,8 @@ Skip this part when `ark status <run>` shows that the run has an `evaluation.rec
 
    The command refuses when `evaluation.md` has no `Blockers` list, no `Risks` list or no `Surfaces` list, or when `Surfaces` holds a value other than `web_ui`, `cli_output`, `document` and `none`. An empty `Blockers` or `Risks` list is valid. Never write the event by hand.
 
+   The command also wakes each live companion that lists `criteria.opened` when `evaluation.md` has at least one blocker. When a wake cannot be sent it prints `companion <name>: wake <trigger> for <run> not sent: <reason>` on stderr and still exits 0 with the event recorded; that line is no failure, so do not run the command again. The next `ark companions sync` sends the wake.
+
 4. Run `ark status <run>`. The phase is `awaiting_criteria` on every run, also with no blockers and a ticket with ACs: go to the criteria gate below. Never record a gate answer for the human. Carry each risk into your plan: a step, a test case or a line in `summary`. `plan.md` lists them. When `evaluation.md` says that an AC conflicts with other code or with another AC (a `Blockers` item; treat the same words under `Risks` as one), never choose a side in your plan: follow the AC text as written, or add the conflict to the criteria ask (step 2 of the criteria gate) so that the human decides.
 
 ### Criteria gate

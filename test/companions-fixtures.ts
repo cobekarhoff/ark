@@ -5,7 +5,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { dirname, join } from "node:path";
 import { now } from "../cli/clock.ts";
 import { ark, tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
-import { runDirectoryOf } from "./hub-fixtures.ts";
+import { runDirectoryOf, writeRun } from "./hub-fixtures.ts";
 import {
   installFakeCompanionTools,
   removeFakeCompanionTools,
@@ -57,6 +57,7 @@ export function scenario(companions: CompanionEntry[] | undefined): Scenario {
     roles: {
       implementer: { harness: "omp", model: "test-model" },
       validator: { harness: "omp", model: "test-model" },
+      evaluator: { harness: "omp", model: "test-model" },
       reviewer: { harness: "omp", model: "test-model" },
     },
   };
@@ -165,3 +166,16 @@ export const readCursor = (folder: string, name: string) =>
     runs: Record<string, { seq: number; time: string }>;
     ci: string[];
   };
+export const pullRequest = "https://github.com/example/app/pull/7";
+
+/** An open run in `merge_requests_open` whose MR is `pullRequest`, with its worktree at `workspace`. */
+export function openMergeRequestRun(run: string, workspace: string): void {
+  writeRun({
+    project,
+    run,
+    ticket: { id: run.slice(11, -2), title: `Ticket of ${run}` },
+    phase: "merge_requests_open",
+    mergeRequests: [{ repo: ".", url: pullRequest, number: 7 }],
+    worktrees: [{ repo: ".", path: workspace, branch: "ark/test" }],
+  });
+}

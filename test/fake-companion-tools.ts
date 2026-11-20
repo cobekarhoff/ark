@@ -38,6 +38,10 @@ const pause = (milliseconds) => {
 const [group, verb] = args;
 const word = group === "orchestration" ? verb : group + " " + verb;
 if (config.failAll || (config.failVerbs ?? []).includes(word)) fail("orca is not reachable");
+if ((config.hangVerbs ?? []).includes(word)) {
+  pause(config.hangMilliseconds ?? 8000);
+  appendFileSync(join(directory, "hung-done.jsonl"), JSON.stringify(args) + "\\n");
+}
 const workersDirectory = join(directory, "workers");
 const liveRows = () =>
   readdirSync(workersDirectory).sort().map((name) => JSON.parse(readFileSync(join(workersDirectory, name), "utf8")));
@@ -154,6 +158,10 @@ export type FakeCompanionConfig = {
   knownWorktrees: string[];
   /** Every verb exits 1: Orca is down. */
   failAll?: boolean;
+  /** These verbs (`send`, `run-list`, `worker-list`, `terminal list`) hang for `hangMilliseconds` and then log to hung-done.jsonl. A caller that gave up and killed the fake leaves no mark. Off by default. */
+  hangVerbs?: string[];
+  /** How long a hung verb holds the call. Default 8 s: longer than a few-second bound, shorter than the 10 s read timeout of cli/orca.ts. */
+  hangMilliseconds?: number;
   /** These verbs exit 1 (for example `worker-stop`). */
   failVerbs?: string[];
   /** Companion names whose `worker-start` exits 1. */
@@ -210,6 +218,8 @@ export type FakeCompanionTools = {
   setCi(mode: "pass" | "fail" | "error", failed?: string[]): void;
   /** The `gh` calls, as argument lists. */
   ghCalls(): string[][];
+  /** The hung calls that ended by themselves, as argument lists: the caller waited for them. */
+  hungDone(): string[][];
 };
 
 const flagOf = (args: string[], name: string): string | undefined =>
@@ -253,7 +263,13 @@ const handle: FakeCompanionTools = {
       args[0] === "orchestration" ? args[1] : `${args[0]} ${args[1]}`,
     ),
   clearCalls: () => {
-    for (const name of ["calls.jsonl", "started.jsonl", "delivered.jsonl", "gh-calls.jsonl"])
+    for (const name of [
+      "calls.jsonl",
+      "started.jsonl",
+      "delivered.jsonl",
+      "gh-calls.jsonl",
+      "hung-done.jsonl",
+    ])
       rmSync(join(directory, name), { force: true });
   },
   sent: () =>
@@ -291,6 +307,7 @@ const handle: FakeCompanionTools = {
   setCi: (mode, failed = []) =>
     writeFileSync(join(directory, "gh.json"), JSON.stringify({ mode, failed })),
   ghCalls: () => readLines("gh-calls.jsonl"),
+  hungDone: () => readLines("hung-done.jsonl"),
 };
 
 function writeExecutable(name: string, text: string): void {

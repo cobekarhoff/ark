@@ -1,6 +1,7 @@
 {
   "version": 1,
   "files": {
+    "test/hub-stall.test.ts": 239226,
     "test/worktree-submodule.test.ts": 152789,
     "test/worker-start.test.ts": 130504,
     "test/test-run.test.ts": 117926,
@@ -19,6 +20,7 @@
     "test/security.test.ts": 37835,
     "test/tooling.test.ts": 31506,
     "test/test-selection.test.ts": 30826,
+    "test/companions-commands.test.ts": 43618,
     "test/companions-race.test.ts": 30803,
     "test/plan.test.ts": 27991,
     "test/bare-test-budget.test.ts": 50000,

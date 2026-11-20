@@ -160,7 +160,7 @@ The default that reviewers use a different vendor from the implementers. The pla
 _Avoid_: Vendor rule
 
 **Companion**:
-An always-on helper agent that a project lists under `companions` in `ark.yml`. `ark companions sync` keeps one Orca worker alive for it in Master Chief's Run and wakes it for each new event of a trigger it lists (`run.merged`, `run.started`, `criteria.opened`, `escalation`, `ci.failed`). Its behavior is the text of its instructions file in the project folder. It writes only inside `companions/<name>/` and acts only through `ark companion advise`, `propose` and `answer`, and messages to Master Chief; it never answers a gate. The human sees it on the hub's Companions page and approves or dismisses what it proposes.
+An always-on helper agent that a project lists under `companions` in `ark.yml`. `ark companions sync` keeps one Orca worker alive for it in Master Chief's Run and wakes it for each new event of a trigger it lists (`run.merged`, `run.started`, `criteria.opened`, `escalation`, `ci.failed`). `ark run start` sends the `run.started` wake and `ark evaluation record` the `criteria.opened` wake at once; sync is the catch-up path for a wake they could not send and the path of the other triggers. Its behavior is the text of its instructions file in the project folder. It writes only inside `companions/<name>/` and acts only through `ark companion advise`, `propose` and `answer`, and messages to Master Chief; it never answers a gate. The human sees it on the hub's Companions page and approves or dismisses what it proposes.
 _Avoid_: Bot, watcher, daemon
 
 ## Planning and proof

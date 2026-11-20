@@ -69,12 +69,12 @@ export const findLiveChief = (
 };
 
 /** Reads Orca now, for an action that must not act on a 3-second-old snapshot. Null when Orca did not answer. */
-export async function readTerminals(): Promise<{
+export async function readTerminals(timeoutMilliseconds = orcaTimeout(10_000)): Promise<{
   terminals: OrcaTerminal[];
   runs: OrcaRun[];
 } | null> {
   const [runList, terminalList] = await Promise.all([
-    orcaPages<OrcaRun>("run-list", "runs", ["--full"], orcaTimeout(10_000)),
+    orcaPages<OrcaRun>("run-list", "runs", ["--full"], timeoutMilliseconds),
     execJson<{ result?: { terminals?: OrcaTerminal[] } }>(["orca", "terminal", "list", "--json"]),
   ]);
   const terminals = terminalList?.result?.terminals;
@@ -309,6 +309,8 @@ export async function sendMessage(options: {
   type?: string;
   /** The terminal handle to send as when the caller has no Orca session. */
   from?: string;
+  /** A limit shorter than the action default, for a caller that must not wait. */
+  timeoutMilliseconds?: number;
 }): Promise<OrcaRead<unknown>> {
   return orcaCommand(
     [
@@ -323,7 +325,7 @@ export async function sendMessage(options: {
       options.body,
       ...(options.type ? ["--type", options.type] : []),
     ],
-    actionTimeout(),
+    options.timeoutMilliseconds ?? actionTimeout(),
   );
 }
 
