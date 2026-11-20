@@ -6,7 +6,7 @@ technique: "boundary values (page budgets at the AC's load) with percentile samp
 priority: medium
 risk: "the 2,000-message conversation read or build blocks the main thread so `/` and `/nope` pass 200 ms p95, or a conversation request made during the builds returns a non-200 status, the early `loading` directory, fewer than 2,000 messages, fewer than 20 runs, or a read older than the cold one"
 status: active
-changed_by: 2026-11-19-ARK-512-1
+changed_by: 2026-11-20-ARK-578-1
 ---
 
 ## Objective
@@ -27,7 +27,7 @@ Prove the AC4 budgets of ARK-344 at 2,000 messages and 20 runs: `/` and `/nope` 
 5. Repeat proof of ARK-512 AC1: run the test in 20 separate processes, one after the other, with the cli suite running beside them for the whole loop.
    - `for i in $(seq 20); do bun test test/hub.test.ts -t ARK-T322 || break; done` in one terminal.
    - `bun test test --parallel=3` repeated in a second terminal until the first loop ends (the cli suite of `ark.yml`: scope `test`, 3 cores; there is no `test/cli*` file). Stop it by its own PID. Keep its log: it is the evidence that the suite ran beside every repeat.
-   - Not `--rerun-each`: the tmpdir preload removes the temp roots after repeat 1 and repeat 2 fails with ENOENT.
+   - `bun test --rerun-each=N <one file>` is the quick repeat of a flaky test (a one-file run takes no cores). It does not replace this proof: one process keeps module state and process-level timing between repeats, so a race or load fix is proved by 20 separate processes beside the loaded suite.
 
 ## Expected results
 

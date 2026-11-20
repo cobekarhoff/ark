@@ -1,9 +1,9 @@
-import { afterAll, setDefaultTimeout } from "bun:test";
+import { afterAll, beforeEach, setDefaultTimeout } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { holdTestBudget } from "../cli/bare-test-budget.ts";
+import { commandLines, holdTestBudget } from "../cli/bare-test-budget.ts";
 import { writeOwnerFile } from "../cli/owner-file.ts";
 
 // ARK-292: default for the first file only; bun resets it per file, so each test file also calls setDefaultTimeout(30_000).
@@ -11,7 +11,31 @@ setDefaultTimeout(30_000);
 
 // One root per bun test process. os.tmpdir() and child processes use it.
 // afterAll, not process "exit": exit hooks do not fire in a bun test preload.
+// `bun test --rerun-each=N <one file>` runs the file N times in this one process, and afterAll fires after every repeat,
+// so a root goes only after repeat N. The preload sees no flag in argv, so it reads its own command line once; a missing
+// flag or a failed `ps` gives N = 1, today's removal after the one run. A repeat in which no test started (the file
+// failed to load, so bun runs no repeat and fires afterAll once; or `-t` matched nothing) removes the root at once.
+// One file in one process only: `--parallel` and several files fire afterAll on other counts.
 // A killed process (SIGKILL, crash) skips afterAll and leaves its root.
+const repeatCount = Number(
+  /(?:^|\s)--rerun-each[=\s]+(\d+)(?:\s|$)/.exec(
+    commandLines([process.pid]).get(process.pid) ?? "",
+  )?.[1] ?? 1,
+);
+let testsStarted = 0;
+beforeEach(() => {
+  testsStarted += 1;
+});
+function removeAfterLastRepeat(root: string): () => void {
+  let repeatsDone = 0;
+  let startedBefore = 0;
+  return () => {
+    repeatsDone += 1;
+    const idle = testsStarted === startedBefore;
+    startedBefore = testsStarted;
+    if (idle || repeatsDone >= repeatCount) rmSync(root, { recursive: true, force: true });
+  };
+}
 const tempRoot = writeOwnerFile(mkdtempSync(join(realpathSync(tmpdir()), "bun-test-")));
 process.env.TMPDIR = tempRoot;
 
@@ -66,9 +90,7 @@ Object.assign(process.env, {
 // Removing the root after a full run can outlast bun's 5s default hook timeout.
 const cleanupTimeoutMilliseconds = 60_000;
 
-afterAll(() => {
-  rmSync(tempRoot, { recursive: true, force: true });
-}, cleanupTimeoutMilliseconds);
+afterAll(removeAfterLastRepeat(tempRoot), cleanupTimeoutMilliseconds);
 
 // Bun resolves a bare command of a spawn with no `env` against the PATH of process start, so the shims and a test's own
 // fake would be skipped. Default `env` to the live process.env.
@@ -106,9 +128,7 @@ writeFileSync(
 );
 process.env.ARK_FAKE_HOST = hostRoot;
 process.env.PATH = `${hostBin}:${process.env.PATH}`;
-afterAll(() => {
-  rmSync(hostRoot, { recursive: true, force: true });
-});
+afterAll(removeAfterLastRepeat(hostRoot));
 
 // ARK-513: a whole-suite `bun test` outside `ark test` waits for the shared test budget. After the fake host above,
 // so the memory admission inside the wait reads the healthy host a test of this repo expects.
