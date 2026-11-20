@@ -25,12 +25,12 @@ Expected: If a test that starts a run or builds a scenario through `startRun(`, 
   3. Refused, constant below the minimum: `const SHORT = 10_000;` and a test that calls `generatedScenario(` with `{ timeout: SHORT }`.
   4. Refused, unresolved name: a test that calls `submoduleRun(` with `{ timeout: MISSING }` and no `const MISSING` in the file.
   5. Passes: `const LONG = 120_000;`, a test that calls `generatedScenario(` with `{ timeout: LONG }`, one that calls `submoduleRun(` with `{ timeout: 30_000 }`, one that calls `openRun(` with `{ timeout: 120_000 }`, and a test with no helper call and no limit followed by a function `testedRun()` whose body calls `scenario(` (a helper definition between tests).
-  6. Refused, borrowed limit and loop-declared test (a chunk runs to the next top-level `test(`): a top-level test `alpha borrows a later limit` that calls `generatedScenario(` with no `{ timeout }`, followed by `for (const n of [1]) { test("gamma loop with a limit", () => { scenario(); }, { timeout: 30_000 }); }`, then a second loop `for (const n of [1]) { test("beta loop without a limit", () => { openRun(); }); }`.
+  6. Refused, borrowed limit and loop-declared test: a top-level test `alpha borrows a later limit` that calls `generatedScenario(` with no `{ timeout }`, followed by `for (const n of [1]) { test("gamma loop with a limit", () => { scenario(); }, { timeout: 30_000 }); }`, then a second loop `for (const n of [1]) { test("beta loop without a limit", () => { openRun(); }); }`.
 
 ## Steps
 
-1. Run `bun test test/timeouts.test.ts -t ARK-T31` in the repository in a child process with `ARK_LOAD_PROOF` removed. Read the exit code and the counts.
-2. For each fixture 1 to 6, write `test/fixture.test.ts` and run `bun test test/timeouts.test.ts -t ARK-T31` in the temporary folder in a child process with `ARK_LOAD_PROOF` removed. Read the exit code and the output.
+1. Run `bun test test/timeouts.test.ts -t "^ARK-T31 "` in the repository in a child process with `ARK_LOAD_PROOF` removed. Read the exit code and the counts. The pattern is anchored: the title of this case also contains "ARK-T31", and an unanchored `-t ARK-T31` selects both tests (`2 pass`).
+2. For each fixture 1 to 6, write `test/fixture.test.ts` and run `bun test test/timeouts.test.ts -t "^ARK-T31 "` in the temporary folder in a child process with `ARK_LOAD_PROOF` removed. Read the exit code and the output.
 
 ## Expected results
 
@@ -41,13 +41,14 @@ Expected: If a test that starts a run or builds a scenario through `startRun(`, 
 - Fixture 4: a non-zero exit code. The output names the test: an unresolved name fails the guard, it never passes it.
 - Fixture 5: exit code 0, `1 pass`. A named constant of 120 s and a number of exactly 30 s pass; the pure test with a helper definition after it is not flagged.
 - Fixture 6: a non-zero exit code. The output names `alpha borrows a later limit` (its own limit is missing, it never borrows the 30 s of the loop test after it) and `beta loop without a limit` (a loop-declared test is split out), and does not name `gamma loop with a limit`. The last test of fixture 2 is the last test of its file; its being named shows that a final chunk is read.
-- Negative controls, each deletion in a copy of the check and the assertion that turns red:
-  - Deleting `generatedScenario(` from the helper-name list: fixture 2's check that the output names each of the three tests turns red; fixture 3 exits 0, so its refusal and `limit 10000` checks turn red; fixture 6 stops naming `alpha borrows a later limit`.
-  - Deleting `submoduleRun(`: fixture 2's names check turns red; fixture 4 exits 0, so its refusal check turns red.
-  - Deleting `openRun(`: fixture 2 still exits non-zero (its other two tests have no limit), only its names check turns red; fixture 6 stops naming `beta loop without a limit`. Fixtures 3 and 4 do not call `openRun(` and do not change.
-  - Deleting the constant resolution (a name reads as 0): fixture 3's `limit 10000` check turns red and fixture 5 exits non-zero (`timeout: LONG` reads 0). Fixture 4 stays refused.
-  - Splitting only at the top-level `^test(` (no split of loop-declared tests): fixture 6 is one chunk, `alpha` and both loops. That chunk reads gamma's `30_000`, so nothing is flagged and the child exits 0. Three assertions turn red: the non-zero exit, the `alpha borrows a later limit` name and the `beta loop without a limit` name.
-  - Deleting the definition cut (a chunk ends at a helper definition): fixture 5 exits non-zero, because the `scenario(` in the `testedRun()` body is read into the chunk of the pure test before it and that test is flagged. Its `1 pass` check turns red.
+- Negative controls: each change below is made in a copy of the check and run against the fixtures. Where a fixture still exits non-zero after the change, it is for another reason (the guard's "at least one git-heavy test per file" check finds none), so the red assertion named is the name or limit check, not the exit code.
+  - Deleting `generatedScenario(` from the helper-name list: fixture 2's names check turns red (two of three names); fixture 3 no longer names its test nor `"timeout": 10000`; fixture 6 no longer names `alpha borrows a later limit`.
+  - Deleting `submoduleRun(`: fixture 2's names check turns red; fixture 4 no longer names its test.
+  - Deleting `openRun(`: fixture 2 still exits non-zero (its other two tests have no limit), only its names check turns red; fixture 6 no longer names `beta loop without a limit`. Fixtures 3 and 4 do not call `openRun(` and do not change.
+  - Deleting the constant resolution (a name reads as 0): fixture 3's `"timeout": 10000` check turns red (it reads `"timeout": 0`) and fixture 5 exits non-zero (`timeout: LONG` reads 0). Fixture 4 stays refused.
+  - Reverting only the first split to the top-level `^test(` (the cut at a line starting `for (` stays): alpha's chunk still ends at the first loop, so `alpha borrows a later limit` is still named; the loop-declared tests are no longer split out, so only the `beta loop without a limit` name check turns red.
+  - Reverting that split and also deleting the whole function, const, let and `for (` cut: alpha's chunk runs through both loops and reads gamma's `30_000`, so fixture 6 exits 0. The non-zero exit, the `alpha borrows a later limit` name and the `beta loop without a limit` name turn red, and fixture 5 exits non-zero (its `1 pass` turns red).
+  - Deleting the `function` alternative of the cut (a chunk ends at a helper definition): fixture 5 exits non-zero, because the `scenario(` in the `testedRun()` body is read into the chunk of the pure test before it and that test is flagged. Its `1 pass` check turns red. No fixture covers the `const`, `let` and `for (` alternatives of the cut on their own.
 
 ## Screenshot checkpoints
 

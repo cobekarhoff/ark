@@ -22,7 +22,7 @@ Expected: When a sync, merge-request or post-mr test starts a run or builds a sc
 
 ## Steps
 
-1. Run `bun test test/timeouts.test.ts -t ARK-T31`.
+1. Run `bun test test/timeouts.test.ts -t "^ARK-T31 "`. The pattern is anchored: the title of ARK-T30 also contains "ARK-T31", and an unanchored `-t ARK-T31` selects both tests.
 2. Read the exit code and the pass and skip counts.
 
 ## Expected results
