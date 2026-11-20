@@ -91,6 +91,31 @@ The pytest parser needs the `ac` marker to reach the report. Check that the suit
 
 Each suite needs a unique `name`, a `level` (`integration` or `e2e`), a `repo` (the repo path, or `.`), a `command` and a `parser`.
 
+A suite may also have a `changed_command`: a quick `ark test` runs it in place of `command`, with `{base}` set to the run's worktree base commit and `{report}` as in `command`, so the quick run runs only the tests a change can reach. A full `ark test` never runs it, and a suite without one runs in full in a quick run. Ask the human before you add one; the choice is the project's. It must contain `{base}` and `{report}`, its report must name the `file` of each test, and it must exit 0 when nothing is affected:
+
+| Runner | `changed_command`                                                                                                                                        | `parser` |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Bun    | `bun test --changed={base} --reporter=junit --reporter-outfile={report}`                                                                                 | `bun`    |
+| Jest   | `JEST_JUNIT_OUTPUT_FILE={report} JEST_JUNIT_ADD_FILE_ATTRIBUTE=true jest --changedSince={base} --passWithNoTests --reporters=jest-junit` (untested here) | `bun`    |
+| Vitest | `vitest run --changed {base} --passWithNoTests --outputFile={report}`, with the config below                                                             | `bun`    |
+| pytest | the command below, or a plugin (pytest-testmon, pytest-picked)                                                                                           | `pytest` |
+
+Vitest's JUnit reporter writes no `file` on a test unless `addFileAttribute` is on (default `false`), and only the config can set it. Without it the quick run records no files and retries no failed file. Put this in `vitest.config.ts`:
+
+```ts
+export default { test: { reporters: [["junit", { addFileAttribute: true }]] } };
+```
+
+The pytest `changed_command` (checked with pytest 8.4.2):
+
+```sh
+changed=$(git diff --name-only --diff-filter=d {base} -- '*.py' | grep test); pytest -o junit_family=xunit1 --junitxml={report} $changed
+```
+
+It selects the changed test files only, not the tests that a change to a source file reaches. When no changed file has `test` in its path, `$changed` is empty and pytest runs the whole suite. The pytest parser refuses an empty report, so exit 0 with no report is no way out; to run a cheap test file instead, add `[ -n "$changed" ] || changed=<that file>;` before `pytest`.
+
+Jest and Vitest have no parser of their own: use `parser: bun` on their JUnit report. Selection is by import graph or by changed files, so a quick run is not proof: the full run is the gate. See `docs/how-to/project-checks.md`, "Run only the affected tests in a quick run".
+
 ### Compose command
 
 Look for `docker-compose.yml`, `docker-compose.yaml`, `compose.yml` or `compose.yaml` in the workspace root, then at `Taskfile*`, `Makefile`, `package.json` scripts and the README for how the team starts the stack (`dev:up` in a Taskfile, for instance).
@@ -272,6 +297,7 @@ suites:
     command: <command with {report}>
     parser: <bun | pytest | behave>
     cores: <cores the suite takes, and the value of <cores> in its command; omit for the whole budget; for example cli 3, playwright 2, each check 1>
+    changed_command: <command with {base} and {report} that a quick ark test runs in place of command; omit to run the suite in full in a quick run>
 roles:
   implementer: { harness: <harness>, model: <model> }
   validator: { harness: <harness>, model: <model> }
@@ -286,7 +312,7 @@ roles:
 Rules for the file:
 
 - `workspace` is an existing absolute directory.
-- `suites` has at least one entry, and each `name` is unique.
+- `suites` has at least one entry, and each `name` is unique. A `changed_command` holds `{base}` and `{report}`.
 - Put `concurrency`, `round_budget` and `escalation_rounds` in only when the human asked for non-default values.
 - Keep the file valid YAML with 2-space indentation and no tabs.
 
