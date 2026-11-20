@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   rmSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -464,6 +465,70 @@ test("ARK-T705 temp-cleaner finds a worker whose working folder is spelled throu
   cleaner.firstSeen({ [throughLink.pid]: 600 });
   expect(cleaner.clean({ TMPDIR: cleaner.scratch }).code).toBe(0);
   await stopped(throughLink);
+});
+
+// ARK-594: the suite that started a worker has removed its temp folders by the time the cleaner looks, so lsof prints a
+// path that no longer exists. Each deleted path is the real path of the scratch TMPDIR plus a suffix, as the kernel prints it.
+test("ARK-T705 temp-cleaner stops an orphaned worker whose working folder, or the temp root above it, was already deleted", async () => {
+  const cleaner = orphanScratch();
+  const realScratch = realpathSync(cleaner.scratch);
+  const deletedFolders = [
+    "/bun-test-x/ark-repo-y",
+    // The ticket's shape: the suite's own root is gone too.
+    "/ark-suite-x/bun-test-y/ark-repo-z",
+    // The cwd is the deleted root folder itself, one for each root name the cleaner removes.
+    ...["ark-x", "ark179-x", "ark199-x", "plannotator-data-x", ".x.bun-chrome", "bun-test-x"].map(
+      (rootName) => `/${rootName}`,
+    ),
+  ].map((suffix) => `${realScratch}${suffix}`);
+  const workers = deletedFolders.map((folder) => cleaner.worker(folder));
+  cleaner.firstSeen(Object.fromEntries(workers.map((worker) => [worker.pid, 1200])));
+
+  expect(cleaner.clean().code).toBe(0);
+  await Promise.all(workers.map(stopped));
+});
+
+test("ARK-T705 temp-cleaner starts the age of a deleted-folder worker on the pass that first sees it, and stops it at 600 seconds", async () => {
+  const cleaner = orphanScratch();
+  const worker = cleaner.worker(
+    join(realpathSync(cleaner.scratch), "ark-suite-x", "bun-test-y", "ark-repo-z"),
+  );
+
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+  expect(cleaner.recorded()).toContain(String(worker.pid));
+
+  cleaner.firstSeen({ [worker.pid]: 590 });
+  expect(cleaner.clean().code).toBe(0);
+  expect(isLive(worker.pid)).toBe(true);
+
+  cleaner.firstSeen({ [worker.pid]: 600 });
+  expect(cleaner.clean().code).toBe(0);
+  await stopped(worker);
+});
+
+test("ARK-T705 temp-cleaner stops no worker whose deleted working folder is outside every temp root or only looks inside one", () => {
+  const cleaner = orphanScratch();
+  const realScratch = realpathSync(cleaner.scratch);
+  // None of these folders is ever created. Each is spelled so that only the guard it names keeps its worker alive.
+  const deletedFolders = [
+    // Outside every root, as "/" is for a folder that exists.
+    "/never-created/ark-repo-y",
+    join(homedir(), "never-created", "bun-test-x", "ark-repo-y"),
+    // A string prefix of the real TMPDIR is not inside it.
+    join(`${realScratch}-other`, "bun-test-x", "ark-repo-y"),
+    // Inside TMPDIR, but not under a temp root folder.
+    join(realScratch, "unrelated", "ark-repo-y"),
+    // Starts with a root name, then leaves it.
+    `${realScratch}/bun-test-x/../unrelated/ark-repo-y`,
+  ];
+  const controls = deletedFolders.map((folder) => cleaner.worker(folder));
+  // lsof knows no folder for this pid.
+  controls.push(cleaner.worker(undefined));
+  cleaner.firstSeen(Object.fromEntries(controls.map((control) => [control.pid, 1200])));
+
+  expect(cleaner.clean().code).toBe(0);
+  for (const control of controls) expect(isLive(control.pid), `pid ${control.pid}`).toBe(true);
 });
 
 test("ARK-T705 temp-cleaner starts the age when it first sees the worker orphaned, and forgets a pid that left the listing", () => {

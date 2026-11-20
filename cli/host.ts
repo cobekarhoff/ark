@@ -333,7 +333,7 @@ export function holdReasons(
 /**
  * Bun test workers (`bun test --test-worker`) whose parent is pid 1, from one `ps`; null when `ps` fails, which is
  * unknown and not none. The working folder is not read, so `ark chief state` runs no `lsof`. Memory is RSS in MB.
- * `scripts/temp-cleaner.sh` uses the same command test and adds the working folder and an age before it stops one.
+ * `scripts/temp-cleaner.sh` uses the same command test and adds the working folder (which may be deleted) and an age before it stops one.
  */
 export async function readOrphanedTestWorkers(): Promise<{
   count: number;
