@@ -3998,9 +3998,12 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
 test("ARK-T320 every message handle maps to Master Chief, a run lead, a worker with step and role, a session agent, or an unmapped agent", async () => {
   isolatedEnvironment();
   const { run, otherRun, messages, orca } = conversationFixture();
-  installFakeTools({ orca });
+  const state = installFakeTools({ orca });
+  // Slow Orca calls: the handle directory read outlasts the 2 s wait, so the first reply is the loading reply.
+  writeFileSync(join(state, "orca.sleep"), "3");
   const { baseUrl } = await start();
   const reply = await conversationWhen<ProjectReply>(baseUrl, () => true);
+  writeFileSync(join(state, "orca.sleep"), "0");
 
   // No message is dropped, whatever its handles.
   expect(new Set(allMessagesOf(reply).map((message) => message.id))).toEqual(
