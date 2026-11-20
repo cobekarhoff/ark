@@ -33,6 +33,8 @@ export type CachedSuite = {
   redOnMain?: string[];
   /** Wall seconds of the suite command, so a replay reports the figure of the run that stored it. Absent in an entry stored before ARK-598. */
   wall_s?: number;
+  /** The root `time` of the suite report, so a replay judges `time_budget_s` by the figure of the run that stored it. Absent when the report gave none, and in an entry stored before ARK-581. */
+  suite_s?: number;
 };
 
 const pruneAfterMilliseconds = 14 * 24 * 60 * 60 * 1000;
