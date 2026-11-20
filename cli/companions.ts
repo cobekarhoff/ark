@@ -177,7 +177,7 @@ async function readChiefWorkers(
     "worker-list",
     "workers",
     ["--run", chiefRun.value, "--include-remote"],
-    orcaTimeoutMilliseconds,
+    timeoutMilliseconds,
   );
   if (!workers.ok) throw new ArkError(`orca orchestration worker-list failed: ${workers.reason}`);
   return { chiefRunId: chiefRun.value, runs: runList.value, workers: workers.value };
