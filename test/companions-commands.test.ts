@@ -46,13 +46,13 @@ function startRun(ticketNumber: number, title = `Ticket ${ticketNumber}`, kind?:
 }
 
 /** Writes evaluation.md with these blockers into the run folder and runs `ark evaluation record`. */
-function recordEvaluation(run: string, blockers: string[]): Finished {
+function recordEvaluation(run: string, blockers: string[], argument = run): Finished {
   const list = blockers.map((blocker) => `- ${blocker}`).join("\n");
   writeFileSync(
     join(runDirectoryOf(project, run), "evaluation.md"),
     `## Blockers\n${list}\n\n## Risks\n\n## Surfaces\n- none\n`,
   );
-  return arkP("evaluation", "record", run);
+  return arkP("evaluation", "record", argument);
 }
 
 const blockerLine = (count: number): string =>
@@ -275,6 +275,25 @@ test("ARK-T731 ark run start and ark evaluation record with blockers wake each l
   expect(wakeLogOf(folder, "starter")).toHaveLength(4);
   // No wake of the older run: its failed check was already in the cursor.
   expect(subjectsTo(fake, folder, "starter").join("\n")).not.toContain(oldRun);
+});
+
+test("ARK-T731 ark evaluation record with the run id and a trailing slash wakes under the bare run name: no second run.started, one criteria.opened, nothing twice at the next sync", () => {
+  const { folder, fake } = startersAndMerger();
+  const k1 = startRun(701, "Start one").run;
+  expect(subjectsTo(fake, folder, "starter")).toEqual([wakeSubject("run.started", k1)]);
+
+  const evaluated = recordEvaluation(k1, ["blocker one"], `${k1}/`);
+  expect(evaluated.code).toBe(0);
+  expect(evaluated.err).toBe("");
+  expect(subjectsTo(fake, folder, "starter")).toEqual([
+    wakeSubject("run.started", k1),
+    wakeSubject("criteria.opened", k1),
+  ]);
+  sync();
+  expect(subjectsTo(fake, folder, "starter")).toHaveLength(2);
+  expect(
+    Object.keys(readCursor(folder, "starter").runs).filter((name) => name.includes(k1)),
+  ).toEqual([k1]);
 });
 
 /** Starts a process by `bun cli/ark.ts`, the way a second terminal would, and waits for it. */

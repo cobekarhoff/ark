@@ -26,7 +26,8 @@ Prove that `ark run start` and `ark evaluation record` send the companion wake t
 2. Run `ark evaluation record` for `K1` with a file that has two blockers. Read the same. Run `ark companions sync` again.
 3. Start a new run `K2` with `ark run start`, then run `ark evaluation record` for `K2` with a file whose `blockers` list is empty. Read the `send` records.
 4. Run `ark evaluation record` for `K1` again with blockers.
-5. Race, with two real processes and no fake delay: start `ark companions sync --project p` in a loop in one process and, at the same time, run `ark run start` for five new tickets one after the other in another. When both loops have ended, run one more sync and read the `send` records and `starter`'s `wake.log`. The repeat is named: `bun test --rerun-each=20` on the one file that holds the case is the quick repeat; the proof of the race is 20 separate `bun test` processes of that file beside the loaded suite (one process keeps module state and process timing between repeats).
+5. Run `ark evaluation record` for a started run with the run id and a trailing slash (`<run>/`) after `ark run start` sent its wake, then `ark companions sync`. Read the `send` records and `cursor.json`.
+6. Race, with two real processes and no fake delay: start `ark companions sync --project p` in a loop in one process and, at the same time, run `ark run start` for five new tickets one after the other in another. When both loops have ended, run one more sync and read the `send` records and `starter`'s `wake.log`. The repeat is named: `bun test --rerun-each=20` on the one file that holds the case is the quick repeat; the proof of the race is 20 separate `bun test` processes of that file beside the loaded suite (one process keeps module state and process timing between repeats).
 
 ## Expected results
 
@@ -34,7 +35,8 @@ Prove that `ark run start` and `ark evaluation record` send the companion wake t
 - Step 2: `starter` gets exactly one more `send` with the subject `Companion wake: criteria.opened <run>`; `merger` gets none; `wake.log` and the cursor moved as in step 1; stdout is the one `recorded evaluation: ...` line, as with no companion; stderr is empty. The sync that follows sends nothing for the event.
 - Step 3: the `send` records hold no message for the evaluation with no blockers.
 - Step 4: a second `criteria.opened` message for `K1` (the same as sync sends for a second evaluation with blockers), once.
-- Step 5: every one of the five runs has exactly one `run.started` message to `starter` and one `wake.log` line in all, whatever the interleaving. A command that prints a `not sent ... another sync is running` line (the sync held the lock) is allowed; the final sync then sent that wake, once. No run has two messages. Every command exited 0 with the run id alone on stdout.
+- Step 5: no second `run.started` message; one `criteria.opened` message; the sync sends nothing more; `cursor.json` holds the bare run name as the only key for the run, none with a slash.
+- Step 6: every one of the five runs has exactly one `run.started` message to `starter` and one `wake.log` line in all, whatever the interleaving. A command that prints a `not sent ... another sync is running` line (the sync held the lock) is allowed; the final sync then sent that wake, once. No run has two messages. Every command exited 0 with the run id alone on stdout.
 
 ## Screenshot checkpoints
 
