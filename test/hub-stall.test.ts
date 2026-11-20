@@ -1292,7 +1292,9 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
 // ---------------------------------------------------------------- ARK-T734 and ARK-T735
 
 /** Open runs and workers for each run of ARK-T734: the unfixed `readOrca` pass must measure over 200 ms at this size. */
-const largeRunCount = 200;
+const largeRunCount = 100;
+/** The rows of `run-list`: this host's Orca lists 273 runs, of which 4 are open Ark runs. */
+const largeListRows = 273;
 const largeWorkerCount = 20;
 /** The `--limit 200` of the inbox read of `readOrca`. */
 const largeInboxCount = 200;
@@ -1330,8 +1332,10 @@ function orcaHome(options: {
   messages: number;
   perRun?: boolean;
   edges?: boolean;
+  /** Rows of `run-list`: closed runs' Orca runs pad the list to this many, as the real list holds every run ever started. */
+  listRows?: number;
 }) {
-  const { runs, workers, messages, perRun = false, edges = false } = options;
+  const { runs, workers, messages, perRun = false, edges = false, listRows = 0 } = options;
   const runsWithWorkers = edges ? runs.slice(0, -2) : runs;
   const orcaRunOf = (run: string) => `orca-${run}`;
   // The name of run `runIndex`'s workers: the same for every run unless `perRun`.
@@ -1399,12 +1403,20 @@ function orcaHome(options: {
     objective: `Ark run ${run}`,
     coordinator_handle: `lead-${runIndex}`,
   }));
+  const closedRuns = Array.from(
+    { length: Math.max(0, listRows - orcaRuns.length - 1) },
+    (_, number) => ({
+      id: `orca-closed-${number}`,
+      objective: `Ark run closed-${number}`,
+      coordinator_handle: `lead-closed-${number}`,
+    }),
+  );
   return {
     chiefId: chiefOrcaRun.id,
     orcaRunOf,
     terminals: JSON.stringify({ result: { terminals } }),
     inbox: JSON.stringify({ result: { messages: messageRows.map((message) => message.row) } }),
-    runList: JSON.stringify({ result: { runs: [...orcaRuns, chiefOrcaRun] } }),
+    runList: JSON.stringify({ result: { runs: [...orcaRuns, ...closedRuns, chiefOrcaRun] } }),
     chiefOnlyRunList: JSON.stringify({ result: { runs: [chiefOrcaRun] } }),
     tasks,
     /** The files that answer for Master Chief and for the run with no worker: empty lists. */
@@ -1553,6 +1565,7 @@ test("ARK-T734 On a hub whose fake orca answers one pass with many open runs, ma
     workers: largeWorkerCount,
     messages: largeInboxCount,
     edges: true,
+    listRows: largeListRows,
   });
 
   // Step 1: the control. Only Master Chief's Orca run, so the pass makes its four calls and parses one inbox.
