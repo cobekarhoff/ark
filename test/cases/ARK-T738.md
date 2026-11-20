@@ -28,17 +28,19 @@ Authoring gate:
 
 ## Steps
 
+The suites are reused when the heads and the mode are the same (the cache key has no `--keep-going`). So before each run that must start the suites, make a new commit in the worktree and delete the markers.
+
 1. Run `ark test <run>` (full). Read the markers and the last `test.completed`.
-2. Delete the markers and run `ark test <run> --keep-going`.
-3. On the second fixture (one failed check), run `ark test <run> --keep-going` and read the markers.
-4. Run `ark test <run> --quick`, then `ark merge-request open <run>`. Read the exit code and stderr.
-5. Run `ark test <run>` (full) again, then `ark merge-request open <run>`.
+2. Make a new commit, delete the markers, and run `ark test <run> --keep-going`. Read the markers.
+3. On the second fixture (one failed check, fresh run), run `ark test <run> --keep-going` and read the markers.
+4. On the first fixture: make a new commit, delete the markers, run `ark test <run> --quick`, then `ark merge-request open <run>`. Read the markers, the exit code and stderr.
+5. Make a new commit, delete the markers, run `ark test <run>` (full), then `ark merge-request open <run>`. Read the markers.
 
 ## Expected results
 
-- Steps 1, 2 and 3: `unit-full` and `e2e-full` exist; `unit-changed` and `e2e-changed` never exist. `test.completed` has `mode: "full"`.
-- Step 4: the quick run wrote `unit-changed` (and not `unit-full`) and `test.completed` has `mode: "quick"`; `ark merge-request open` exits non-zero and refuses the last run because it was quick (the same refusal text as ARK-T121; this case asserts the refusal, not a new wording).
-- Step 5: the MR opens (exit 0), so the full run, which ran `command` only, is the one the gate accepts.
+- Steps 1, 2 and 3: `unit-full` and `e2e-full` exist after the run; `unit-changed` and `e2e-changed` never exist. `test.completed` has `mode: "full"`.
+- Step 4: the quick run wrote `unit-changed` and not `unit-full`; `test.completed` has `mode: "quick"`; `ark merge-request open` exits non-zero and refuses the last run because it was quick (the same refusal text as ARK-T121; this case asserts the refusal, not a new wording).
+- Step 5: `unit-full` and `e2e-full` exist and `unit-changed` does not; the MR opens (exit 0), so the full run, which ran `command` only, is the one the gate accepts.
 - The case does not assert which commit the quick run used for `{base}` (ARK-T737 owns it).
 
 ## Screenshot checkpoints
