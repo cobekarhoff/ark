@@ -6,7 +6,7 @@ technique: "equivalence classes (fixture without the keys vs with them) at a hos
 priority: high
 risk: "A demo fixture leaves the memory floor or swap ceiling at its default, so a fake `ark test` waits on a host under 20 percent free, the suite ends on its timeout, and the runner lives on; or the test passes although the floor is never read"
 status: active
-changed_by: 2026-11-18-ARK-515-1
+changed_by: 2026-11-20-ARK-586-1
 ---
 
 ## Objective
@@ -16,7 +16,7 @@ Prove the demo project that the fixture writers of `test/test-run.test.ts`, `tes
 ## Preconditions
 
 - Temp `ARK_HOME`, temp git repo, a fake run `FAKE-1` with one cheap suite whose command writes a marker file.
-- Fake host reading at the real boundary: `memory_pressure` and `sysctl vm.swapusage` on a temp `PATH` (macOS), through the `setFakeHost` helper of `test/helpers.ts`. No hook in product code for the memory reading. The 1-minute load reads 0 in both the control and the fixture runs (`ARK_FAKE_LOAD_ONE=0` from the preload, no `test_max_load` key in the fixture), so the control's wait is the memory wait and the fixture never waits on the real load of the host (ARK-T692). The case skips off macOS.
+- Fake host reading at the real boundary: `memory_pressure` and `sysctl vm.swapusage` on a temp `PATH` (macOS), through the `setFakeHost` helper of `test/helpers.ts`. No hook in product code for the memory reading. No other suite runs in the temp store in the control or the fixture runs, so the CPU hold never applies (ARK-T709) and the control's wait is the memory wait. The case skips off macOS.
 - Fake reading: 15 percent free (under the default floor 20), 12 GB swap (over the default ceiling 8 and over 10).
 
 ## Steps

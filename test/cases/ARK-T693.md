@@ -6,7 +6,7 @@ technique: "equivalence classes (a suite that ran and passed, one that ran and f
 priority: high
 risk: "A failed full test cannot be judged a load failure from the event alone (ARK-499: 15 test ids failed on load with no record), because the fields are missing, always `null`, or taken from the wrong moment; or a reused suite records the load of the old run instead of `null`; or a reader that reads a suite entry throws on an old event that has no `loadAtStart` or `loadPeak`, so the retro, the MR body or a run page of an older run breaks"
 status: active
-changed_by: 2026-11-18-ARK-515-1
+changed_by: 2026-11-20-ARK-586-1
 ---
 
 ## Objective
@@ -18,11 +18,11 @@ Gate answers:
 1. Protects the event contract of AC2 (new fields, the `null` of a reused suite) and the tolerance of the readers for the old shape.
 2. A regression that fails it: fields missing, a load of 0 or a wrong slot (5-minute) recorded, a reused suite not `null`, a reader that fails on an absent field.
 3. ARK-T135 proves the event holds suites, heads, mode and duration, and the reused flag, with no load; ARK-T163 owns the cache semantics. The load fields have no case.
-4. The seam of ARK-T692 in its file form, `ARK_FAKE_LOAD_ONE=file:<path>`: the file's number is read on every reading by the same reader the runner uses for the admission and the once-a-second sampler (it takes the reader as a parameter). The fake suite command rewrites that file while it runs, so the load changes during the suite: start 2, a middle value 9 higher than both start and final, final 3. Each of 9 and 3 stays in the file for at least two sampler ticks (2.5 s each), so the sampler reads `9` at least once and `3` at least once, and the last value read is `3`. A recorded first sample (2), last sample (3) or constant fails; only the maximum (9) passes. The case does not require the sampler to take one more reading when the suite ends: the oracle is `loadAtStart` = the first value and `loadPeak` = the middle maximum 9, with the last value sampled at least once. The case runs the real `ark test` and reads the event the runner writes; there is no export.
+4. The seam `ARK_FAKE_LOAD_ONE` in its file form, `ARK_FAKE_LOAD_ONE=file:<path>`: the file's number is read on every reading by the same reader the runner uses for the once-a-second sampler (it takes the reader as a parameter). The fake suite command rewrites that file while it runs, so the load changes during the suite: start 2, a middle value 9 higher than both start and final, final 3. Each of 9 and 3 stays in the file for at least two sampler ticks (2.5 s each), so the sampler reads `9` at least once and `3` at least once, and the last value read is `3`. A recorded first sample (2), last sample (3) or constant fails; only the maximum (9) passes. The case does not require the sampler to take one more reading when the suite ends: the oracle is `loadAtStart` = the first value and `loadPeak` = the middle maximum 9, with the last value sampled at least once. The case runs the real `ark test` and reads the event the runner writes; there is no export. The load is recorded for display only; it holds nothing (ARK-T710).
 
 ## Preconditions
 
-- Temp project and temp `ARK_HOME`, a run with two suites (one passes, one fails) and a check that passes; the fake host of ARK-T187, `test_max_load: 100`.
+- Temp project and temp `ARK_HOME`, a run with two suites (one passes, one fails) and a check that passes; the fake host of ARK-T187. No other suite runs in the store, so no hold applies.
 - `ARK_FAKE_LOAD_ONE=file:<load file>` in the environment of `ark test`, the file holding `2` before each run (the case writes it).
 - The failing suite's command writes the load file itself while it runs: `9`, holds 2.5 seconds (at least two sampler ticks, so `9` is sampled), then writes `3`, holds another 2.5 seconds (at least two ticks, so `3` is sampled at least once and is the last value read before the sampler stops), then exits 1. The passing suite is cheap and does not touch the file.
 - A second run folder whose `events.ndjson` was written by hand with a `test.completed` whose suites are `{ name, level, passed }` only (the shape of `test/merge-request.test.ts`, `test/pr-writing.test.ts` and `test/evidence-ship.test.ts`).

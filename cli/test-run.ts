@@ -1124,7 +1124,6 @@ async function executeTest(
   budget = openTestBudget(runId, config.test_budget_cores, {
     minimumFreeMemoryPercent: config.test_min_free_memory_percent,
     maximumSwapGigabytes: config.test_max_swap_gb,
-    maximumLoad: config.test_max_load,
   });
   const started = Date.now();
   try {
