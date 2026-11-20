@@ -1358,3 +1358,34 @@ test("ARK-T707 a whole-suite bun test that a test of a single-file run starts wa
   expect(readFileSync(join(markers, "nested-ran"), "utf8")).toBe("x");
   expect(readFileSync(join(markers, "nested-code"), "utf8")).toBe("0");
 });
+
+// ARK-551: a whole-suite `bun test` passes no mode to `openTestBudget`, which defaults it to `full`: it never passes a blocked
+// full ticket, although its core fits the 6-core budget next to the 4 held cores. A serial run asks 1 core and prints
+// its waiting line on stderr.
+test("ARK-T721 a bun test with no mode does not pass a blocked full ticket whose cores do not fit, and starts once the cores are free", async () => {
+  const fixture = makeFixture({ budget: 6 });
+  const holder = Bun.spawn(["sleep", "300"]);
+  const full = Bun.spawn(["sleep", "300"]);
+  started.push({ pid: holder.pid, group: false }, { pid: full.pid, group: false });
+  mkdirSync(fixture.storeDirectory(), { recursive: true });
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const ticket = (name: string, pid: number, cores: number, extra: object) =>
+    writeFileSync(
+      join(fixture.storeDirectory(), `${pid}-${name}.json`),
+      JSON.stringify({ run: `2026-01-01-${name}-1`, pid, cores, ...extra }),
+    );
+  ticket("holder", holder.pid, 4, { arrival: minutesAgo(2), started: minutesAgo(2) });
+  ticket("full", full.pid, 3, { arrival: minutesAgo(1), mode: "full" });
+
+  const run = bunTest(fixture.directory, [], environment(fixture.home));
+  await run.output.until(waitingLine, waitingLineLimit);
+  expect(fixture.ran()).toEqual([]);
+  expect(run.child.exitCode).toBeNull();
+
+  for (const sleeper of [holder, full]) {
+    sleeper.kill("SIGKILL");
+    await sleeper.exited;
+  }
+  expect(await finish(run), run.output.text).toBe(0);
+  for (const name of ["a", "b", "c"]) expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
+});
