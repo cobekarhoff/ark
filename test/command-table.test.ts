@@ -16,7 +16,7 @@ async function runArk(
   };
   delete environment.ARK_PROJECT;
   const child = Bun.spawn(["bun", join(repositoryRoot, "cli/ark.ts"), ...args], {
-    cwd: sandbox,
+    cwd: join(sandbox, "work"),
     env: environment,
     stdin: "ignore",
     stdout: "pipe",
@@ -33,6 +33,7 @@ async function runArk(
 
 test("ARK-T704 a bad call of an ark command stops in the parser with its reason and its usage, and help of a command that has a longer sibling prints its own usage", async () => {
   const sandbox = mkdtempSync(join(tmpdir(), "ark-parser-"));
+  for (const folder of ["home", "ark-home", "work"]) mkdirSync(join(sandbox, folder));
   try {
     const retroUsage = "usage: ark retro <run> [--project <name>]";
     const rejected: { args: string[]; reason: string; usage: string }[] = [
