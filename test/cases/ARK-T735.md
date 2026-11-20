@@ -40,7 +40,7 @@ No `setTimeout(`, `Bun.sleep(`, `waitForTimeout(` or `.toBeLessThan(<3 or more d
 6. Replace `orca.fail` with `worker-list <chief orca run id>`; poll twice; read the snapshot.
 7. Remove `orca.fail` and change the title of one worker's task of run 3 in `orca.tasks` by adding a note after the step id and keeping the form (`s2-1 (validator, .)` becomes `s2-1 retry (validator, .)`, so the step and the role stay). Poll twice; read the snapshot.
 8. Stop the hub with SIGTERM and await its exit.
-9. Write 150 more open runs (each with an Orca run, a run lead, one worker), list `worker-list <orca run id>` of every one of them in `orca.null`, and start a second hub with `/events` held. The pass launches its per-run reads in slices with a yield between, and a read that answers no result rejects while the launch loop still waits in a yield. Poll until the `orca` `ended_at` has advanced twice. Read `/api/snapshot`, then stop the hub with SIGTERM and await its exit.
+9. Write 150 more open runs (each with an Orca run, a run lead, one worker), list `worker-list <orca run id>` of every one of them in `orca.null`, and start a second hub with `/events` held. The fake answers those reads with `{"result":null}`, so `orcaPages` throws inside the worker of hub/orca-worker.ts. Poll until the `orca` `ended_at` has advanced twice. Read `/api/snapshot`, then stop the hub with SIGTERM and await its exit.
 
 ## Expected results
 
@@ -48,7 +48,7 @@ No `setTimeout(`, `Bun.sleep(`, `waitForTimeout(` or `.toBeLessThan(<3 or more d
 - Step 6: `sources.orca.ok` is true. The agents of run 2 hold no run lead (nothing else lists it); the agents of runs 1 and 3 and every other agent of run 2 equal `good`; the waits equal `good`.
 - Step 7: `sources.orca.ok` is true again, the run lead of run 2 is back with presence `running`, and the changed task title shows in the agent of its worker in run 3, with its step and role as before, and in no other agent.
 - Red on unfixed code: none; the case passes at base and guards the fix. The deletions that must turn it red: returning the runs that finished when one call failed (steps 2 and 3); setting the waits of a failed pass to an empty list (steps 2 to 5); failing the pass when only Master Chief's `worker-list` fails, or keeping the run lead of run 2 from a stale answer (step 6); leaving `ok` false after the call recovers (step 7).
-- Step 9: the hub is still serving after the passes (the health polls and the snapshot answer) and `sources.orca.ok` is false. A `readRun` whose rejection has no handler until `Promise.all` turns it red: the hub process exits and the polls fail with a refused connection.
+- Step 9: a throw inside the orca worker turns into a null pass (the catch of hub/orca-worker.ts posts `null`; the `onerror` and `close` handlers of `inOrcaWorker` reject for a worker that dies), so `sources.orca.ok` is false, the `orca` `ended_at` still advances and the hub keeps serving the health polls and the snapshot. Removing the catch of hub/orca-worker.ts together with the `onerror` and `close` handlers of `inOrcaWorker` turns it red: the pass never answers, `ended_at` never advances and the test times out (checked in a scratch clone of head: ARK-T735 failed at its 60 s timeout; the other steps do not throw in the worker).
 
 ## Screenshot checkpoints
 

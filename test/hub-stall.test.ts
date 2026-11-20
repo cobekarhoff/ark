@@ -1722,8 +1722,8 @@ test("ARK-T735 When the fake orca fails run-list, inbox, or worker-list or task-
   hub.child.kill("SIGTERM");
   await hub.exited;
 
-  // Steps 8 and 9: a pass large enough to yield between launches, where one run answers worker-list with no result.
-  // That read rejects while the launch loop still waits in a yield; the hub must stay up and read the source not ok.
+  // Steps 8 and 9: worker-list answers no result, so orcaPages throws inside the orca worker.
+  // The throw must become a null pass (source not ok) and the hub must keep serving.
   const manyRuns = Array.from({ length: 150 }, (_, number) => {
     const run = `${today()}-ARK-${4000 + number}-1`;
     writeRun({
