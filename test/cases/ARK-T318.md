@@ -1,12 +1,12 @@
 ---
 id: ARK-T318
-title: ARK-T318 ARK-293-AC5 with session models on the run page, / and /nope answer with a p95 under 200 ms and the page sends no request but the ones ARK-285 allows
+title: ARK-T318 with session models on the run page, / and /nope answer with a p95 under 200 ms and the page sends no request but the ones ARK-285 allows
 level: e2e
 technique: request accounting on the run page; p95 of two routes
 priority: medium
 risk: "the run page sends a request ARK-285 does not allow; `/` or `/nope` takes 200 ms or more at p95"
 status: active
-changed_by: 2026-11-12-ARK-335-1
+changed_by: 2026-11-15-ARK-493-1
 ---
 
 ## Objective
