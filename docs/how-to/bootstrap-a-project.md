@@ -167,7 +167,7 @@ A meta-repo is a workspace with a `repos/` folder of nested repos. Clara is one:
 
 Edit `~/.ark/projects/<project>/ark.yml` by hand, or run `/skill:ark-bootstrap` again and answer "edit" when it finds the file. Add lessons for run leads to `~/.ark/projects/<project>/learnings.md`, and fix `~/.ark/projects/<project>/verify.md` when the app starts or behaves differently. The [retro skill](../../skills/ark-retro/SKILL.md) proposes such changes for your approval.
 
-To add an always-on helper agent, a [companion](../../CONTEXT.md), write its instructions file under `~/.ark/projects/<project>/companions/` and list it under `companions` in `ark.yml` (name, instructions, harness, model and the events that wake it). `ark chief state` and `ark companions sync` then start it. The fields are in [The `ark.yml` fields](../reference/cli.md#arkyml-fields).
+To add an always-on helper agent, a [companion](../../CONTEXT.md), write its instructions file under `~/.ark/projects/<project>/companions/` and list it under `companions` in `ark.yml` (name, instructions, harness, model and the events that wake it). `ark chief state` and `ark companions sync` then start it; only a sync starts a worker. `ark run start` and `ark evaluation record` wake a running companion at once for `run.started` and `criteria.opened`, and the next sync sends any wake they could not send. The fields are in [The `ark.yml` fields](../reference/cli.md#arkyml-fields).
 
 ## Related
 

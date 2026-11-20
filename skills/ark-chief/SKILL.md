@@ -127,7 +127,7 @@ Do these steps in order for one ready ticket.
    ark run start $ARK_HOME/projects/<project>/tickets/<ticket id>.md
    ```
 
-   The command prints the run name. Use it as `<run>` below.
+   The command prints the run name. Use it as `<run>` below. It also wakes each live companion that lists `run.started` before it exits. When a wake cannot be sent it prints `companion <name>: wake <trigger> for <run> not sent: <reason>` on stderr and still exits 0; that is no failure, and the next `ark companions sync` sends the wake. The run name is the whole of stdout.
 
 3. **Start the run lead.** First make the run worktree, so the run lead does not start in the main workspace. You stay in the main workspace.
 
@@ -343,9 +343,9 @@ Leave out a part that has no items and say "Nothing waiting" when all three are 
 
 ## 14. Companions
 
-A companion is an always-on helper agent that `ark.yml` lists under `companions` (`docs/reference/cli.md`, "companions sync"). Ark starts it as a worker of your Orca Run and wakes it for each new event of a trigger it lists; it acts only through `ark companion advise`, `ark companion propose` and `ark companion answer`, and messages to you.
+A companion is an always-on helper agent that `ark.yml` lists under `companions` (`docs/reference/cli.md`, "companions sync"). Ark starts it as a worker of your Orca Run and wakes it for each new event of a trigger it lists: `ark run start` and `ark evaluation record` send the `run.started` and `criteria.opened` wakes at once, and `ark companions sync` is the catch-up path for the rest; it acts only through `ark companion advise`, `ark companion propose` and `ark companion answer`, and messages to you.
 
-- `ark chief state --project <project>` runs `ark companions sync` and prints its lines under `## Companions` (`running`, `started`, `stopped`, or `unavailable: <reason>`, which is unknown, not stopped). Run `ark companions sync --project <project>` by itself at every checkpoint of the supervise loop (section 7), so an event wakes a companion without a state read. A project with no `companions` shows no section.
+- `ark chief state --project <project>` runs `ark companions sync` and prints its lines under `## Companions` (`running`, `started`, `stopped`, or `unavailable: <reason>`, which is unknown, not stopped). Run `ark companions sync --project <project>` by itself at every checkpoint of the supervise loop (section 7): it starts a companion that is not running and sends the wakes that `ark run start` and `ark evaluation record` could not send, and the wakes of the other triggers (`run.merged`, `escalation`, `ci.failed`), so an event wakes a companion without a state read. A project with no `companions` shows no section.
 - A companion's digest reaches you as messages: `Companion <name> answers`, `Companion <name> advised the lead of <run>`, and whatever the companion writes to you. Its latest ideas are in `companions/<name>/ideas.md` of the project folder, and its proposed tickets are the tickets with `status: proposed` and `source: companion <name>` (the Roadmap Review list of the hub shows them).
 - Bring each digest to the human as its own block, apart from the run lead items of section 7: name the companion, say what it found in a few lines, and add your view (do you agree, what it costs, which run or ticket it touches) and your recommended answer. Never forward a companion message unchanged.
 - Queue a proposed ticket only after the human approves it. The human approves in the hub (the Companions page sets `status: ready`) or tells you in chat; only then queue it as in section 5. Never set a ticket to `ready` yourself, and never queue a companion's ticket from the proposal alone.
