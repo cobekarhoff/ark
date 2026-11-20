@@ -349,7 +349,13 @@ test("ARK-T668 project-autocommit.sh dates its log lines: a failed pass after a 
       .filter(Boolean);
   const endLoop = async () => {
     if (loop === undefined) return;
-    for (const child of sleepChildren()) process.kill(Number(child));
+    const killedSleeps = sleepChildren();
+    for (const sleepPid of killedSleeps) process.kill(Number(sleepPid));
+    // Slowed on purpose (ARK-514 red proof): the loop ends late, after the pass that the killed sleep let it start.
+    while (sleepChildren().every((sleepPid) => killedSleeps.includes(sleepPid))) {
+      if (loop.exitCode !== null) break;
+      await nextTick();
+    }
     loop.kill();
     await loop.exited;
     loop = undefined;
