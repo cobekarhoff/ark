@@ -45,7 +45,7 @@ Every pull request, and every push to `main`, runs the full suite: there is no f
 
 `test/timings.json` is the shard balance and nothing else: Bun reads the recorded milliseconds of each file to give the 4 shards about equal total time, and to start the slowest files first. It does not select, skip or order what must pass. A stale or missing entry makes a shard slower, never a file unrun.
 
-Refresh it when the suite changes much, from a Linux machine with the CI core count (a CI run is best: times from a Mac differ). Run the whole suite unsharded, because `--update-timings` under `--shard` replaces the file with that shard's files only:
+The recorded milliseconds are from the Linux CI run 44464183048 (the per-test times summed for each file); a file added since has the median. Refresh it from CI when the suite changes much: a Mac gives times that do not match the runner. In a CI job, run the command below unsharded, download the file it writes, run `bun run format` and commit it. For a local refresh, run the same command. It must run unsharded, because `--update-timings` under `--shard` replaces the file with that shard's files only:
 
 ```sh
 bun test --parallel --update-timings --timings=test/timings.json
