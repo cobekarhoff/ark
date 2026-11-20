@@ -4,7 +4,7 @@ title: ARK-T723 a full ark test runs the files that failed in the last test firs
 level: integration
 technique: state transition over three real ark test runs (full run fails, the pre-run stops, the pre-run stops again) over two suites that each hold failed files, with a decision table on the file result (unresolved, flaky, red on main)
 priority: high
-risk: the failed files are never recorded, or are recorded for flaky and red-on-main files so a file that fails at the tip of main stops every full run with exit 1; the stopped event keeps no per-suite failed files so the pre-run runs once and never again; the pre-run runs after another suite or after the base run, or the normal command of suite `b` runs between the two pre-runs; only the first suite gets a pre-run or a line; the pre-run uses the whole suite and not `base_command` with the files; a stop still runs a suite or the base run; no `test.completed` with `passed: false` is recorded; or `ark status` and `ark merge-request open` read the stopped event as a pass
+risk: "the failed files are never recorded, or are recorded for flaky and red-on-main files so a file that fails at the tip of main stops every full run with exit 1; the stopped event keeps no per-suite failed files so the pre-run runs once and never again; the pre-run runs after another suite or after the base run, or the normal command of suite `b` runs between the two pre-runs; only the first suite gets a pre-run or a line; the pre-run uses the whole suite and not `base_command` with the files; a stop still runs a suite or the base run; no `test.completed` with `passed: false` is recorded; or `ark status` and `ark merge-request open` read the stopped event as a pass"
 status: active
 changed_by: 2026-11-20-ARK-551-1
 ---
