@@ -646,6 +646,8 @@ export async function companionsSync(inProject?: string): Promise<void> {
  * that sync then sends the wake: the line is harmless, the sync moved the cursor.
  * ponytail: no Orca call when ark.yml lists no companion; a recorded worker of a removed companion is
  * left to the sync that stops it.
+ * ponytail: each Orca call has its own 3 s bound, so a hung send costs 3 s for each listed companion;
+ * upgrade path: one deadline for the whole wake.
  */
 export async function wakeCompanions(project: string, run: string): Promise<void> {
   const configuration = loadConfig(project);

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { wakeCompanions } from "./companions.ts";
 import { loadConfig } from "./config.ts";
 import { ArkError } from "./errors.ts";
@@ -64,5 +64,5 @@ export async function evaluationRecord(runId: string, inProject?: string): Promi
   console.log(
     `recorded evaluation: ${blockers.length} blocker${blockers.length === 1 ? "" : "s"}, ${risks.length} risk${risks.length === 1 ? "" : "s"}, surfaces ${surfaces.join(", ")}`,
   );
-  await wakeCompanions(project, runId);
+  await wakeCompanions(project, basename(directory));
 }
