@@ -7,7 +7,8 @@
 # bun test cleans up after itself; this covers test processes that were killed. It loops until stopped.
 # A bun test worker (`bun test --test-worker`) with parent pid 1 whose working folder, by real path, is inside a temp
 # root of $TMPDIR is stopped with `kill <pid>` on the first pass that finds it 10 minutes or more after the pass that
-# first saw it orphaned (<state dir>/temp-cleaner.orphans keeps "<pid> <epoch seconds>"). The command line of the pid
+# first saw it orphaned (<state dir>/temp-cleaner.orphans keeps "<pid> <epoch seconds>"). The folder may already be
+# deleted: the suite that started the worker removes its temp root when it ends. The command line of the pid
 # is checked again right before the kill. No other process is stopped, and a failing ps, lsof or kill skips that row.
 # When / has less than 15 GB free it prints LOW DISK and sends one status message "Disk low: <n> GB free" to the Run
 # "Master Chief: <project> tickets" (scripts/mc-send.sh), once per drop: it sends again only after free disk went above
@@ -25,21 +26,36 @@ diskLimit=15
 orphanFile="$stateDir/temp-cleaner.orphans"
 orphanSeconds=600
 root=$(pwd -P)
-# The folders this script cleans, as `find` tests: the same list picks the temp root a worker runs in.
-rootNames=(\( -name 'ark-*' -o -name 'ark179-*' -o -name 'ark199-*' -o -name 'plannotator-data-*' -o -name '.*.bun-chrome' -o -name 'bun-test-*' \))
+# The folders this script cleans, by name (bash patterns). inTempRoot tests the first path component of a working
+# folder against them, and `rootNames` turns the same list into the `find` tests that pick the folders to remove.
+rootPatterns=('ark-*' 'ark179-*' 'ark199-*' 'plannotator-data-*' '.*.bun-chrome' 'bun-test-*')
+rootNames=(\()
+for pattern in "${rootPatterns[@]}"; do
+  [ "${#rootNames[@]}" -gt 1 ] && rootNames+=(-o)
+  rootNames+=(-name "$pattern")
+done
+rootNames+=(\))
+unset pattern
 # `bun test --test-worker`, with or without a path. `ark chief state` (cli/host.ts) counts the same command.
 workerCommand='^([^ ]*/)?bun test --test-worker( |$)'
 
-# True when the folder $1, by real path, is inside a temp root of $TMPDIR (compared by real path: /var is /private/var).
+# True when the folder $1 is inside a temp root of $TMPDIR. A folder that exists is compared by real path (/var is
+# /private/var). A deleted one is taken as lsof printed it, which is the real path already; with no cd there is no
+# `..` to resolve, so a path with a `..` component never counts. The root is matched by name, not on disk: it may be gone too.
 inTempRoot() {
-  local real first
-  real=$(cd "$1" 2>/dev/null && pwd -P) || return 1
+  local real first pattern
+  real=$(cd "$1" 2>/dev/null && pwd -P) || real=$1
   [[ $real == "$root"/* ]] || return 1
   first=${real#"$root"/}
-  [ -n "$(find "$root/${first%%/*}" -maxdepth 0 -type d "${rootNames[@]}" 2>/dev/null)" ]
+  [[ /$first/ == *"/../"* ]] && return 1
+  first=${first%%/*}
+  for pattern in "${rootPatterns[@]}"; do
+    [[ $first == $pattern ]] && return 0
+  done
+  return 1
 }
 
-# Stops, by pid, a bun test worker whose parent is pid 1 and whose working folder is in a temp root, on the first pass
+# Stops, by pid, a bun test worker whose parent is pid 1 and whose working folder (deleted or not) is in a temp root, on the first pass
 # that finds it $orphanSeconds or more after the pass that first saw it. `ps` has no "orphaned since", so the first
 # sighting is kept in $orphanFile ("<pid> <epoch seconds>" per line); a pid that is no longer listed loses its line.
 # A failing ps, lsof or kill skips the row and never ends the pass.
