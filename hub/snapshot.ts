@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { now } from "../cli/clock.ts";
-import { loadConfig } from "../cli/config.ts";
+import { hubConfig } from "./config.ts";
 import { waitingGate, type ArkEvent } from "../cli/events.ts";
 import { gateWaits, splitRunTime } from "../cli/time-split.ts";
 import {
@@ -91,6 +91,8 @@ const repoFactsIntervalMilliseconds = allIntervalMilliseconds || 3000;
 const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
 
 const usageTimeoutMilliseconds = 30_000;
+/** Folder watchers made between two yields to the event loop. */
+const watchBatch = 16;
 
 /** Harness and model of `roles.<role>` in the project's `ark.yml`, or null when unset or unreadable. */
 function roleConfig(
@@ -98,7 +100,7 @@ function roleConfig(
   role: "chief" | "evaluator" | "designer",
 ): { harness: string; model: string } | null {
   try {
-    return loadConfig(project).roles[role] ?? null;
+    return hubConfig(project).roles[role] ?? null;
   } catch {
     return null;
   }
@@ -621,7 +623,7 @@ export function createSnapshotReader() {
     ark: async () => {
       await read("ark", () => arkReader.read());
       if (!running) return;
-      syncWatchers();
+      await syncWatchers();
       // A gate that this read saw wakes the Plannotator read at once, not at its next tick.
       const open = gateOpen();
       if (armed && open && !gateWasOpen) void readers.plannotator();
@@ -778,15 +780,22 @@ export function createSnapshotReader() {
 
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
   let arkSoon: ReturnType<typeof setTimeout> | undefined;
-  function syncWatchers(): void {
+  /** Yields after every few `watch` calls: the first pass on 250 run folders held the loop for 270 ms (ARK-533). A pause during a yield ends it. */
+  async function syncWatchers(): Promise<void> {
+    const started = generation;
     const wanted = new Set(arkReader.watchPaths());
     for (const [path, watcher] of watchers) {
       if (wanted.has(path)) continue;
       watcher.close();
       watchers.delete(path);
     }
+    let created = 0;
     for (const path of wanted) {
       if (watchers.has(path)) continue;
+      if (created++ % watchBatch === watchBatch - 1) {
+        await new Promise((resolve) => setImmediate(resolve));
+        if (generation !== started) return;
+      }
       try {
         watchers.set(
           path,

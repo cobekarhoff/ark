@@ -13,7 +13,7 @@ import {
   type StepWindow,
 } from "../cli/events.ts";
 import { isDropped } from "../cli/findings.ts";
-import { loadConfig } from "../cli/config.ts";
+import { hubConfig } from "./config.ts";
 import {
   orcaOrchestration,
   orcaPages,
@@ -141,6 +141,8 @@ export function readTicketDocument(entry: TicketFile): { document: TicketDocumen
   }
 }
 
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 /**
  * Reads Ark's files again only where a file changed (size and mtime). A run whose log is being
  * written at this moment can end on a half line: that run keeps its last good value.
@@ -246,41 +248,59 @@ export function createArkReader() {
     return parsed;
   }
 
-  return {
-    /** Every run (open and closed, newest first) and every ticket of every project. */
-    read(): ArkValue {
-      const runs: ArkRun[] = [];
-      const tickets: TicketView[] = [];
-      const ticketFiles = new Map<TicketView, TicketFile>();
-      const roadmap: Record<string, ProjectRoadmap> = {};
-      for (const project of listProjects()) {
-        const runsRoot = runsDirectory(project);
-        if (existsSync(runsRoot)) {
-          for (const name of readdirSync(runsRoot)) {
-            const run = readRun(join(runsRoot, name));
-            if (run) runs.push(run);
-          }
+  async function pass(): Promise<ArkValue> {
+    const runs: ArkRun[] = [];
+    const tickets: TicketView[] = [];
+    const ticketFiles = new Map<TicketView, TicketFile>();
+    const roadmap: Record<string, ProjectRoadmap> = {};
+    for (const project of listProjects()) {
+      const runsRoot = runsDirectory(project);
+      if (existsSync(runsRoot)) {
+        for (const name of readdirSync(runsRoot)) {
+          const run = readRun(join(runsRoot, name));
+          if (run) runs.push(run);
+          await yieldToLoop();
         }
-        const ticketsRoot = join(projectDirectory(project), "tickets");
-        const projectTickets: TicketView[] = [];
-        if (existsSync(ticketsRoot)) {
-          for (const name of readdirSync(ticketsRoot).sort()) {
-            if (!ticketFile.test(name)) continue;
-            const file = join(ticketsRoot, name);
-            const read = readTicket(project, file, name);
-            if (!read) continue;
-            projectTickets.push(read.ticket);
-            ticketFiles.set(read.ticket, { file, document: read.document });
-          }
-        }
-        tickets.push(...projectTickets);
-        roadmap[project] = roadmapOf(project, projectTickets);
       }
-      runs.sort((left, right) =>
-        right.state.run.localeCompare(left.state.run, undefined, { numeric: true }),
-      );
-      return { runs, tickets, ticketFiles, roadmap };
-    },
+      const ticketsRoot = join(projectDirectory(project), "tickets");
+      const projectTickets: TicketView[] = [];
+      if (existsSync(ticketsRoot)) {
+        for (const name of readdirSync(ticketsRoot).sort()) {
+          if (!ticketFile.test(name)) continue;
+          const file = join(ticketsRoot, name);
+          const listed = readTicket(project, file, name);
+          await yieldToLoop();
+          if (!listed) continue;
+          projectTickets.push(listed.ticket);
+          ticketFiles.set(listed.ticket, { file, document: listed.document });
+        }
+      }
+      tickets.push(...projectTickets);
+      roadmap[project] = roadmapOf(project, projectTickets);
+    }
+    runs.sort((left, right) =>
+      right.state.run.localeCompare(left.state.run, undefined, { numeric: true }),
+    );
+    return { runs, tickets, ticketFiles, roadmap };
+  }
+
+  // At most one pass runs and one waits: a change that lands during a pass needs another pass, and a pass that
+  // yields must never finish after a newer one and put older data back.
+  let current: Promise<ArkValue> | null = null;
+  let queued: Promise<ArkValue> | null = null;
+  function read(): Promise<ArkValue> {
+    if (!current) return (current = pass().finally(() => (current = null)));
+    return (queued ??= current
+      .catch(() => {})
+      .then(() => {
+        queued = null;
+        return read();
+      }));
+  }
+
+  return {
+    /** Every run (open and closed, newest first) and every ticket of every project. Yields to the event loop between runs and tickets (ARK-533). */
+    read,
     /** Folders to watch: each run folder (events.ndjson, plan.yml), the runs roots, the tickets folders and each project folder (ROADMAP.md, ark.yml). */
     watchPaths(): string[] {
       const paths: string[] = [];
@@ -314,7 +334,7 @@ export async function readQueues(): Promise<Map<string, QueueRead>> {
     projects.map(async (project): Promise<QueueRead> => {
       let concurrency: number | null = null;
       try {
-        concurrency = loadConfig(project).concurrency;
+        concurrency = hubConfig(project).concurrency;
       } catch {
         // An ark.yml that does not load leaves the limit unknown; it never hides the queue.
       }

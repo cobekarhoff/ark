@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { stat } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import { isInside } from "../cli/paths.ts";
 import { type Harness, sessionRoots } from "../cli/usage/index.ts";
 import type { StageTimes, StepWindow } from "../cli/events.ts";
@@ -65,13 +66,10 @@ type Entry = {
 };
 
 const workerCount = 3;
+/** Session files stat-ed at once by a refresh. */
+const statBatch = 64;
 /** A worker that has not answered this long is hung: it is dropped and its requests fail. */
 const requestTimeoutMilliseconds = 60_000;
-
-/** The folder and its symlink-resolved path: a session records whichever the agent started in. */
-function parentsOf(directory: string): string[] {
-  return [resolve(directory), ...(existsSync(directory) ? [realpathSync(directory)] : [])];
-}
 
 /** Sum of known costs, or null when nothing was measured or one message has no price. */
 function sum(messages: CompactMessage[]): number | null {
@@ -119,6 +117,12 @@ export class UsageIndex {
   parseCount = 0;
   version = 0;
   #entries = new Map<string, Entry>();
+  /** Moves when a file enters or leaves `#entries` or changes its cwd: what `#inside` depends on. */
+  #layout = 0;
+  /** The entries inside each run folder that `#parentsOf` has seen, built for all of them in one pass over `#entries` when `#layout` moves (ARK-533: a scan of every entry for each open run on each publish held the loop). */
+  #inside = new Map<string, [string, Entry][]>();
+  #insideLayout = -1;
+  #parents = new Map<string, string[]>();
   #workers: (Worker | undefined)[] = [];
   #waiting = new Map<number, { slot: number; resolve: (reply: WorkerReply) => void }>();
   #nextId = 0;
@@ -133,6 +137,59 @@ export class UsageIndex {
   }
 
   /**
+   * The folder and its symlink-resolved path: a session records whichever the agent started in. Kept
+   * once the folder exists (a stat and a realpath for each call held the loop, ARK-533): a run
+   * folder is never re-linked while the hub runs.
+   */
+  #parentsOf(directory: string): string[] {
+    const known = this.#parents.get(directory);
+    if (known) return known;
+    const exists = existsSync(directory);
+    const parents = [resolve(directory), ...(exists ? [realpathSync(directory)] : [])];
+    if (exists) {
+      this.#parents.set(directory, parents);
+      this.#layout += 1; // a new run folder: who is inside it is not indexed yet
+    }
+    return parents;
+  }
+
+  #insideOf(directory: string): [string, Entry][] {
+    const parents = this.#parentsOf(directory);
+    // A folder that does not exist (yet) is not remembered: its entries are found by a plain scan.
+    if (!this.#parents.has(directory))
+      return [...this.#entries].filter(
+        ([, entry]) => entry.cwd !== null && parents.some((parent) => isInside(entry.cwd!, parent)),
+      );
+    if (this.#insideLayout !== this.#layout) this.#indexInside();
+    return this.#inside.get(directory) ?? [];
+  }
+
+  /** One walk of each entry's cwd up its folders, looking for a folder that is a run's: no entry is compared with every run. */
+  #indexInside(): void {
+    const owners = new Map<string, Set<string>>();
+    this.#inside.clear();
+    for (const [directory, parents] of this.#parents) {
+      this.#inside.set(directory, []);
+      for (const parent of parents) {
+        const known = owners.get(parent) ?? new Set<string>();
+        known.add(directory);
+        owners.set(parent, known);
+      }
+    }
+    for (const pair of this.#entries) {
+      const hit = new Set<string>();
+      let at = pair[1].cwd ?? "";
+      while (at !== "") {
+        for (const directory of owners.get(at) ?? []) hit.add(directory);
+        const cut = at.lastIndexOf(sep);
+        at = cut < 0 ? "" : at.slice(0, cut);
+      }
+      for (const directory of hit) this.#inside.get(directory)!.push(pair);
+    }
+    this.#insideLayout = this.#layout;
+  }
+
+  /**
    * Brings the index up to date for the open runs of `directories`, and parses the session files of
    * `companionFiles` whatever their cwd (a companion runs in no run). Calls run one after the other.
    */
@@ -143,41 +200,48 @@ export class UsageIndex {
   }
 
   async #refresh(directories: string[], companionFiles: Set<string>): Promise<void> {
-    const parents = directories.flatMap(parentsOf);
     const seen = new Set<string>();
     const changed: [string, Entry][] = [];
     for (const { harness, root, pattern } of sessionRoots()) {
       if (!existsSync(root)) continue;
-      for await (const relative of new Bun.Glob(pattern).scan({ cwd: root, dot: true })) {
-        const file = join(root, relative);
-        let stat: Stats;
-        try {
-          stat = statSync(file);
-        } catch {
-          continue;
-        }
-        const signature = `${stat.size}:${stat.mtimeMs}`;
-        seen.add(file);
-        if (this.#entries.get(file)?.signature === signature) continue;
-        changed.push([
-          file,
-          {
-            signature,
-            cwd: null,
-            start: null,
-            size: stat.size,
-            mtime: stat.mtimeMs,
-            harness,
-            messages: null,
-            failed: false,
-          },
-        ]);
+      const files: string[] = [];
+      for await (const relative of new Bun.Glob(pattern).scan({ cwd: root, dot: true }))
+        files.push(join(root, relative));
+      // Async stats in batches: each await lets a request run (a `statSync` of each file held the loop, ARK-533).
+      for (let from = 0; from < files.length; from += statBatch) {
+        await Promise.all(
+          files.slice(from, from + statBatch).map(async (file) => {
+            let stats;
+            try {
+              stats = await stat(file);
+            } catch {
+              return;
+            }
+            const signature = `${stats.size}:${stats.mtimeMs}`;
+            seen.add(file);
+            if (this.#entries.get(file)?.signature === signature) return;
+            changed.push([
+              file,
+              {
+                signature,
+                cwd: null,
+                start: null,
+                size: stats.size,
+                mtime: stats.mtimeMs,
+                harness,
+                messages: null,
+                failed: false,
+              },
+            ]);
+          }),
+        );
       }
     }
     let didChange = changed.length > 0;
     for (const file of this.#entries.keys()) {
       if (seen.has(file)) continue;
       this.#entries.delete(file);
+      this.#layout += 1;
       didChange = true;
     }
     // A changed file is read for its cwd first; a file already known is parsed when a new run needs it.
@@ -187,16 +251,25 @@ export class UsageIndex {
         entry.cwd = reply.cwd ?? null;
         entry.start = reply.start ?? null;
         entry.failed = reply.error !== undefined;
-        this.#entries.set(file, entry);
+        // The entry a run's list holds stays the same object; only a new file or a moved cwd changes who is inside which run.
+        const known = this.#entries.get(file);
+        if (known) {
+          if (known.cwd !== entry.cwd) this.#layout += 1;
+          Object.assign(known, entry);
+        } else {
+          this.#entries.set(file, entry);
+          this.#layout += 1;
+        }
       }),
     );
     const parses: Promise<void>[] = [];
+    for (const directory of directories) this.#parentsOf(directory); // all folders known before the one index pass
+    const insideOpen = new Set<Entry>(
+      directories.flatMap((directory) => this.#insideOf(directory).map(([, entry]) => entry)),
+    );
     for (const [file, entry] of this.#entries) {
       if (entry.failed) continue;
-      const cwd = entry.cwd;
-      const wanted =
-        companionFiles.has(file) ||
-        (cwd !== null && parents.some((parent) => isInside(cwd, parent)));
+      const wanted = companionFiles.has(file) || insideOpen.has(entry);
       if (!wanted) {
         if (entry.messages !== null) entry.messages = null; // the run closed: free the memory
         continue;
@@ -224,13 +297,11 @@ export class UsageIndex {
    */
   runCost(directory: string, closed: boolean, windows: StepWindow[]): RunCost {
     if (closed) return readMetricsCost(directory) ?? { total: null, steps: {} };
-    const parents = parentsOf(directory);
     const all: CompactMessage[] = [];
     const byStep = new Map<string, CompactMessage[]>();
     let incomplete = false;
-    for (const entry of this.#entries.values()) {
-      const cwd = entry.cwd;
-      if (cwd === null || !parents.some((parent) => isInside(cwd, parent))) continue;
+    for (const [, entry] of this.#insideOf(directory)) {
+      const cwd = entry.cwd!;
       // A file that is unreadable or not parsed yet makes the total unknown, never a partial sum.
       if (entry.failed || entry.messages === null) {
         incomplete = true;
@@ -278,10 +349,8 @@ export class UsageIndex {
     runStarted: number,
     stages: StageTimes = {},
   ): SessionFile[] {
-    const parents = parentsOf(directory);
-    const inside = [...this.#entries].filter(
-      ([, entry]) => entry.cwd !== null && parents.some((parent) => isInside(entry.cwd!, parent)),
-    );
+    const parents = this.#parentsOf(directory);
+    const inside = this.#insideOf(directory);
     const owners = ownersOf(
       inside.map(([file, entry]) => ({
         file,
