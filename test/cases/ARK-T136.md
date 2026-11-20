@@ -1,12 +1,12 @@
 ---
 id: ARK-T136
-title: ARK-T136 ARK-309-AC5 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it and with the scroll
+title: ARK-T136 a ticket and a run of another project open by direct link with their project, say Outside the filter with a link, keep the filter in the control, and Esc and the back links return with it and with the scroll
 level: e2e
 technique: state transition (filter alpha, page of beta, then link, no filter, Esc, back links); settled geometry before the click
 priority: high
 risk: "a direct link to another project's ticket or run drops the project, shows no Outside the filter note, loses the filter on Esc or a back link, or returns to a different scroll position; or the click lands on a layout that still moves"
 status: active
-changed_by: 2026-11-08-ARK-331-1
+changed_by: 2026-11-15-ARK-493-1
 ---
 
 ## Objective

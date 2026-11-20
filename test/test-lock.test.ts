@@ -23,6 +23,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  afterHostReads,
   ark,
   healthyHost,
   recordEvaluation,
@@ -308,7 +309,7 @@ function runnerPid(run: string): number {
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
 function startTest(run: string, extraEnvironment: Record<string, string> = {}): Started {
   const child = Bun.spawn(["bun", arkEntry, "test", run], {
-    env: { ...process.env, ARK_HOME: arkHome, ...extraEnvironment },
+    env: { ...process.env, ARK_HOME: arkHome, ARK_FAKE_LOAD_ONE: "0", ...extraEnvironment },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -818,20 +819,6 @@ describe("ark test memory admission", () => {
   }
   const waitLines = (out: string) =>
     out.split("\n").filter((line) => line.includes("waiting for memory"));
-  const readsFile = () => join(process.env.ARK_FAKE_HOST as string, "reads");
-  const hostReads = () =>
-    existsSync(readsFile()) ? readFileSync(readsFile(), "utf8").split("\n").length - 1 : 0;
-  /** Resolves once the fake host has been read `count` more times: the sysctl shim logs one after the last call of a reading, so a test never writes mid-reading. */
-  function afterHostReads(count: number): Promise<void> {
-    const target = hostReads() + count;
-    const { promise, resolve } = Promise.withResolvers<void>();
-    const watcher = watch(process.env.ARK_FAKE_HOST as string, () => {
-      if (hostReads() < target) return;
-      watcher.close();
-      resolve();
-    });
-    return promise;
-  }
 
   /** Holds the suite under a short fake host: one line while it waits, no start, then a start after recovery. */
   async function holdsThenStarts(

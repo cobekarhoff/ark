@@ -109,6 +109,7 @@ export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promis
     delete withDefaults.test_max_swap_gb;
     writeFileSync(configFile(), JSON.stringify(withDefaults));
     Bun.spawn([process.execPath, arkEntry, "test", runId], {
+      env: { ...process.env, ARK_FAKE_LOAD_ONE: "0" },
       stdin: "ignore",
       stdout: "ignore",
       stderr: "ignore",
@@ -130,6 +131,7 @@ export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promis
     // The fixture as written: the run starts at once and finishes.
     writeFileSync(configFile(), fixtureConfig);
     const caller = Bun.spawn([process.execPath, arkEntry, "test", runId], {
+      env: { ...process.env, ARK_FAKE_LOAD_ONE: "0" },
       stdout: "pipe",
       stderr: "pipe",
     });

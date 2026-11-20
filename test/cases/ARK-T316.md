@@ -1,12 +1,12 @@
 ---
 id: ARK-T316
-title: ARK-T316 ARK-291-AC9 j k / Enter and Esc work on Roadmap, Esc returns to the same scroll position, and text keeps 4.5:1 (3:1 large) in light and dark
+title: ARK-T316 j k / Enter and Esc work on Roadmap, Esc returns to the same scroll position, and text keeps 4.5:1 (3:1 large) in light and dark
 level: e2e
 technique: state transition over keys; contrast measured in both themes once the animations of the page ended
 priority: medium
 risk: "Roadmap keys do not move the selection, Esc does not restore the scroll position, a stale chip still moving the page when the scroll is measured, or text below 4.5:1 in a theme"
 status: active
-changed_by: 2026-11-12-ARK-335-1
+changed_by: 2026-11-15-ARK-493-1
 ---
 
 ## Objective

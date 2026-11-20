@@ -27,6 +27,7 @@ import { baseSide, oldIdsTouched, planMembership } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { checkStage } from "./merge-request.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
+import { sampleLoad, type LoadSampler } from "./host.ts";
 import { budgetHeldVariable, openTestBudget, type TestBudget } from "./test-lock.ts";
 import { sampleGroup, updateResources, type SideUse } from "./resources-file.ts";
 import { callTest, runnerMain } from "./test-runner.ts";
@@ -455,6 +456,7 @@ async function runSuite(
   // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
   const suiteTmpdir = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-suite-")));
   let taken: { cores: number; waitMilliseconds: number; release: () => void } | null = null;
+  let loadSampler: LoadSampler | null = null;
   try {
     const cached = cache ? loadCached(cache.project, cache.key, scratch) : null;
     if (cached !== null) {
@@ -475,10 +477,19 @@ async function runSuite(
       for (const file of cached.flaky) sideRun.flaky.push({ suite: suite.name, file });
       const redOnMain = cached.redOnMain ?? [];
       for (const file of redOnMain) sideRun.redOnMain.push({ suite: suite.name, file });
-      return { results: cached.results, passed: true, flaky: cached.flaky, reused: true, code: 0 };
+      return {
+        results: cached.results,
+        passed: true,
+        flaky: cached.flaky,
+        reused: true,
+        code: 0,
+        load: { start: null, peak: null },
+      };
     }
     // ARK-390: a cached suite takes no cores; a suite that runs waits for its cores in the host budget.
     taken = await budget!.take(suite.cores);
+    // From the start of the suite to the end of its retries: the load the verdict was made under.
+    loadSampler = sampleLoad();
     const command = template
       .replaceAll("{report}", reportPath)
       .replaceAll("<cores>", String(taken.cores));
@@ -568,10 +579,18 @@ async function runSuite(
         { results, output, log, flaky, ...(redOnMain.length > 0 ? { redOnMain } : {}) },
         scratch,
       );
-    return { results, passed, flaky, reused: false, code: outcome.code };
+    return {
+      results,
+      passed,
+      flaky,
+      reused: false,
+      code: outcome.code,
+      load: { start: loadSampler.start, peak: loadSampler.stop() },
+    };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
     rmSync(suiteTmpdir, { recursive: true, force: true });
+    loadSampler?.stop();
     taken?.release();
   }
 }
@@ -1105,6 +1124,7 @@ async function executeTest(
   budget = openTestBudget(runId, config.test_budget_cores, {
     minimumFreeMemoryPercent: config.test_min_free_memory_percent,
     maximumSwapGigabytes: config.test_max_swap_gb,
+    maximumLoad: config.test_max_load,
   });
   const started = Date.now();
   try {
@@ -1246,6 +1266,8 @@ async function executeTest(
       name: string;
       level: string;
       passed: boolean;
+      loadAtStart: number | null;
+      loadPeak: number | null;
       reused?: boolean;
       flaky?: string[];
     }[] = [];
@@ -1310,7 +1332,7 @@ async function executeTest(
           compose: config.compose,
         });
         headKeys.set(suite.name, key.slice(0, 6));
-        const { results, passed, flaky, reused, code } = await runSuite(
+        const { results, passed, flaky, reused, code, load } = await runSuite(
           suite,
           join(mirror, suite.repo),
           resultsDirectory,
@@ -1329,6 +1351,9 @@ async function executeTest(
           name: suite.name,
           level: suite.level,
           passed,
+          // null for a reused suite: it started no process, so it has no load of its own.
+          loadAtStart: load.start,
+          loadPeak: load.peak,
           ...(reused ? { reused } : {}),
           ...(flaky.length > 0 ? { flaky } : {}),
         });
