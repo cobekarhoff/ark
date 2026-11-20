@@ -116,6 +116,20 @@ const configRole = (role: string): "chief" | "evaluator" | "designer" =>
 type Slot<T> = { ok: boolean; since: string | null; readAt: string | null; value: T | null };
 const emptySlot = <T>(): Slot<T> => ({ ok: false, since: null, readAt: null, value: null });
 
+/** The most recent finished pass of a source: how long it took and when it ended (ms since the epoch). */
+type Pass = { durationMilliseconds: number; endedAt: number };
+/** `GET /api/health` (ARK-533): a reader pass longer than its interval is slow; lag is null while no page is connected. */
+export type Health = {
+  lag_ms: number | null;
+  sources: Record<SourceName, { last_ms: number | null; ended_at: string | null; slow: boolean }>;
+  slow: SourceName[];
+};
+/** The event loop lag is the largest delay of a timer of this period over the last minute. */
+const lagTimerMilliseconds = 100;
+const lagWindowMilliseconds = 60_000;
+/** The hub logs a loop lag above this. */
+const lagLogMilliseconds = 1000;
+
 const questions: Record<GateKind, (title: string) => string> = {
   criteria: (title) => `Approve the acceptance criteria for "${title}"?`,
   strategy: (title) => `Pick a strategy for "${title}"`,
@@ -168,6 +182,11 @@ export function createSnapshotReader() {
     chiefUnread: emptySlot<true>(),
     resources: emptySlot<ResourcesView>(),
   };
+  // Health (ARK-533), outside `slots` and `compose()` so it never makes a push. Both parts exist only while a page is connected:
+  // `pause()` clears them, so a hub with no page reports no lag and no pass.
+  const passes = new Map<SourceName, Pass>();
+  let lagSamples: { at: number; delay: number }[] = [];
+  let lagTimer: NodeJS.Timeout | undefined;
   const resourcesReader = createResourcesReader();
   const evidenceReader = createEvidenceReader();
   let githubFacts = new Map<string, MergeRequestFacts>();
@@ -569,13 +588,18 @@ export function createSnapshotReader() {
   ): Promise<void> {
     const slot = slots[name] as Slot<unknown>;
     const started = generation;
+    const began = performance.now();
     let value: unknown = null;
     try {
       value = await reader();
     } catch {
       // A failed read leaves the slot's value and shows its last good read time.
     }
-    if (started !== generation) return;
+    if (started !== generation) return; // a pass that a pause dropped is no pass
+    const durationMilliseconds = Math.round(performance.now() - began);
+    passes.set(name, { durationMilliseconds, endedAt: now() });
+    if (durationMilliseconds > intervalMilliseconds[name])
+      console.log(`slow pass: ${name} took ${durationMilliseconds} ms`);
     if (value === null) slot.ok = false;
     else {
       const time = new Date(now()).toISOString();
@@ -777,6 +801,20 @@ export function createSnapshotReader() {
     }
   }
 
+  /** One timer of 100 ms while a page is connected: how late it fires is the event loop lag. */
+  function startLagTimer(): void {
+    let expected = performance.now() + lagTimerMilliseconds;
+    lagTimer = setInterval(() => {
+      const at = performance.now();
+      const delay = Math.max(0, Math.round(at - expected));
+      expected = at + lagTimerMilliseconds;
+      while (lagSamples.length > 0 && lagSamples[0].at < at - lagWindowMilliseconds)
+        lagSamples.shift();
+      lagSamples.push({ at, delay });
+      if (delay > lagLogMilliseconds) console.log(`loop lag: ${delay} ms`);
+    }, lagTimerMilliseconds);
+  }
+
   function loop(read: () => Promise<void>, intervalMilliseconds: number, started: number): void {
     const tick = async () => {
       await read();
@@ -796,6 +834,7 @@ export function createSnapshotReader() {
   async function resume(): Promise<void> {
     if (running) return;
     running = true;
+    startLagTimer();
     const started = ++generation;
     firstArkRead = readers.ark();
     await firstArkRead;
@@ -830,6 +869,9 @@ export function createSnapshotReader() {
   function pause(): void {
     if (!running) return;
     running = false;
+    clearInterval(lagTimer);
+    lagSamples = [];
+    passes.clear();
     armed = false;
     generation++;
     for (const timer of timers) clearTimeout(timer);
@@ -853,6 +895,26 @@ export function createSnapshotReader() {
       if (slots.ark.value) return;
       await readers.ark();
       if (!slots.ark.value && firstArkRead) await firstArkRead;
+    },
+    /** What `GET /api/health` sends, from memory: the lag of the last minute and the last pass of each source. */
+    health(): Health {
+      const cutoff = performance.now() - lagWindowMilliseconds;
+      const delays = lagSamples
+        .filter((sample) => sample.at >= cutoff)
+        .map((sample) => sample.delay);
+      const sources = {} as Health["sources"];
+      const slow: SourceName[] = [];
+      for (const name of Object.keys(slots) as SourceName[]) {
+        const pass = passes.get(name);
+        const isSlow = pass !== undefined && pass.durationMilliseconds > intervalMilliseconds[name];
+        if (isSlow) slow.push(name);
+        sources[name] = {
+          last_ms: pass?.durationMilliseconds ?? null,
+          ended_at: pass ? new Date(pass.endedAt).toISOString() : null,
+          slow: isSlow,
+        };
+      }
+      return { lag_ms: delays.length === 0 ? null : Math.max(...delays), sources, slow };
     },
     stop(): void {
       stopped = true;

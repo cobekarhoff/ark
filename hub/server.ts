@@ -67,7 +67,7 @@ const fileLimitBytes = 1 << 20;
 const switchTimeoutMilliseconds = 5000;
 
 /**
- * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /api/resources/history` (the 24-hour host history), `GET /events`
+ * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /api/health` (the event loop lag and the last pass of each source, from memory), `GET /api/resources/history` (the 24-hour host history), `GET /events`
  * (Server-Sent Events), and on request `GET /api/run/<run>` (any run, open or closed),
  * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/transcript/result?file=&call=`
  * (one full tool result), `GET /api/run/<run>/file?path=`,
@@ -246,6 +246,9 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
           : text("method not allowed", 405, { allow: "POST" });
       if (request.method !== "GET") return text("method not allowed", 405, { allow: "GET" });
       if (!isLocalRequest(request, getAuthorities())) return text("foreign origin", 403);
+
+      // Memory only, like /api/snapshot: it never waits for a reader pass, so a stalled source cannot stall the probe.
+      if (pathname === "/api/health") return json(reader.health());
 
       const cases = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)\/cases$/);
       if (cases) {
