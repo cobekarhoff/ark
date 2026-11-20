@@ -4258,10 +4258,17 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
   const { baseUrl } = await start();
   // 20 runs and 2,000 messages sit 100 minutes apart, so a 48 h window holds them all.
   const path = `/api/conversation?since=${encodeURIComponent(new Date(base - 48 * 3_600_000).toISOString())}&until=${encodeURIComponent(new Date(base + 60_000).toISOString())}`;
+  // ARK-512 on-purpose red (the implementer step removes it): one 1,100 ms busy spin in the first background reply.
+  let spinPending = false;
   const timed = async () => {
     const requestedAt = performance.now();
     const response = await fetch(`${baseUrl}${path}`);
     const reply = (await response.json()) as ProjectReply;
+    if (spinPending) {
+      spinPending = false;
+      const spinUntil = performance.now() + 1100;
+      while (performance.now() < spinUntil);
+    }
     return { milliseconds: performance.now() - requestedAt, status: response.status, reply };
   };
   // The first conversation request waits for the first read, so wait for it on the cheap message route; then ask for the
@@ -4282,6 +4289,7 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
   expect(cold.reply.runs).toHaveLength(20);
   expect(cold.milliseconds, "cold /api/conversation").toBeLessThan(conversationBudgetMilliseconds);
 
+  spinPending = true;
   // / and /nope while the conversation is requested again and again.
   let building = true;
   const conversationTimes: number[] = [];
