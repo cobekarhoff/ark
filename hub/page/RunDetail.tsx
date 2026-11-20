@@ -8,6 +8,8 @@ export type DetailState =
   | { status: "loading" | "missing" | "failed" }
   | { status: "ok"; detail: RunDetail };
 
+const loadingRetryMilliseconds = 500;
+
 /**
  * Reads one run on request (`GET /api/run/<run>`): any run, open or closed, is never in the snapshot.
  * The last answer for the same run stays on screen while a newer one loads. `refreshKey` changes when
@@ -21,17 +23,27 @@ export function useRunDetail(run: string | null, refreshKey: string): DetailStat
   useEffect(() => {
     if (run === null) return;
     const controller = new AbortController();
-    void fetch(`/api/run/${encodeURIComponent(run)}`, { signal: controller.signal })
-      .then(async (response): Promise<DetailState> => {
-        if (response.status === 404) return { status: "missing" };
-        if (!response.ok) return { status: "failed" };
-        return { status: "ok", detail: await response.json() };
-      })
-      .catch((): DetailState => ({ status: "failed" }))
-      .then((value) => {
-        if (!controller.signal.aborted) setState({ run, value });
-      });
-    return () => controller.abort();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A cold hub answers 503 `loading` until its first read of Ark ends: stay on the loading state and ask again.
+    const load = () =>
+      void fetch(`/api/run/${encodeURIComponent(run)}`, { signal: controller.signal })
+        .then(async (response): Promise<DetailState | null> => {
+          if (response.status === 503) return null;
+          if (response.status === 404) return { status: "missing" };
+          if (!response.ok) return { status: "failed" };
+          return { status: "ok", detail: await response.json() };
+        })
+        .catch((): DetailState => ({ status: "failed" }))
+        .then((value) => {
+          if (controller.signal.aborted) return;
+          if (value === null) timer = setTimeout(load, loadingRetryMilliseconds);
+          else setState({ run, value });
+        });
+    load();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [run, refreshKey]);
   return state.run === run ? state.value : { status: "loading" };
 }

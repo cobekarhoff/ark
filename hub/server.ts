@@ -170,8 +170,21 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
   const conversationReply = (reply: ConversationReply | null) =>
     reply ? json(reply) : text("no inbox read yet: open the hub page, then retry", 503);
 
+  /**
+   * Waits for the first read of Ark for a short bound. A cold hub (a large home reads for seconds) answers 503 `loading`
+   * and the read keeps running; after the first read this resolves at once.
+   */
+  async function readyOrLoading(): Promise<Response | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<false>((resolve) => (timer = setTimeout(resolve, 250, false)));
+    const ready = await Promise.race([reader.ready().then(() => true), bound]);
+    clearTimeout(timer);
+    return ready ? null : text("loading", 503);
+  }
+
   async function runRoute(url: URL, runName: string, rest: string): Promise<Response> {
-    await reader.ready();
+    const loading = await readyOrLoading();
+    if (loading) return loading;
     const directory = reader.runDirectory(runName);
     if (directory === null) return text("no such run", 404);
     if (rest === "") return json(reader.runDetail(runName));
@@ -253,7 +266,8 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       const cases = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)\/cases$/);
       if (cases) {
         try {
-          await reader.ready();
+          const loading = await readyOrLoading();
+          if (loading) return loading;
           const result = await reader.ticketCases(
             decodeURIComponent(cases[1]),
             decodeURIComponent(cases[2]),
@@ -267,7 +281,8 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       const ticket = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)$/);
       if (ticket) {
         try {
-          await reader.ready();
+          const loading = await readyOrLoading();
+          if (loading) return loading;
           // The id only selects a listed ticket: the file is the one the hub listed, never a path built from the URL.
           const result = reader.ticketDocument(
             decodeURIComponent(ticket[1]),
