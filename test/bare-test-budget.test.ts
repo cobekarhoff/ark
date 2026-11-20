@@ -1292,10 +1292,10 @@ test("ARK-T714 each wait for the exit of a child in the ARK-T707 test of an ende
     const waitCount = Number(readFileSync(countFile, "utf8"));
     expect(waitCount).toBeGreaterThanOrEqual(3);
 
-    // The k-th limit expires in a microtask, so a wait on a child that still runs always fails with its own name.
-    const runs = await Promise.all(
-      Array.from({ length: waitCount }, (_, index) => innerRun(index + 1)),
-    );
+    // One inner run at a time: many together load the host enough to break a check of the inner test that prints no name.
+    const runs: { code: number; text: string }[] = [];
+    for (let expireCall = 1; expireCall <= waitCount; expireCall += 1)
+      runs.push(await innerRun(expireCall));
     const exitNames: string[] = [];
     runs.forEach(({ code, text }, index) => {
       // A wait that had already settled when its limit expired passes the race and prints no name: only failed runs are read.
@@ -1303,7 +1303,10 @@ test("ARK-T714 each wait for the exit of a child in the ARK-T707 test of an ende
       const names = new Set(
         [...text.matchAll(/error: no (.+?) within 20000 ms/g)].map((match) => match[1]!),
       );
-      expect(names.size, `inner run with call ${index + 1} expired:\n${text}`).toBe(1);
+      expect(
+        names.size,
+        `inner run with call ${index + 1} expired and failed with no "no <name> within 20000 ms" line:\n${text}`,
+      ).toBe(1);
       const [name] = names;
       if (name!.startsWith("exit of")) exitNames.push(name!);
     });
