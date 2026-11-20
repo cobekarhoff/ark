@@ -19,7 +19,7 @@ import { hasTestCriterion, runCriteria } from "./ticket.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { writeOwnerFile } from "./owner-file.ts";
 import { ArkError } from "./errors.ts";
-import { appendEvent, deriveState, readEvents, type RunState } from "./events.ts";
+import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events.ts";
 import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
 import { parsers, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
@@ -197,6 +197,8 @@ type SideRun = {
   redOnMain: { suite: string; file: string }[];
   /** Every result of each suite that ran on this side. */
   listed: Map<string, TestResult[]>;
+  /** A pre-run side: its logs go to `prerun-<suite>.log`, its evidence to a folder that is removed, and it writes no row in `resources.json`. */
+  throwaway?: boolean;
 };
 
 /** A test that the base has and the head lacks. `file` is absent when the report names none. */
@@ -361,6 +363,29 @@ function writeResults(run: SideRun, evidenceDirectory: string): void {
 /** Where a suite's passed result is kept: the project's cache folder and the key of the result. */
 type SuiteCache = { project: string; key: string };
 
+/** A suite row of `test.completed`. `failed_files`: the test files that still failed after the one retry, not flaky and not red on main; an event written before ARK-551 has none. */
+type SuiteRecord = {
+  name: string;
+  level: string;
+  passed: boolean;
+  loadAtStart: number | null;
+  loadPeak: number | null;
+  reused?: boolean;
+  flaky?: string[];
+  failed_files?: string[];
+};
+
+/** The failed files of each suite in the run's last `test.completed` event, whatever its mode; empty when there is none or it passed. A suite row without `failed_files` has none. */
+function failedFilesOfLastTest(events: ArkEvent[]): Map<string, string[]> {
+  const failed = new Map<string, string[]>();
+  const last = events.findLast((event) => event.type === "test.completed");
+  if (last === undefined || last.data.passed === true) return failed;
+  for (const entry of last.data.suites ?? [])
+    if (Array.isArray(entry.failed_files) && entry.failed_files.length > 0)
+      failed.set(entry.name, entry.failed_files);
+  return failed;
+}
+
 /**
  * Runs each failed test file once more through `base_command` with that one file. A file that passes the second
  * time is flaky: its second results replace the failed ones. No retry (null) when the suite has no
@@ -450,11 +475,15 @@ async function runSuite(
   cache?: SuiteCache,
   mainCheck?: MainCheck,
 ) {
-  const prefix = sideRun.side === "base" ? "base-" : "";
+  const prefix = sideRun.throwaway ? "prerun-" : sideRun.side === "base" ? "base-" : "";
   const reportPath = join(resultsDirectory, `${prefix}${suite.name}.report`);
   const scratch = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-evidence-")));
   // ARK-390: a private TMPDIR per suite, so two suites or two runs never share temp files.
   const suiteTmpdir = writeOwnerFile(mkdtempSync(join(tmpdir(), "ark-suite-")));
+  // A pre-run keeps no evidence: its folder goes with the private TMPDIR.
+  const evidenceStage = sideRun.throwaway
+    ? join(suiteTmpdir, "evidence")
+    : join(resultsDirectory, STAGING);
   let taken: { cores: number; waitMilliseconds: number; release: () => void } | null = null;
   let loadSampler: LoadSampler | null = null;
   try {
@@ -483,6 +512,7 @@ async function runSuite(
         flaky: cached.flaky,
         reused: true,
         code: 0,
+        failedFiles: [] as string[],
         load: { start: null, peak: null },
       };
     }
@@ -503,7 +533,7 @@ async function runSuite(
       },
       true,
     );
-    if (sideRun.side !== "census")
+    if (sideRun.side !== "census" && !sideRun.throwaway)
       recordSide(resultsDirectory, suite.name, sideRun.side, {
         ...outcome.use!,
         wall_s: Math.round((Date.now() - started) / 100) / 10,
@@ -525,7 +555,7 @@ async function runSuite(
       log += retried.log;
     }
     writeFileSync(join(resultsDirectory, `${prefix}${suite.name}.log`), output);
-    addSuite(sideRun, suite, sha, log, results, scratch, join(resultsDirectory, STAGING), selected);
+    addSuite(sideRun, suite, sha, log, results, scratch, evidenceStage, selected);
     const flaky = retried?.flaky ?? [];
     for (const file of flaky) sideRun.flaky.push({ suite: suite.name, file });
     // A file that still fails after its retry goes once to the tip of the target branch (ARK-428).
@@ -583,6 +613,7 @@ async function runSuite(
       results,
       passed,
       flaky,
+      failedFiles: unresolved,
       reused: false,
       code: outcome.code,
       load: { start: loadSampler.start, peak: loadSampler.stop() },
@@ -1226,14 +1257,15 @@ async function executeTest(
       const headLines = [...headCheck.problems, ...headCheck.evidence];
       if (headLines.length > 0) console.log(["merge-request check", ...headLines].join("\n"));
     };
-    if (stopped) {
+    // The one writer of a run that stops before any suite: a failed check, and a pre-run file that still fails.
+    const stopRun = (recorded: SuiteRecord[], message: string): never => {
       rmSync(evidenceDirectory, { recursive: true, force: true });
       // Never `failing`: that would fake the bug-run red proof. A stopped full run records no `red_on_main`, so the chief's list of files red on main is empty until the next full run: accepted.
       appendEvent(directory, "test.completed", {
         passed: false,
         checks,
         heads,
-        suites: [],
+        suites: recorded,
         criteria: Object.fromEntries(
           criteria.map((criterion) => [criterion, quick ? "not run" : "missing"]),
         ),
@@ -1243,10 +1275,13 @@ async function executeTest(
         duration: Math.round((Date.now() - started) / 1000),
       });
       printHeadCheck();
-      throw new ArkError(
+      throw new ArkError(message);
+    };
+    if (stopped)
+      stopRun(
+        [],
         `tests did not prove every criterion: ${failedChecks.map((check) => `check ${check.name} failed`).join("; ")}`,
       );
-    }
     // A dirty checkout has results no head names: nothing of this run is read from or stored in the cache.
     const dirty = (
       await Promise.all(
@@ -1262,15 +1297,7 @@ async function executeTest(
       )
     ).some(Boolean);
     const mode = quick ? "quick" : "full";
-    const suites: {
-      name: string;
-      level: string;
-      passed: boolean;
-      loadAtStart: number | null;
-      loadPeak: number | null;
-      reused?: boolean;
-      flaky?: string[];
-    }[] = [];
+    const suites: SuiteRecord[] = [];
     const headKeys = new Map<string, string>();
     // ARK-333: the exit code of each head suite, printed with a failed suite; not part of the recorded `suites`.
     const exitCodes = new Map<string, number>();
@@ -1291,6 +1318,54 @@ async function executeTest(
         const up = await run([...composeBase, "up", "-d", "--wait"], mirror);
         if (up.code !== 0)
           throw new ArkError(`compose up failed: ${(up.stderr || up.stdout).trim()}`);
+      }
+      // ARK-551: a full run first runs the files that failed in the last test, through the quick selection (`base_command` with `{files}`). The pre-run is a throwaway side: it adds nothing to the head run, the cache or `resources.json`. `--keep-going` skips it.
+      if (!quick && !keepGoing) {
+        const failedBefore = failedFilesOfLastTest(readEvents(directory));
+        const prerun: SideRun = { ...newSide("head"), throwaway: true };
+        const still: SuiteRecord[] = [];
+        for (const suite of config.suites) {
+          const recorded = failedBefore.get(suite.name);
+          if (
+            recorded === undefined ||
+            suite.base_command === undefined ||
+            !suiteRepoInRun(suite, state.worktrees)
+          )
+            continue;
+          // `file` is relative to the suite's cwd, the repo folder in the mirror, as at the retry.
+          const files = recorded.filter((file) => existsSync(join(mirror, suite.repo, file)));
+          if (files.length === 0) continue;
+          if (prerun.suites.size === 0)
+            console.log("ark test: failed files of the last test, run first");
+          const { passed, failedFiles } = await runSuite(
+            suite,
+            join(mirror, suite.repo),
+            resultsDirectory,
+            prerun,
+            heads[suite.repo]!,
+            suite.base_command.replaceAll("{files}", files.map(shellQuote).join(" ")),
+            files,
+            undefined,
+            mainCheck,
+          );
+          if (passed) continue;
+          // A failure that names no file (a crash) keeps every file of the pre-run, so the next run runs them again.
+          const failed = failedFiles.length > 0 ? failedFiles : files;
+          console.log(`  ${suite.name}: ${failed.join(", ")}`);
+          still.push({
+            name: suite.name,
+            level: suite.level,
+            passed: false,
+            loadAtStart: null,
+            loadPeak: null,
+            failed_files: failed,
+          });
+        }
+        if (still.length > 0)
+          stopRun(
+            still,
+            `the files of the last test still fail: ${still.map((suite) => `${suite.name} (${suite.failed_files!.join(", ")})`).join("; ")}; run no other suite`,
+          );
       }
       for (const suite of config.suites) {
         if (!suiteRepoInRun(suite, state.worktrees)) {
@@ -1332,7 +1407,7 @@ async function executeTest(
           compose: config.compose,
         });
         headKeys.set(suite.name, key.slice(0, 6));
-        const { results, passed, flaky, reused, code, load } = await runSuite(
+        const { results, passed, flaky, failedFiles, reused, code, load } = await runSuite(
           suite,
           join(mirror, suite.repo),
           resultsDirectory,
@@ -1356,6 +1431,7 @@ async function executeTest(
           loadPeak: load.peak,
           ...(reused ? { reused } : {}),
           ...(flaky.length > 0 ? { flaky } : {}),
+          ...(failedFiles.length > 0 ? { failed_files: failedFiles } : {}),
         });
       }
     } finally {
