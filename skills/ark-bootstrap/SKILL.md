@@ -116,6 +116,14 @@ It selects the changed test files only, not the tests that a change to a source 
 
 Jest and Vitest have no parser of their own: use `parser: bun` on their JUnit report. Selection is by import graph or by changed files, so a quick run is not proof: the full run is the gate. See `docs/how-to/project-checks.md`, "Run only the affected tests in a quick run".
 
+A suite may also have a time limit. Ask the human before you add any of the three keys; the choice is the project's, and `on_over: fail` makes an `ark test` run fail:
+
+- `time_budget_s`: seconds the whole suite may take, read as the `time` of its report's root element. A full `ark test` judges it; a quick run does not.
+- `slow_test_s`: seconds one test may take, read from the `time` of each test in the report. Every test over it is listed in a full and a quick run. A test with no `time` in the report is never slow.
+- `on_over`: `warn` (the default; prints a `warning` line and the run passes) or `fail` (a suite over `time_budget_s`, or a test over `slow_test_s` with no `slow_reason`, fails a full run). Ask for `fail` only with a figure that has headroom over an idle host: the times move with the host's load.
+
+Each number must be positive, and `on_over` is `warn` or `fail`, or `ark.yml` is refused when it loads. With none of the keys set nothing changes, so omit them when the human has no limit. Tell the human that a test case entry (`test/cases/<id>.md`) can give `slow_reason` to excuse a test over `slow_test_s`; `docs/reference/cli.md` and `docs/how-to/project-checks.md`, "Limit the time of a suite and of a test", describe it.
+
 ### Compose command
 
 Look for `docker-compose.yml`, `docker-compose.yaml`, `compose.yml` or `compose.yaml` in the workspace root, then at `Taskfile*`, `Makefile`, `package.json` scripts and the README for how the team starts the stack (`dev:up` in a Taskfile, for instance).
@@ -298,6 +306,9 @@ suites:
     parser: <bun | pytest | behave>
     cores: <cores the suite takes, and the value of <cores> in its command; omit for the whole budget; for example cli 3, playwright 2, each check 1>
     changed_command: <command with {base} and {report} that a quick ark test runs in place of command; omit to run the suite in full in a quick run>
+    time_budget_s: <seconds the whole suite may take; a positive number; omit for no limit; ask the human>
+    slow_test_s: <seconds one test may take; a positive number; omit for no limit; ask the human>
+    on_over: <warn | fail; omit for warn; fail makes a full ark test fail when a limit is exceeded; ask the human>
 roles:
   implementer: { harness: <harness>, model: <model> }
   validator: { harness: <harness>, model: <model> }
@@ -313,6 +324,7 @@ Rules for the file:
 
 - `workspace` is an existing absolute directory.
 - `suites` has at least one entry, and each `name` is unique. A `changed_command` holds `{base}` and `{report}`.
+- `time_budget_s` and `slow_test_s` are positive numbers, and `on_over` is `warn` or `fail`. Set them only when the human asked for a limit.
 - Put `concurrency`, `round_budget` and `escalation_rounds` in only when the human asked for non-default values.
 - Keep the file valid YAML with 2-space indentation and no tabs.
 

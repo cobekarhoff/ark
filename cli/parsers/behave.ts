@@ -14,7 +14,13 @@ import { ArkError } from "../errors";
 import { caseIdsIn } from "./case";
 import type { Parser, TestResult } from "./index";
 
-type BehaveElement = { type: string; name: string; tags?: string[]; status?: string };
+type BehaveElement = {
+  type: string;
+  name: string;
+  tags?: string[];
+  status?: string;
+  steps?: { result?: { duration?: number } }[];
+};
 type BehaveFeature = {
   name: string;
   location?: string;
@@ -45,12 +51,16 @@ export const parseBehave: Parser = ({ report }) => {
         /^\.\//,
         "",
       );
+      // behave gives a duration to each step, not to the scenario: a scenario takes the sum of its steps.
+      const steps = (element.steps ?? []).flatMap((step) => step.result?.duration ?? []);
+      const duration_s = steps.reduce((sum, seconds) => sum + seconds, 0);
       results.push({
         name: `${feature.name}: ${element.name.trim()}`,
         criteria: [...new Set(tags.match(criterionPattern) ?? [])].sort(),
         cases: caseIdsIn(tags).sort(),
         status: statusOf(element.status),
         ...(file ? { file } : {}),
+        ...(steps.length > 0 && Number.isFinite(duration_s) ? { duration_s } : {}),
       });
     }
   }
