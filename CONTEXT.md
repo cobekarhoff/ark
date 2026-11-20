@@ -123,7 +123,7 @@ The worker that makes mockups for the strategy cards, and for a question about i
 _Avoid_: UI agent, artist
 
 **Test case writer**:
-The worker the run lead starts after the strategy and before it writes `plan.yml`. It writes the run's test cases and never test code or product code. `roles.test_writer` in `ark.yml` sets its harness and model.
+The worker the run lead starts after the strategy and before it writes `plan.yml`. It writes the run's test cases, commits the case files, and never test code or product code. `roles.test_writer` in `ark.yml` sets its harness and model.
 _Avoid_: Test designer
 
 **Test case reviewer**:
