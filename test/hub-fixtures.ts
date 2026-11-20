@@ -385,6 +385,8 @@ export type FakeToolOptions = {
   orcaPsFails?: boolean;
   /** The full conversation `orca orchestration inbox` read (any `--limit` but the liveness read's 200, no `--terminal`) exits 1; every other call still answers. */
   orcaInboxFails?: boolean;
+  /** Seconds the full conversation read waits after it passed the `orcaInboxFails` check and before it answers; each such read appends a line to `orca.inboxpassed` first. Default 0: no wait, no line. */
+  orcaInboxDelaySeconds?: number;
   /** The unread messages of each project's Master Chief Run, by project: the `inbox --terminal run:<id> --full` rows, or `"fails"` to make that read exit 1. A project not listed has none. */
   chiefUnread?: Record<string, unknown[] | "fails">;
   /** Projects with no Master Chief Run in `run-list` (every other project of the fixture has one). */
@@ -433,6 +435,7 @@ export function writeFakeToolState(stateDirectory: string, options: FakeToolOpti
   put("orca.tasks", wrap(options.orca?.tasks, "tasks"));
   put("orca.inbox", wrap(options.orca?.messages, "messages"));
   put("orca.inboxfails", options.orcaInboxFails ? "1" : "0");
+  put("orca.inboxdelay", String(options.orcaInboxDelaySeconds ?? 0));
   // The per-project read of the Master Chief Run: rows as ndjson (newest first), or a marker file for a failing read.
   for (const name of readdirSync(stateDirectory))
     if (name.startsWith("orca.unread.")) rmSync(join(stateDirectory, name), { force: true });
@@ -539,7 +542,8 @@ case "$1 $2" in
       case " $* " in *" --full "*) ;; *) rows=$(printf '%s\\n' "$rows" | sed 's/,"created_at":"[^"]*"//') ;; esac
       printf '{"result":{"messages":[%s]}}\\n' "$(printf '%s\\n' "$rows" | paste -sd, -)"
     else
-      case " $* " in *" --limit 200 "*) ;; *) [ "$(cat '${state}/orca.inboxfails')" = 1 ] && exit 1 ;; esac; cat '${state}/orca.inbox'
+      case " $* " in *" --limit 200 "*) ;; *) [ "$(cat '${state}/orca.inboxfails')" = 1 ] && exit 1
+      delay=$(cat '${state}/orca.inboxdelay'); [ "$delay" = 0 ] || { echo passed >> '${state}/orca.inboxpassed'; sleep "$delay"; } ;; esac; cat '${state}/orca.inbox'
     fi ;;
   "worktree ps") [ "$(cat '${state}/orca.psfails')" = 1 ] && exit 1; cat '${state}/orca.ps' ;;
   *) exit 1 ;;
