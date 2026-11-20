@@ -380,11 +380,23 @@ printf '};\\n'
     const status = ark("services", "status", "--project", project);
     expect(state.code, state.err).toBe(0);
     expect(status.code, status.err).toBe(0);
-    expect(
-      section(state.out, "Services")
-        .replace(/^Services\s*/, "")
-        .trim(),
-    ).toBe(status.out.trim());
+    // The Hub line holds an answer time that differs on each call (ARK-533): the service rows are
+    // identical without it, and the two Hub lines have the same shape once the numbers are replaced.
+    const hubLines = (text: string) => text.split("\n").filter((line) => /^Hub\b/.test(line));
+    const withoutHub = (text: string) =>
+      text
+        .split("\n")
+        .filter((line) => !/^Hub\b/.test(line))
+        .join("\n")
+        .trim();
+    expect(hubLines(state.out), "one Hub line in chief state").toHaveLength(1);
+    expect(hubLines(status.out), "one Hub line in services status").toHaveLength(1);
+    expect(hubLines(state.out)[0].replace(/\d+(\.\d+)?/g, "N")).toBe(
+      hubLines(status.out)[0].replace(/\d+(\.\d+)?/g, "N"),
+    );
+    expect(withoutHub(section(state.out, "Services").replace(/^Services\s*/, ""))).toBe(
+      withoutHub(status.out),
+    );
     expect(status.out).toMatch(/^auto-merger\s+loaded\s+pid -/m);
     expect(status.out).toMatch(/^temp-cleaner\s+running\s+pid 4242\s+last log: free 31 GB$/m);
     expect(status.out).toMatch(/^sweep\s+not installed$/m);

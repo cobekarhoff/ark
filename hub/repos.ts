@@ -6,7 +6,7 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, mergeRequestsMode } from "../cli/config.ts";
+import { hubConfig } from "./config.ts";
 import { bumpState, submodulePointer } from "../cli/merge-request.ts";
 import { hasMultipleRepos, repoGraph, type PlanRepo, type PlanRepoEdge } from "../cli/plan.ts";
 import { commitsAhead } from "../cli/worktree.ts";
@@ -40,13 +40,13 @@ export function readRepoFacts(run: ArkRun): RepoFacts {
   const { state } = run;
   let workspace: string | null = null;
   try {
-    workspace = loadConfig(state.project).workspace;
+    workspace = hubConfig(state.project).workspace;
   } catch {
     // ark.yml does not load: the branch state stays unknown
   }
   const facts: RepoFacts = { ahead: {}, pointers: {}, localOnly: false };
   try {
-    facts.localOnly = mergeRequestsMode(state.project) === "none";
+    facts.localOnly = hubConfig(state.project).merge_requests === "none";
   } catch {
     // ark.yml does not load: treated as open
   }

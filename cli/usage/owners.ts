@@ -45,9 +45,21 @@ export type OwnableFile = {
   times: number[];
 };
 
+const resolved = new Map<string, string>();
+
+/**
+ * The symlink-resolved path, looked up once for each path that exists: the hub calls `ownersOf` on
+ * every publish, and a `realpathSync` for each file and window held its event loop for 6 s of 90 s
+ * (ARK-533). A path that does not exist yet is looked up again. ponytail: a symlink that is
+ * retargeted while the hub runs shows after a restart; key the entry by mtime if that matters.
+ */
 const realPathOf = (path: string): string => {
+  const known = resolved.get(path);
+  if (known !== undefined) return known;
   try {
-    return realpathSync(path);
+    const real = realpathSync(path);
+    resolved.set(path, real);
+    return real;
   } catch {
     return path;
   }
@@ -81,13 +93,15 @@ export function ownersOf(
   stages: StageTimes = {},
 ): Owner[] {
   const firstStep = Math.min(...windows.map((window) => window.start));
+  const sessionReals = windows.map((window) =>
+    window.session === undefined ? undefined : realPathOf(window.session),
+  );
   const owners = files.map((file): Owner => {
     const start = file.start;
     const recorded = windows.findLast(
-      (candidate) =>
+      (candidate, index) =>
         candidate.session !== undefined &&
-        (candidate.session === file.file ||
-          realPathOf(candidate.session) === realPathOf(file.file)),
+        (candidate.session === file.file || sessionReals[index] === realPathOf(file.file)),
     );
     const window =
       recorded ??

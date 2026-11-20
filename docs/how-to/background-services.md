@@ -43,7 +43,10 @@ auto-merger         running   pid 80115   last log: CHANGE: 2026-11-12-ARK-435-1
 temp-cleaner        running   pid 80117   last log: none
 sweep               running   pid 80121   last log: none
 project-autocommit  running   pid 80130   last log: none
+Hub                 answered in 4 ms, loop lag 12 ms
 ```
+
+The `Hub` line comes from the hub's `GET /api/health`: how long it took to answer and the event loop lag. A hub that does not answer in 5 s reads `stalled: no answer in 5 s`; no hub at all reads `no hub running`. `ark chief state` prints the same line under Services.
 
 `merge_requests: none` in `ark.yml` means the project has no MRs. Install then skips the auto-merger, and removes one that an earlier setting loaded.
 

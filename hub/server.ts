@@ -67,7 +67,7 @@ const fileLimitBytes = 1 << 20;
 const switchTimeoutMilliseconds = 5000;
 
 /**
- * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /api/resources/history` (the 24-hour host history), `GET /events`
+ * Serves the hub. Routes: `GET /`, `GET /assets/*`, `GET /api/snapshot`, `GET /api/health` (the event loop lag and the last pass of each source, from memory), `GET /api/resources/history` (the 24-hour host history), `GET /events`
  * (Server-Sent Events), and on request `GET /api/run/<run>` (any run, open or closed),
  * `GET /api/run/<run>/transcript?file=&cursor=`, `GET /api/run/<run>/transcript/result?file=&call=`
  * (one full tool result), `GET /api/run/<run>/file?path=`,
@@ -170,8 +170,21 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
   const conversationReply = (reply: ConversationReply | null) =>
     reply ? json(reply) : text("no inbox read yet: open the hub page, then retry", 503);
 
+  /**
+   * Waits for the first read of Ark for a short bound. A cold hub (a large home reads for seconds) answers 503 `loading`
+   * and the read keeps running; after the first read this resolves at once.
+   */
+  async function readyOrLoading(): Promise<Response | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<false>((resolve) => (timer = setTimeout(resolve, 250, false)));
+    const ready = await Promise.race([reader.ready().then(() => true), bound]);
+    clearTimeout(timer);
+    return ready ? null : text("loading", 503);
+  }
+
   async function runRoute(url: URL, runName: string, rest: string): Promise<Response> {
-    await reader.ready();
+    const loading = await readyOrLoading();
+    if (loading) return loading;
     const directory = reader.runDirectory(runName);
     if (directory === null) return text("no such run", 404);
     if (rest === "") return json(reader.runDetail(runName));
@@ -247,10 +260,14 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       if (request.method !== "GET") return text("method not allowed", 405, { allow: "GET" });
       if (!isLocalRequest(request, getAuthorities())) return text("foreign origin", 403);
 
+      // Memory only, like /api/snapshot: it never waits for a reader pass, so a stalled source cannot stall the probe.
+      if (pathname === "/api/health") return json(reader.health());
+
       const cases = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)\/cases$/);
       if (cases) {
         try {
-          await reader.ready();
+          const loading = await readyOrLoading();
+          if (loading) return loading;
           const result = await reader.ticketCases(
             decodeURIComponent(cases[1]),
             decodeURIComponent(cases[2]),
@@ -264,7 +281,8 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
       const ticket = pathname.match(/^\/api\/ticket\/([^/]+)\/([^/]+)$/);
       if (ticket) {
         try {
-          await reader.ready();
+          const loading = await readyOrLoading();
+          if (loading) return loading;
           // The id only selects a listed ticket: the file is the one the hub listed, never a path built from the URL.
           const result = reader.ticketDocument(
             decodeURIComponent(ticket[1]),
@@ -298,7 +316,7 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         if (Number.isNaN(since) || Number.isNaN(until) || since >= until)
           return text("since and until must be ISO times, since before until", 400);
         try {
-          await reader.ready();
+          // `reader.conversation` waits for the first reads itself, for a short bound: `ready()` here waited for the whole first Ark read.
           return conversationReply(await reader.conversation({ kind: "project", since, until }));
         } catch {
           return text("the usage worker could not build the conversation", 502);
