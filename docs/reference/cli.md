@@ -531,11 +531,11 @@ directory while it reads the highest number, writes the counter and then the fil
 and worktrees of one repo get different IDs. It prints the ID alone on stdout and the path of the
 file on stderr. An entry is one Markdown file with the frontmatter `id`, `title` (starts with the
 id), `level` (unit, integration or e2e), `technique`, `priority`, `risk` (the defect the case
-catches), `status` (active or retired; a retired entry also has `retired_reason`), and optionally
-`slow_reason` (why a test with this id may be slower than `slow_test_s`; `ark test` lists that test
-with the reason and does not fail it) and `changed_by`, and the sections Objective, Preconditions,
-Steps, Expected results and Screenshot checkpoints. `test_case_source` in ark.yml accepts `local`
-only. Outside a git repo it exits 1.
+catches), `status` (active or retired; a retired entry also has `retired_reason`), `changed_by`, and
+optionally `slow_reason` (why a test with this id may be slower than `slow_test_s`; `ark test` lists
+that test with the reason and does not fail it), and the sections Objective, Preconditions, Steps,
+Expected results and Screenshot checkpoints. `test_case_source` in ark.yml accepts `local` only.
+Outside a git repo it exits 1.
 ```
 
 ### test-audit inventory
