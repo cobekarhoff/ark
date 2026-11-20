@@ -1,6 +1,6 @@
 ---
 id: ARK-T742
-title: ARK-T742 The time verdict of ark test is made once on the head results of a full run from the current ark.yml: a quick run, a reused suite, a retried file, a missing time, each parser and an invalid key each have a stated result
+title: "ARK-T742 The time verdict of ark test is made once on the head results of a full run from the current ark.yml: a quick run, a reused suite, a retried file, a missing time, each parser and an invalid key each have a stated result"
 level: integration
 technique: equivalence classes over the ways into the verdict (full run, quick run, cache reuse, retry replace, report with no time, each parser) and error guessing at the config boundary (zero, negative, text, unknown value of `on_over`)
 priority: high

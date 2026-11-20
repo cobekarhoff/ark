@@ -98,7 +98,7 @@ describe("playwright migration", () => {
     long,
   );
 
-  test("ARK-243-AC2 the bun parser maps Playwright JUnit statuses and criterion ids", async () => {
+  test("ARK-T134 the bun parser maps Playwright JUnit statuses and criterion ids", async () => {
     const report = await Bun.file(join(root, "test/fixtures/playwright/junit.xml")).text();
     expect(parseBun({ report, stdout: "" })).toEqual([
       {
