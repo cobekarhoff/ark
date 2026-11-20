@@ -3,10 +3,12 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -1347,7 +1349,11 @@ test(
         .filter(Boolean);
       for (const file of tracked) {
         mkdirSync(dirname(join(workspace, file)), { recursive: true });
-        copyFileSync(join(repositoryRoot, file), join(workspace, file));
+        const source = join(repositoryRoot, file);
+        // the skills/<skill>/shared links point at a folder, so keep them as links
+        if (lstatSync(source).isSymbolicLink())
+          symlinkSync(readlinkSync(source), join(workspace, file));
+        else copyFileSync(source, join(workspace, file));
       }
       // Without the trailing slash the pattern also ignores the symlink. It is in the base commit,
       // so the run, the clone and the merge all agree on it.
