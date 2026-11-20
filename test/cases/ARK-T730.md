@@ -33,7 +33,7 @@ The helper module is created by the implementer. The validator loads it with a d
 3. Probes at 0, 5000, 10000, 70000 with lags 10, 10, 226, 226 (the hub reports its 60 s maximum again at the last probe). One pass ending at 7000 (`last_ms` 50) and another ending at 65000 (`last_ms` 50).
 4. Probes at 0 and 5000 with lags 10 and 244. `sources` hold: `a` with `ended_at` `null` and `last_ms` `null`, `b` with `ended_at` `iso(-1000)` and `last_ms` 40 (a pass that ended before the soak start). No hub line.
 5. One probe at 0 with lag 300, and a source `a` with `ended_at` `iso(0)`, `last_ms` 40.
-6. Two spikes of the same value: probes at 0, 5000, 10000, 15000, 20000 with lags 10, 300, 20, 300, 10. `usage` ended at `iso(3000)` (`last_ms` 50), `github` ended at `iso(12000)` (`last_ms` 50). Then, on its own: probes at 0 and 5000 where every `lag_ms` is `null`.
+6. Two spikes of the same value: probes at 0, 5000, 10000, 15000, 20000 with lags 10, 300, 20, 300, 10. `usage` ended at `iso(3000)` (`last_ms` 50), `github` ended at `iso(12000)` (`last_ms` 50). Then, on their own, two sets of probes at 0 and 5000: one where every `lag_ms` is `null`, one where every `lag_ms` is 0 (no lag means every `lag_ms` is `null` or 0).
 7. Probes at 0, 5000, 10000, 15000 with lags 20, 20, 240, 240. `batch` first appears at probe 15000 with `ended_at` `iso(12000)` and `last_ms` 5000 (it started at 7000, inside the window 5000 to 10000, and ended after it). `claude` appears at probe 15000 with `iso(12000)` and `last_ms` 3.
 
 ## Expected results
@@ -43,7 +43,7 @@ The helper module is created by the implementer. The validator loads it with a d
 - Step 3: the window is 5000 to 10000, not 10000 to 70000: the pass ending at 7000 is named, the one ending at 65000 is not. The message time is 10000 ms.
 - Step 4: the message still holds `244` and its time 5000, and says "no source" and "no hub line": `a` has no pass and `b` ended before the soak start, so neither is named. A section is never omitted.
 - Step 5: with no probe before the largest one, the window starts at 0 and is 0 to 0; `a` (ran -40 to 0) is named, a pass ending exactly at the window start is in it. The helper does not throw.
-- Step 6, first example: the first spike wins: the message time is 5000, it names `usage` (3000 is in 0 to 5000) and not `github` (12000 is in the second spike's window, 10000 to 15000). Second example: the message says there was no lag, the helper does not throw, and no source or hub line is invented.
+- Step 6, first example: the first spike wins: the message time is 5000, it names `usage` (3000 is in 0 to 5000) and not `github` (12000 is in the second spike's window, 10000 to 15000). Second and third examples: the message says there was no lag, the helper does not throw, and no source or hub line is invented.
 - Step 7: `batch` is named (its pass ran 7000 to 12000 and overlaps 5000 to 10000, though it ended after the window); `claude` is not (11997 to 12000). A helper that filters on `ended_at` alone fails this step.
 
 Red at base: the helper module does not exist, so each dynamic import fails; each example fails by its own message and the rest of the file loads. The deletion that must turn step 1 red: widening the window to the whole soak (names `github`) or narrowing it to the single probe. The one that must turn step 3 red: using the last probe that reports the maximum. The one that must turn step 7 red: filtering on `ended_at` only.
