@@ -2,9 +2,9 @@
 id: ARK-T715
 title: ARK-T715 the ARK-T707 test "takes its own ticket under the marker of a run that has ended" passes under 5 s when the case closes the FIFO writer during the pause after the fake test writes ran-x
 level: integration
-technique: race made deterministic by a delayed fixture (boundary value: the writer closes inside the window after the marker), plus a validator evidence run of repeats on a loaded shard
+technique: race made deterministic by a delayed fixture (boundary value, the writer closes inside the window after the marker), plus a validator evidence run of repeats on a loaded shard
 priority: high
-risk: the fake test of `makeProbeRepo({ hold: true })` writes `ran-x` and only then opens its FIFO for reading; the case sees `ran-x`, calls `release()` (closes its read-write descriptor), the child then opens a FIFO that has no writer and blocks forever, so `finish(taking)` times out at 20 s with `no exit of the child` on a loaded CI shard (2 of 2 attempts of PR #265, passing in 173, 254 and 495 ms on idle hosts)
+risk: the fake test of `makeProbeRepo` with `hold` set writes `ran-x` and only then opens its FIFO for reading; the case sees `ran-x`, calls `release()` (closes its read-write descriptor), the child then opens a FIFO that has no writer and blocks forever, so `finish(taking)` times out at 20 s with `no exit of the child` on a loaded CI shard (2 of 2 attempts of PR #265, passing in 173, 254 and 495 ms on idle hosts)
 status: active
 changed_by: 2026-11-20-ARK-596-1
 ---
