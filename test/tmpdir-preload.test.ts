@@ -303,11 +303,14 @@ test("fixture", () => {
 });
 `;
 
-test(
-  "ARK-T712 bun test --rerun-each=5 on one file that uses the temp root and the shims passes 5 of 5 repeats in one process",
-  async () => {
+test.each([
+  { label: "--rerun-each=5", flags: ["--rerun-each=5"] },
+  { label: "--rerun-each 5", flags: ["--rerun-each", "5"] },
+])(
+  "ARK-T712 bun test --rerun-each=5 on one file that uses the temp root and the shims passes 5 of 5 repeats in one process ($label)",
+  async ({ flags }) => {
     const fixturePath = writeFixture("rerun-roots-and-shims", usesRootsAndShims);
-    const repeated = await runBunTest(fixturePath, scratchDirectory(), ["--rerun-each=5"]);
+    const repeated = await runBunTest(fixturePath, scratchDirectory(), [...flags]);
     expect(repeated.exitCode, repeated.output).toBe(0);
     expect(repeated.output).toContain(" 5 pass");
     expect(repeated.output).toContain(" 0 fail");
@@ -373,6 +376,37 @@ test.each([
     expect(new Set(lines).size).toBe(1);
     const [root, host, presentWhileRunning] = lines[0]!.split("|");
     expect(presentWhileRunning).toBe("true");
+    expect(dirname(root!)).toBe(realpathSync(scratch));
+    expect(root!).toMatch(/\/bun-test-[^/]+$/);
+    expect(host!).toMatch(/^\/tmp\/ark-fake-host-/);
+    expect(existsSync(root!)).toBe(false);
+    expect(existsSync(host!)).toBe(false);
+  },
+  { timeout: 60_000 },
+);
+
+// A file that throws at load: bun runs no repeat and fires each preload afterAll once, so "remove after repeat N" alone
+// would leak both roots. The fixture records the roots before it throws.
+const throwsAtLoad = `
+import { writeFileSync } from "node:fs";
+writeFileSync(process.env.ROOT_RECORD!, [process.env.TMPDIR, process.env.ARK_FAKE_HOST].join("|"));
+throw new Error("fixture fails at load");
+`;
+
+test.each([
+  { label: "--rerun-each=3", flags: ["--rerun-each=3"] },
+  { label: "--rerun-each 3", flags: ["--rerun-each", "3"] },
+])(
+  "ARK-T713 after a bun test process ends normally, with or without --rerun-each, and after repeats that fail, its bun-test-* root and its host root no longer exist (file fails at load, $label)",
+  async ({ flags }) => {
+    const fixturePath = writeFixture("rerun-throws-at-load", throwsAtLoad);
+    const scratch = scratchDirectory();
+    const record = join(scratchDirectory(), "roots.txt");
+    const child = spawnBunTest(fixturePath, scratch, [...flags], { ROOT_RECORD: record });
+    const output =
+      (await new Response(child.stdout).text()) + (await new Response(child.stderr).text());
+    expect(await child.exited, output).toBe(1);
+    const [root, host] = readFileSync(record, "utf8").split("|");
     expect(dirname(root!)).toBe(realpathSync(scratch));
     expect(root!).toMatch(/\/bun-test-[^/]+$/);
     expect(host!).toMatch(/^\/tmp\/ark-fake-host-/);
