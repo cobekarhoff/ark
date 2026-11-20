@@ -329,3 +329,25 @@ export function holdReasons(
     );
   return reasons;
 }
+
+/**
+ * Bun test workers (`bun test --test-worker`) whose parent is pid 1, from one `ps`; null when `ps` fails, which is
+ * unknown and not none. The working folder is not read, so `ark chief state` runs no `lsof`. Memory is RSS in MB.
+ * `scripts/temp-cleaner.sh` uses the same command test and adds the working folder and an age before it stops one.
+ */
+export async function readOrphanedTestWorkers(): Promise<{
+  count: number;
+  megabytes: number;
+} | null> {
+  const output = await exec(["ps", "-axww", "-o", "pid=,ppid=,rss=,command="]);
+  if (output === null) return null;
+  let count = 0;
+  let kilobytes = 0;
+  for (const line of output.split("\n")) {
+    const [, parent, rss, command] = /^\s*\d+\s+(\d+)\s+(\d+)\s+(.*)$/.exec(line) ?? [];
+    if (parent !== "1" || !/^(\S*\/)?bun test --test-worker( |$)/.test(command ?? "")) continue;
+    count++;
+    kilobytes += Number(rss);
+  }
+  return { count, megabytes: Math.round(kilobytes / 1024) };
+}

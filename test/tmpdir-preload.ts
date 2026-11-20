@@ -2,6 +2,7 @@ import { afterAll, setDefaultTimeout } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import { holdTestBudget } from "../cli/bare-test-budget.ts";
 import { writeOwnerFile } from "../cli/owner-file.ts";
 
@@ -13,6 +14,15 @@ setDefaultTimeout(30_000);
 // A killed process (SIGKILL, crash) skips afterAll and leaves its root.
 const tempRoot = writeOwnerFile(mkdtempSync(join(realpathSync(tmpdir()), "bun-test-")));
 process.env.TMPDIR = tempRoot;
+
+// ARK-569: a `bun test --parallel` worker whose coordinator died (SIGKILL, a test timeout, a crashed run) keeps its
+// event loop, or a synchronous call, and sleeps for hours with parent pid 1. A thread of the worker (parent-watch.ts)
+// compares its parent with the one it started with and kills the process within 10 s of any change. A run that
+// started with parent pid 1 has no parent to lose, and a serial run is never a worker.
+if (process.env.BUN_TEST_WORKER_ID !== undefined || process.argv.includes("--test-worker")) {
+  if (process.ppid !== 1)
+    new Worker(new URL("./parent-watch.ts", import.meta.url), { workerData: process.ppid }).unref();
+}
 
 // ARK-390: a real orca, gh, glab, omp, plannotator, launchctl or portless must never run in a test.
 // The shims come first on PATH; a test's own fake (writeFakeCommand) goes in front of them and wins.

@@ -34,8 +34,10 @@ import { arkHome } from "./paths.ts";
 export type Ticket = { run: string; pid: number; cores: number; arrival: string; started?: string };
 
 /**
- * The environment variable that tells a `bun test` preload its cores are already held: `ark test` sets it on every
- * command it starts, and a bare `bun test` sets it after it takes its own ticket, so no nested run waits twice.
+ * The environment variable that tells a `bun test` preload which run holds its cores: the pid of an `ark test` run or
+ * of a bare whole-suite `bun test` that took a ticket. `ark test` sets it on every command it starts and a bare
+ * whole-suite `bun test` sets it after it takes its own ticket, so a nested whole-suite run does not wait twice. The
+ * preload trusts it only while `runHoldsCores` is true: a hand-set value never skips the wait.
  */
 export const budgetHeldVariable = "ARK_TEST_BUDGET";
 
@@ -108,6 +110,12 @@ export function readTestLock(prune = true): { running: Ticket[]; waiting: Ticket
     running: tickets.filter((ticket) => ticket.started !== undefined),
     waiting: tickets.filter((ticket) => ticket.started === undefined),
   };
+}
+
+/** True when `marker` is the pid of a live run that holds a started ticket: the only value that skips a budget wait. */
+export function runHoldsCores(marker: string | undefined): boolean {
+  if (marker === undefined || !/^[1-9][0-9]{0,8}$/.test(marker)) return false;
+  return readTestLock(false).running.some((ticket) => ticket.pid === Number(marker));
 }
 
 function writeTicket(file: string, ticket: Ticket): void {

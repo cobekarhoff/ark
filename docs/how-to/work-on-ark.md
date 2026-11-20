@@ -71,10 +71,11 @@ Why: a whole suite outside the budget raises the host load for every run's `ark 
 
 - A whole suite is `bun test`, `bun test --parallel` or `bun test <directory>`, for example `bun test test --parallel=3`. It asks `N` cores for `--parallel=N`, the CPU count for a bare `--parallel`, and 1 core with no flag. It never asks for more than `test_budget_cores`.
 - It takes the cores through `openTestBudget` in `cli/test-lock.ts`, the same budget as `ark test`. `ark chief state` lists it as `bun test` under `## ark test budget`.
-- It never waits when it runs one or more test files (`bun test test/<file>.test.ts`), or when `ark test` started it. `ark test` sets `ARK_TEST_BUDGET=held` on every command it starts.
+- It never waits when it runs one or more test files (`bun test test/<file>.test.ts`): that run takes no cores, so a whole suite that one of its tests starts waits like a bare run. It never waits when `ark test` started it, or when a held bare run started it: both set `ARK_TEST_BUDGET=<pid>` on the commands they start, and the wait is skipped only while that pid is alive and holds a started ticket. Any other value, such as a hand-set `held`, waits.
 - It never waits when it finds no project for the folder, no readable `ark.yml` or no `ps`. CI and `.githooks/pre-commit` have no project, so they never wait.
 - The project is `ARK_PROJECT`, else the project whose `workspace` or run folder holds the folder you run in.
 - With `--parallel`, a terminal shows the waiting line at once. Without a terminal, Bun shows the line of a worker only when the worker's first file ends.
+- A `bun test --parallel` worker whose coordinator ended exits within 10 s: `test/tmpdir-preload.ts` starts a thread (`test/parent-watch.ts`) that kills the worker when its parent pid changes. `scripts/temp-cleaner.sh` stops one that is left anyway.
 
 The wait lives in the preload of `bunfig.toml`, which calls `holdTestBudget()` from `cli/bare-test-budget.ts`. It covers this repo. Another Ark project gets the wait when its own `bunfig.toml` preload calls the same function.
 
