@@ -11,7 +11,7 @@ changed_by: 2026-11-10-ARK-419-1
 
 ## Objective
 
-Prove the `afterEach` cleanup of `test/test-run.test.ts` (`stopStartedRuns` of `test/orphan-runners.ts`) leaves no `test-runner` process of a run the suite started, including a runner that ignores SIGTERM, and leaves a runner it did not start alone. The two other suites that start fake runs (`test/evidence-test-run.test.ts`, `test/test-selection.test.ts`) use the same helper and keep only their ARK-T235 test; this case runs in `test/test-run.test.ts` only.
+Prove the `afterEach` cleanup of `test/test-run.test.ts` (`stopStartedRuns` of `test/orphan-runners.ts`) leaves no `test-runner` process of a run the suite started, including a runner that ignores SIGTERM, and leaves a runner it did not start alone. The other suites that start fake runs use the same helper and keep only their ARK-T235 test; this case runs in `test/test-run.test.ts` only.
 
 ## Preconditions
 
