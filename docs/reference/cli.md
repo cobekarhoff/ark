@@ -412,11 +412,23 @@ criterion passes it. A suite that fails prints `suite <name> (<level>) failed`, 
 its log path `results/<suite>.log` and the last 20 lines of the log. A criterion with `verified_by`
 prints `no test title starts with <test case id>` on a new line after its `criterion` line for each
 test case that reads `missing`, except on a quick run that selected test files for a suite with
-`base_files`. On every `ark test` it also runs suites on a throwaway checkout at the base commit of
-each worktree: the `target_commit` of its newest `worktree.synced` event that has one (a conflict
-event has none), else the `worktree.created` base. A suite whose `repo` has no worktree in the run
-(an untouched repo) is skipped at head and at base, with `skipped <suite> (repo <repo> not in run)`
-at head, and records no result; repo `.` always runs. A `kind: refactor` run runs every suite whole
+`base_files`. A full run first runs the files that failed in the last `test.completed` event of the
+run (any mode) before any suite and inside the compose, through the `base_command` of each suite
+with `{files}`, and prints `ark test: failed files of the last test, run first`. The pre-run is a
+throwaway: it adds no result, no evidence and no `resources.json` row. `test.completed` records
+`failed_files` for each suite, the files that still fail after the one retry and are neither flaky
+nor red on main. A failed file that no longer exists at head is left out, and a suite with no file
+left runs no command. A suite with no `base_command`, a last test that passed or has no
+`failed_files` (also an event written before this field), a suite whose failed test names no file,
+and `--quick` get no pre-run. A file that still fails prints ` <suite>: <files>`, and the run stops
+with exit 1 and `the files of the last test still fail: <suite> (<files>); run no other suite`, with
+no other suite and no base run; its `test.completed` has `passed: false` and a row for each failing
+suite with its `failed_files`, so the next full run runs them again. `--keep-going` skips the
+pre-run. On every `ark test` it also runs suites on a throwaway checkout at the base commit of each
+worktree: the `target_commit` of its newest `worktree.synced` event that has one (a conflict event
+has none), else the `worktree.created` base. A suite whose `repo` has no worktree in the run (an
+untouched repo) is skipped at head and at base, with `skipped <suite> (repo <repo> not in run)` at
+head, and records no result; repo `.` always runs. A `kind: refactor` run runs every suite whole
 there. For another kind, a suite with `base_files` and `base_command` runs only the test files of
 the run's own commits (`git log --first-parent --no-merges --name-only <base>..HEAD`, merge-in files
 left out, files that exist at head, matching `base_files`) through `base_command`; a suite with none

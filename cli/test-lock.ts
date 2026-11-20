@@ -24,14 +24,25 @@ import { arkHome } from "./paths.ts";
  * A CPU budget per host instead of one `ark test` at a time. The folder `test-budget` under $ARK_HOME holds one
  * ticket file per suite (or check) of every `ark test`: run, pid, cores and arrival, plus `started` once admitted.
  * There is no lock. Arrival (time, pid, file name) is a total order, and a process writes only its own ticket:
- * 1. The first waiting ticket marks itself `started` when the started cores plus its own fit the budget.
+ * 1. The first waiting ticket marks itself `started` when the started cores plus its own fit the budget. A `quick`
+ *    ticket that is not first may also mark itself `started` when the first waiting ticket is a `full` ticket that
+ *    does not fit now, the started cores plus its own cores fit the budget, and the first waiting ticket has waited
+ *    under 10 minutes (10 minutes or more blocks, so a full run is never starved). It passes the same host hold.
  * 2. It reads all tickets again. If the started tickets up to its own arrival exceed the budget it revokes itself
  *    (removes `started`) and waits again; the earliest ticket never revokes.
  * 3. It runs only when all started tickets, later ones included, fit the budget. A later ticket that missed this one
  *    revokes on its own re-read or runs and ends first, so two overflowing suites never run at the same time.
  * A ticket is removed by its owner, or by a reader that sees its pid ended.
  */
-export type Ticket = { run: string; pid: number; cores: number; arrival: string; started?: string };
+export type Ticket = {
+  run: string;
+  pid: number;
+  cores: number;
+  arrival: string;
+  started?: string;
+  /** `quick` only for an `ark test --quick`; a ticket without it (an older runner, a bare `bun test`) is `full`. */
+  mode?: "quick" | "full";
+};
 
 /**
  * The environment variable that tells a `bun test` preload which run holds its cores: the pid of an `ark test` run or
@@ -44,6 +55,7 @@ export const budgetHeldVariable = "ARK_TEST_BUDGET";
 const pollMilliseconds = 100;
 const lineWindowMilliseconds = 30_000;
 const memoryReadingMilliseconds = 1000;
+const overtakeBoundMilliseconds = 10 * 60_000;
 
 const ticketDirectory = () => join(arkHome(), "test-budget");
 
@@ -181,6 +193,8 @@ type Options = {
    * stays until the owner ends and a reader prunes it.
    */
   owner?: number;
+  /** `quick` lets this process's tickets pass a blocked `full` ticket; none counts as `full`. */
+  mode?: "quick" | "full";
 };
 
 /**
@@ -197,6 +211,7 @@ export function openTestBudget(
     minimumFreeMemoryPercent = defaultMinimumFreeMemoryPercent,
     maximumSwapGigabytes = defaultMaximumSwapGigabytes,
     owner,
+    mode = "full",
   }: Options = {},
 ): TestBudget {
   let uncheckedPrinted = false;
@@ -258,6 +273,7 @@ export function openTestBudget(
         pid: owner ?? process.pid,
         cores,
         arrival: new Date().toISOString(),
+        mode,
       };
       // The time spent waiting for others or for memory: the polling sleeps only, so a suite that is admitted at once waits 0.
       let waitMilliseconds = 0;
@@ -315,9 +331,17 @@ export function openTestBudget(
             }
           } else {
             const firstWaiting = tickets.find((entry) => entry.ticket.started === undefined);
+            // A quick ticket passes a `full` first ticket that does not fit now and has waited under 10 minutes. The
+            // real clock, never `now`: `arrival` is a real time. An arrival that does not parse never passes.
+            const overtakes =
+              mode === "quick" &&
+              firstWaiting !== undefined &&
+              firstWaiting.ticket.mode !== "quick" &&
+              sumOf(startedTickets) + firstWaiting.ticket.cores > budget &&
+              Date.now() - Date.parse(firstWaiting.ticket.arrival) < overtakeBoundMilliseconds;
             if (
               mine >= 0 &&
-              firstWaiting?.file === file &&
+              (firstWaiting?.file === file || overtakes) &&
               sumOf(startedTickets) + cores <= budget
             ) {
               const held = await hostHold(startedTickets.length > 0);
