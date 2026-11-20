@@ -9,20 +9,37 @@ setDefaultTimeout(30_000);
 const repositoryRoot = resolve(import.meta.dir, "..");
 const minimumTimeoutMilliseconds = 30_000;
 // The ARK-T31 guard reads these files; ARK-T30 replaces this line in a copy of the file.
-const timeoutGuardFiles = ["test/sync.test.ts", "test/merge-request.test.ts"];
+const timeoutGuardFiles = [
+  "test/sync.test.ts",
+  "test/merge-request.test.ts",
+  "test/post-mr.test.ts",
+];
 const gitHeavyFiles = ["test/sync.test.ts", "test/merge-request.test.ts"];
 
-// Splits a test file into the source of each top-level `test(` call. Tests that call neither
-// startRun( nor scenario( (the text-scan tests) are skipped.
+// Calls that start a run or build a scenario. Case-sensitive, no word boundary: generatedScenario(
+// and submoduleRun( count, a definition `function scenario(` is cut out of the chunk before this runs.
+const gitHeavyCall = /(?:startRun|scenario|generatedScenario|submoduleRun|openRun)\(/;
+
+// Splits a test file into the source of each `test(` call, including a test declared inside a `for`
+// loop. A chunk ends at the next `test(` or at the next top-level function, const, let or for, so a
+// helper definition or a loop between tests never leaks into the chunk before it. Tests that call no
+// helper (the text-scan tests) are skipped. The timeout is the last `timeout:` of the chunk, a number
+// or a `const NAME = <number>;` of the same file; any other value reads 0 and fails the guard.
 function gitHeavyTests(file: string): { name: string; timeout: number }[] {
   const source = readFileSync(join(repositoryRoot, file), "utf8");
-  const chunks = source.split(/^test(?:\.each\([^)]*\))?\(/m).slice(1);
+  const chunks = source.split(/(?<![\w.])test(?:\.each\([^)]*\))?\(/).slice(1);
   return chunks
-    .filter((chunk) => /\b(startRun|scenario)\(/.test(chunk))
-    .map((chunk) => ({
-      name: chunk.match(/"([^"]+)"|`([^`]+)`/)?.[0] ?? chunk.slice(0, 60),
-      timeout: Number((chunk.match(/timeout:\s*([\d_]+)/)?.[1] ?? "0").replaceAll("_", "")),
-    }));
+    .map((chunk) => chunk.split(/^(?:(?:async\s+)?function\b|const\b|let\b|for\s*\()/m)[0])
+    .filter((chunk) => gitHeavyCall.test(chunk))
+    .map((chunk) => {
+      const limit = [...chunk.matchAll(/timeout:\s*(\w+)/g)].at(-1)?.[1] ?? "";
+      const constant = source.match(new RegExp(`^const ${limit} = ([\\d_]+);`, "m"))?.[1];
+      const digits = /^\d[\d_]*$/.test(limit) ? limit : (constant ?? "0");
+      return {
+        name: chunk.match(/"([^"]+)"|`([^`]+)`/)?.[0] ?? chunk.slice(0, 60),
+        timeout: Number(digits.replaceAll("_", "")),
+      };
+    });
 }
 
 // The ARK-T31 check: git-heavy tests of the given files (paths relative to the repository root)
@@ -33,8 +50,10 @@ function tooShortTests(files: string[]) {
     .filter((testCase) => testCase.timeout < minimumTimeoutMilliseconds);
 }
 
-test("ARK-T31 every sync and merge-request test that starts a run or builds a scenario has a timeout of at least 30 seconds", () => {
-  expect(timeoutGuardFiles.flatMap(gitHeavyTests).length).toBeGreaterThan(0);
+test("ARK-T31 every sync, merge-request and post-mr test that starts a run or builds a scenario through a helper has a timeout of at least 30 seconds", () => {
+  for (const file of timeoutGuardFiles) {
+    expect(gitHeavyTests(file).length, file).toBeGreaterThan(0);
+  }
   expect(tooShortTests(timeoutGuardFiles)).toEqual([]);
 });
 
