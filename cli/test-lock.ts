@@ -9,10 +9,12 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import {
   defaultMaximumSwapGigabytes,
   defaultMinimumFreeMemoryPercent,
+  loadReason,
   memoryReasons,
   readHost,
 } from "./host.ts";
@@ -164,6 +166,8 @@ type Options = {
   minimumFreeMemoryPercent?: number;
   /** A suite waits while swap used is above this many GB (inclusive: equal admits). */
   maximumSwapGigabytes?: number;
+  /** A suite waits while the 1-minute load average is above this (inclusive: equal admits). Default the core count. */
+  maximumLoad?: number;
   /**
    * The pid that owns the tickets, when it is not this process (a `bun test --parallel` coordinator; its workers
    * take for it). One ticket for that pid: the first `take()` creates it and waits; every later `take()`, in any
@@ -186,28 +190,28 @@ export function openTestBudget(
     print = console.log,
     minimumFreeMemoryPercent = defaultMinimumFreeMemoryPercent,
     maximumSwapGigabytes = defaultMaximumSwapGigabytes,
+    maximumLoad = availableParallelism(),
     owner,
   }: Options = {},
 ): TestBudget {
   let uncheckedPrinted = false;
   let reasons: string[] = [];
+  let loadHeld: string | null = null;
   let readAt = -Infinity;
-  /** The memory reasons that hold a suite now. One reading a second, because a reading starts processes. */
-  const memoryHold = async (): Promise<string[]> => {
+  /** The memory and load reasons that hold a suite now. One reading a second, because a reading starts processes. */
+  const hostHold = async (): Promise<{ memory: string[]; load: string | null }> => {
     if (Date.now() - readAt >= memoryReadingMilliseconds) {
-      const verdict = memoryReasons(
-        await readHost(),
-        minimumFreeMemoryPercent,
-        maximumSwapGigabytes,
-      );
+      const reading = await readHost();
+      const verdict = memoryReasons(reading, minimumFreeMemoryPercent, maximumSwapGigabytes);
       readAt = Date.now();
       reasons = verdict.reasons;
+      loadHeld = loadReason(reading, maximumLoad);
       if (verdict.unchecked && !uncheckedPrinted) {
         uncheckedPrinted = true;
         print("memory: unchecked");
       }
     }
-    return reasons;
+    return { memory: reasons, load: loadHeld };
   };
   const files = new Set<string>();
   // After close() no ticket may be written: close() also drops the exit handler, so a ticket written by a take() that
@@ -263,6 +267,7 @@ export function openTestBudget(
       let printedKey: string | null = null;
       let printedAt = 0;
       let memoryPrinted: string | null = null;
+      let loadPrinted = false;
       try {
         for (;;) {
           if (closed) throw new Error("ark test: the budget is closed");
@@ -299,17 +304,25 @@ export function openTestBudget(
               firstWaiting?.file === file &&
               sumOf(startedTickets) + cores <= budget
             ) {
-              const held = await memoryHold();
+              const held = await hostHold();
               if (closed) throw new Error("ark test: the budget is closed");
-              if (held.length > 0) {
-                // Its own line and key: once for each change of reason, never for each poll.
-                const line = `ark test: waiting for memory: ${held.join("; ")}`;
-                if (line !== memoryPrinted) print(line);
-                memoryPrinted = line;
+              if (held.memory.length > 0 || held.load !== null) {
+                // Its own line and key for each reason: once for each change of reason, never for each poll. The
+                // load figure moves all the time, so the load line is once for each hold, not for each figure.
+                if (held.memory.length > 0) {
+                  const line = `ark test: waiting for memory: ${held.memory.join("; ")}`;
+                  if (line !== memoryPrinted) print(line);
+                  memoryPrinted = line;
+                } else memoryPrinted = null;
+                if (held.load !== null) {
+                  if (!loadPrinted) print(`ark test: waiting for load: ${held.load}`);
+                  loadPrinted = true;
+                } else loadPrinted = false;
                 await nap();
                 continue;
               }
               memoryPrinted = null;
+              loadPrinted = false;
               writeTicket(file, { ...tickets[mine]!.ticket, started: new Date().toISOString() });
               continue; // read everything again before running
             }

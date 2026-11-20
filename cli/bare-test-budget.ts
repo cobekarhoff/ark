@@ -113,6 +113,7 @@ export async function holdTestBudget(): Promise<void> {
       owner: coordinator,
       minimumFreeMemoryPercent: config.test_min_free_memory_percent,
       maximumSwapGigabytes: config.test_max_swap_gb,
+      maximumLoad: config.test_max_load,
       print: (line) => {
         const first = !announced && line.startsWith("waiting:");
         announced ||= first;
