@@ -953,6 +953,7 @@ test("ARK-T308 two steps started through the current start path each open their 
 
 // ARK-T569: a process call of this file that stalls fails at the limit ARK_TEST_LIMIT_MS sets, in a few seconds.
 const testTimeoutMs = 30_000;
+const defaultLimitMs = 25_000;
 const stallLimitMs = 1_500;
 const stallBudgetMs = 5_000;
 
@@ -1022,12 +1023,17 @@ test("ARK-T569 a hub that never prints its address fails with its command line, 
   expect(elapsedMs).toBeLessThan(stallBudgetMs);
 });
 
-test("ARK-T569 with ARK_TEST_LIMIT_MS unset the limit of every call of this file is below the test timeout", () => {
+test("ARK-T569 the limit of every call of this file is 25 s, below the test timeout, with ARK_TEST_LIMIT_MS unset or junk", () => {
   const saved = process.env.ARK_TEST_LIMIT_MS;
-  delete process.env.ARK_TEST_LIMIT_MS;
   try {
-    expect(processLimit()).toBeLessThan(testTimeoutMs);
+    for (const value of [undefined, "", "abc", "0", "-5", "2147483648"]) {
+      if (value === undefined) delete process.env.ARK_TEST_LIMIT_MS;
+      else process.env.ARK_TEST_LIMIT_MS = value;
+      expect(processLimit()).toBe(defaultLimitMs);
+    }
+    expect(defaultLimitMs).toBeLessThan(testTimeoutMs);
   } finally {
-    if (saved !== undefined) process.env.ARK_TEST_LIMIT_MS = saved;
+    if (saved === undefined) delete process.env.ARK_TEST_LIMIT_MS;
+    else process.env.ARK_TEST_LIMIT_MS = saved;
   }
 });

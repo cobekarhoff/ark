@@ -390,6 +390,7 @@ describe("worktree cleanup of composed submodules", () => {
 
 describe("a stalled git or ark command fails at its own limit", () => {
   const testTimeoutMs = 60_000;
+  const defaultLimitMs = 45_000;
   const stallLimitMs = 1_500;
   const stallBudgetMs = 5_000;
 
@@ -470,18 +471,17 @@ describe("a stalled git or ark command fails at its own limit", () => {
     expect(message).not.toContain("timed out");
   });
 
-  test("ARK-T400 the limit is below the test timeout with ARK_TEST_LIMIT_MS unset, the variable replaces it after import, and a junk value keeps it", () => {
+  test("ARK-T400 the limit is 45 s, below the test timeout, with ARK_TEST_LIMIT_MS unset or junk, and the variable replaces it after import", () => {
     const saved = process.env.ARK_TEST_LIMIT_MS;
     try {
-      delete process.env.ARK_TEST_LIMIT_MS;
-      const unset = limitOr(commandLimitMs);
-      expect(unset).toBeLessThan(testTimeoutMs);
+      for (const value of [undefined, "", "abc", "0", "-5", "2147483648"]) {
+        if (value === undefined) delete process.env.ARK_TEST_LIMIT_MS;
+        else process.env.ARK_TEST_LIMIT_MS = value;
+        expect(limitOr(commandLimitMs)).toBe(defaultLimitMs);
+      }
+      expect(defaultLimitMs).toBeLessThan(testTimeoutMs);
       process.env.ARK_TEST_LIMIT_MS = String(stallLimitMs);
       expect(limitOr(commandLimitMs)).toBe(stallLimitMs);
-      for (const junk of ["", "abc", "0", "-5"]) {
-        process.env.ARK_TEST_LIMIT_MS = junk;
-        expect(limitOr(commandLimitMs)).toBe(unset);
-      }
     } finally {
       if (saved === undefined) delete process.env.ARK_TEST_LIMIT_MS;
       else process.env.ARK_TEST_LIMIT_MS = saved;
