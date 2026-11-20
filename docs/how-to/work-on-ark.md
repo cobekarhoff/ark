@@ -4,7 +4,7 @@ For a person or an agent that changes Ark's own code. [`AGENTS.md`](../../AGENTS
 
 ## Install
 
-Ark needs Bun 1.4.4 (the version of both CI jobs). On a Mac:
+Ark needs Bun 1.4.4 (the version of every CI job). On a Mac:
 
 ```sh
 bun install --frozen-lockfile
@@ -24,7 +24,7 @@ bun run lint
 
 `format` writes; the other three only check. `.githooks/pre-commit` and CI never run `format`: a file you forgot to format fails there. The order to run them in is in [`AGENTS.md`](../../AGENTS.md).
 
-[`.githooks/pre-commit`](../../.githooks/pre-commit) runs `typecheck`, `lint`, `format:check` and `bun test --parallel`. CI has two jobs: the first runs `typecheck`, `lint`, `format:check` and `bun test --parallel`; the second runs `bunx playwright test`.
+[`.githooks/pre-commit`](../../.githooks/pre-commit) runs `typecheck`, `lint`, `format:check` and `bun test --parallel`. CI runs the same checks, with the Bun suite in 4 shards ([below](#how-ci-shards-the-bun-suite)), and `bunx playwright test`.
 
 The hook is opt-in. Turn it on once per clone:
 
@@ -33,6 +33,26 @@ git config core.hooksPath .githooks
 ```
 
 The hook runs the full Bun suite, not only the files you changed. On a busy host that is slow, and it waits for the test budget when the budget is full ([below](#a-whole-suite-bun-test-waits-for-the-test-budget)).
+
+## How CI shards the Bun suite
+
+Every pull request, and every push to `main`, runs the full suite: there is no fast lane and no path filter. CI has these jobs:
+
+- `checks` runs `typecheck`, `lint` and `format:check`.
+- `bun-shards` is a matrix of 4 jobs. Shard `N` runs `bun test --parallel --shard=N/4 --timings=test/timings.json`, which is one quarter of the `*.test.ts` files. Together the 4 shards run every file once, and a file that is not in the timings file still runs in exactly one shard.
+- `playwright` runs `bunx playwright test` on 4 workers (`playwright.config.ts` sets 4 when `CI` is set, 2 otherwise).
+- `test` is the required status check of `main`. It needs `checks` and `bun-shards`, always runs, and fails unless both succeeded, so a failed, cancelled or skipped shard fails it. A matrix job cannot be named `test`: it would report `test (1)` to `test (4)`.
+
+`test/timings.json` is the shard balance and nothing else: Bun reads the recorded milliseconds of each file to give the 4 shards about equal total time, and to start the slowest files first. It does not select, skip or order what must pass. A stale or missing entry makes a shard slower, never a file unrun.
+
+The recorded milliseconds are from the Linux CI run 44464183048 (the per-test times summed for each file); a file added since has the median. Refresh it from CI when the suite changes much: a Mac gives times that do not match the runner. In a CI job, run the command below unsharded, download the file it writes, run `bun run format` and commit it. For a local refresh, run the same command. It must run unsharded, because `--update-timings` under `--shard` replaces the file with that shard's files only:
+
+```sh
+bun test --parallel --update-timings --timings=test/timings.json
+bun run format
+```
+
+`format` is needed: `format:check` also checks the JSON file that Bun writes.
 
 ## Run one file
 
