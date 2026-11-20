@@ -999,6 +999,8 @@ function generatedScenario(
     config?: Record<string, unknown>;
     onRun?: (worktree: string) => void;
     onOrigin?: (clone: string) => void;
+    /** Each `git fetch` of the sync sleeps this long inside the spawned `ark worktree sync`, as a loaded host would. */
+    syncDelaySeconds?: number;
   } = {},
 ) {
   const scenario = startRun(
@@ -1037,6 +1039,18 @@ function generatedScenario(
     edit(clone, "origin");
     options.onOrigin?.(clone);
   });
+  if (options.syncDelaySeconds !== undefined) {
+    // installed after the fixture commits and pushes, so only the fetch of the sync is slowed
+    const hookPath = join(
+      git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "hooks"),
+      "reference-transaction",
+    );
+    writeFileSync(
+      hookPath,
+      `#!/bin/sh\n[ "$1" = prepared ] && grep -q refs/remotes/ && sleep ${options.syncDelaySeconds}\nexit 0\n`,
+    );
+    chmodSync(hookPath, 0o755);
+  }
   return { ...scenario, worktree, tip };
 }
 
@@ -1245,6 +1259,8 @@ test("ARK-T385 a conflict outside the generated list fails the sync as before an
       config: variant.config ?? {
         generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }],
       },
+      // 4 syncs of 8 s each pass the 30 s default limit, as a loaded host does
+      syncDelaySeconds: 8,
     });
     const before = treeState(scenario.worktree);
 
