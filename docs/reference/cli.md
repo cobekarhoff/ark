@@ -888,12 +888,12 @@ last full `test.completed` recorded in `red_on_main`, with the run id, once; a r
 cannot be read prints `unavailable` there. It also runs `ark companions sync` and prints its lines,
 and each failure as `unavailable: <reason>`, under `Companions`; with no `companions` in ark.yml and
 no recorded companion worker it adds no section and no Orca call, and a failing sync never changes
-the exit code. The `Services` section ends with the `Hub` line of `ark services status`. The `Host`
-section prints one line each for `free memory`, `swap used`, `load (5 min)`, `cpu` and `free disk`,
-then `tests: running <n>, waiting <n>` (the `ark test` runs), `orphaned bun test workers: <n> (<MB>
-MB)` (`0` when none) and, last, `hold new runs: no` or `hold new runs: <reason>`; a reading that
-cannot be taken, such as the orphan count when `ps` fails, prints `unavailable`. --project falls
-back to ARK_PROJECT.
+the exit code. The `Services` section ends with the `Hub` lines of `ark services status`, one for
+each live hub. The `Host` section prints one line each for `free memory`, `swap used`, `load (5
+min)`, `cpu` and `free disk`, then `tests: running <n>, waiting <n>` (the `ark test` runs),
+`orphaned bun test workers: <n> (<MB> MB)` (`0` when none) and, last, `hold new runs: no` or `hold
+new runs: <reason>`; a reading that cannot be taken, such as the orphan count when `ps` fails,
+prints `unavailable`. --project falls back to ARK_PROJECT.
 ```
 
 ### chief handover
@@ -1103,11 +1103,13 @@ ark services status [--project <name>]
 
 Prints one line for each service of the project: `not installed`, `loaded` (loaded, no process) or
 `running` with `pid <n>` (from `launchctl list <label>`), and `last log: <last line of its log>`.
-Then one `Hub` line from `GET /api/health` of the live hub (found by its lock file in ARK_HOME):
-`answered in <n> ms, loop lag <n> ms`, or `stalled: no answer in 5 s` when it does not answer in 5
-s, or `no hub running` (no lock, a dead pid or a refused connection; exit 0). `ark chief state`
-prints the same lines under its Services heading. A project with `merge_requests: none` shows the
-auto-merger as not installed. --project falls back to ARK_PROJECT.
+Then one `Hub` line for each live hub (one for each clone; found by its lock file in ARK_HOME), from
+its `GET /api/health`: `answered in <n> ms, loop lag <n> ms`, or `answered in <n> ms, no loop lag
+measured (no page connected)` when the hub has no loop lag yet, or `stalled: no answer in 5 s on
+port <port>` when it does not answer in 5 s. `no hub running` prints only when no live hub gave a
+line (no lock, a dead pid, a refused connection or an answer that is not JSON; exit 0). `ark chief
+state` prints the same lines under its Services heading. A project with `merge_requests: none` shows
+the auto-merger as not installed. --project falls back to ARK_PROJECT.
 ```
 
 <!-- generated:commands:end -->
