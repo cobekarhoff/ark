@@ -126,12 +126,18 @@ function bounded<T>(promise: Promise<T>, { within, name }: WaitLimit): Promise<T
   return Promise.race([promise, expired]);
 }
 
-/** The exit of a child and then the end of its output, each with the roomy limit. Resolves to the exit code. */
-async function finish(run: {
-  child: { exited: Promise<number> };
-  output: Output;
-}): Promise<number> {
-  const code = await bounded(run.child.exited, { within: passLimit, name: "exit of the child" });
+/**
+ * The exit of a child and then the end of its output, each with the roomy limit. Resolves to the exit code. `name` is what
+ * a timeout says did not exit.
+ */
+async function finish(
+  run: {
+    child: { exited: Promise<number> };
+    output: Output;
+  },
+  name = "exit of the child",
+): Promise<number> {
+  const code = await bounded(run.child.exited, { within: passLimit, name });
   await bounded(run.output.done, { within: passLimit, name: "end of the output" });
   return code;
 }
@@ -1087,8 +1093,9 @@ test("ARK-T685 a failing test file fails the run with exit 1 and the failure tex
 
 /**
  * A scratch repo with the repo preload and one file `x` that records its pid in `ran-x` and, when `hold` is set, blocks on a
- * pipe the case holds open. `holdDelay` (ms, opt-in) pauses the file right after it writes `ran-x`, so a case that closes
- * its end of the pipe at once does it before the file opens the pipe.
+ * pipe the case holds open. The file opens the pipe before it writes `ran-x`, so a case that closes its end of the pipe on
+ * seeing `ran-x` cannot leave the file opening a pipe with no writer. `holdDelay` (ms, opt-in) pauses the file right after
+ * it writes `ran-x`, so that close happens while the file still waits to read.
  */
 function makeProbeRepo(options: { hold?: boolean; holdDelay?: number } = {}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "bare-probe-")));
@@ -1101,9 +1108,10 @@ function makeProbeRepo(options: { hold?: boolean; holdDelay?: number } = {}) {
   writeFileSync(
     join(directory, "test", "x.test.ts"),
     `${header(markers)}test("FAKE-1-AC1 x", () => {
+  const hold = join(import.meta.dir, "..", "hold");
+  const holding = existsSync(hold) && statSync(hold).isFIFO() ? openSync(hold, "r") : -1;
   appendFileSync(join(markers, "ran-x"), process.pid + "\\n");
-${pause}  const hold = join(import.meta.dir, "..", "hold");
-  if (existsSync(hold) && statSync(hold).isFIFO()) readFileSync(openSync(hold, "r"));
+${pause}  if (holding >= 0) readFileSync(holding);
 });
 `,
   );
@@ -1202,7 +1210,7 @@ test("ARK-T707 ARK-T715 a whole-suite bun test takes its own ticket under the ma
   await waitForMarkers(fixture, ["started-gate", "marker-value"]);
   const marker = fixture.markerLines("marker-value")[0]!;
   fixture.openGate();
-  expect(await finish(first), first.output.text).toBe(0);
+  expect(await finish(first, "exit of the first run"), first.output.text).toBe(0);
 
   const projectEnvironment = environment(fixture.home, {
     ARK_PROJECT: "demo",
@@ -1220,7 +1228,7 @@ test("ARK-T707 ARK-T715 a whole-suite bun test takes its own ticket under the ma
   ]);
   const released = performance.now();
   free.release();
-  expect(await finish(taking), taking.output.text).toBe(0);
+  expect(await finish(taking, "exit of the run that takes the cores"), taking.output.text).toBe(0);
   expect(performance.now() - released).toBeLessThan(rejectionCeiling);
 
   // A new holder holds all 3 cores; the marker still names the run that ended.
@@ -1230,7 +1238,7 @@ test("ARK-T707 ARK-T715 a whole-suite bun test takes its own ticket under the ma
   await waitsForBudget(fixture, waiting.child, (ticket) => ticket.pid === waiting.child.pid);
   expect(blocked.ranX()).toBe(false);
   process.kill(-waiting.child.pid, "SIGKILL"); // the detached run this case started, by its own pid
-  await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
+  await bounded(waiting.child.exited, { within: passLimit, name: "exit of the waiting run" });
   await holder.release();
 });
 
