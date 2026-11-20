@@ -7,6 +7,7 @@ import {
   describe,
   expect,
   setDefaultTimeout,
+  setSystemTime,
   test,
 } from "bun:test";
 import type { FSWatcher } from "node:fs";
@@ -22,6 +23,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { openTestBudget } from "../cli/test-lock.ts";
 import { type FakeProcess, fakeProcesses } from "./fake-ps.ts";
 import {
   afterHostReads,
@@ -61,6 +63,8 @@ let fixtures: string;
 let runA: string;
 let runB: string;
 let projectA: string;
+/** The projects of the quick-overtake runs; `runnerPids` stops their detached runners too. */
+const quickProjects = ["lock-quick-two", "lock-later-two", "lock-quick-three"];
 
 const logFile = () => join(fixtures, "suite.log");
 const budgetDirectory = () => join(arkHome, "test-budget");
@@ -283,7 +287,7 @@ function killStarted(): void {
 /** The pids of the live runners recorded under this file's ARK_HOME. */
 function runnerPids(): number[] {
   const pids: number[] = [];
-  for (const project of [projectA, "lock-two"]) {
+  for (const project of [projectA, "lock-two", ...quickProjects]) {
     const runsDirectory = join(arkHome, "projects", project, "runs");
     if (!existsSync(runsDirectory)) continue;
     for (const run of readdirSync(runsDirectory)) {
@@ -308,8 +312,12 @@ function runnerPid(run: string): number {
 }
 
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
-function startTest(run: string, extraEnvironment: Record<string, string> = {}): Started {
-  const child = Bun.spawn(["bun", arkEntry, "test", run], {
+function startTest(
+  run: string,
+  extraEnvironment: Record<string, string> = {},
+  flags: string[] = [],
+): Started {
+  const child = Bun.spawn(["bun", arkEntry, "test", run, ...flags], {
     env: { ...process.env, ARK_HOME: arkHome, ARK_FAKE_CPU_PERCENT: "0", ...extraEnvironment },
     stdin: "ignore",
     stdout: "pipe",
@@ -370,7 +378,14 @@ async function expectCleanRunOfB(): Promise<void> {
 /** A ticket file as `ark test` writes it. */
 function writeTicketFile(
   name: string,
-  ticket: { run: string; pid: number; cores: number; arrival: string; started?: string },
+  ticket: {
+    run: string;
+    pid: number;
+    cores: number;
+    arrival: string;
+    started?: string;
+    mode?: "quick" | "full";
+  },
 ): string {
   mkdirSync(budgetDirectory(), { recursive: true });
   const file = join(budgetDirectory(), `${name}.json`);
@@ -599,7 +614,12 @@ describe("ark test budget admission", () => {
   // (`publish`: inside its first ticket write, `start`: just before it writes `started`, `unlink`: before it removes a
   // stale ticket) until the test marks `<name>-go-<point>`; they supply no data. A process marks `<name>-running` when
   // `take` returns. The invariant: no two running processes ever hold more cores than the budget (6).
-  const child = (home: string, name: string, pauses: string[]) => `
+  const child = (
+    home: string,
+    name: string,
+    pauses: string[],
+    options: { cores?: number; settings?: object } = {},
+  ) => `
 import { mock } from "bun:test";
 import * as real from "node:fs";
 const fs = { ...real };
@@ -640,10 +660,12 @@ mock.module("node:fs", () => ({
   },
 }));
 const { openTestBudget } = await import(${JSON.stringify(resolve(import.meta.dir, "..", "cli", "test-lock.ts"))});
+const options = ${JSON.stringify(options)};
 const budget = openTestBudget(name, 6, {
   print: (line) => fs.appendFileSync(home + "/" + name + "-lines", line + "\\n"),
+  ...options.settings,
 });
-await budget.take(6);
+await budget.take(options.cores ?? 6);
 mark(name + "-running");
 await new Promise((done) => process.stdin.once("data", done));
 budget.close();`;
@@ -653,6 +675,11 @@ budget.close();`;
     steps: (api: {
       home: string;
       spawn: (name: string, ...pauses: string[]) => void;
+      spawnWith: (
+        name: string,
+        options: { cores: number; mode: "quick" | "full" },
+        ...pauses: string[]
+      ) => void;
       waitFor: (...names: string[]) => Promise<void>;
       has: (name: string) => boolean;
       go: (name: string, point: string) => void;
@@ -662,20 +689,31 @@ budget.close();`;
     const home = mkdtempSync(join(tmpdir(), "ark-admission-"));
     const children = new Map<string, Subprocess<"pipe", "ignore", "inherit">>();
     const has = (name: string) => existsSync(join(home, name));
+    const start = (
+      name: string,
+      options: { cores?: number; settings?: object },
+      pauses: string[],
+    ) => {
+      children.set(
+        name,
+        Bun.spawn(["bun", "-e", child(home, name, pauses, options)], {
+          env: { ...Bun.env, ARK_HOME: home },
+          stdin: "pipe",
+          stdout: "ignore",
+          stderr: "inherit",
+        }),
+      );
+    };
     try {
       await steps({
         home,
-        spawn: (name, ...pauses) => {
-          children.set(
+        spawn: (name, ...pauses) => start(name, {}, pauses),
+        spawnWith: (name, { cores, mode }, ...pauses) =>
+          start(
             name,
-            Bun.spawn(["bun", "-e", child(home, name, pauses)], {
-              env: { ...Bun.env, ARK_HOME: home },
-              stdin: "pipe",
-              stdout: "ignore",
-              stderr: "inherit",
-            }),
-          );
-        },
+            { cores, settings: { mode, minimumFreeMemoryPercent: 0, maximumSwapGigabytes: 1000 } },
+            pauses,
+          ),
         waitFor: (...names) => {
           const { promise, resolve } = Promise.withResolvers<void>();
           const check = () => {
@@ -806,6 +844,56 @@ await budget.take(6).catch(() => {});`;
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  // ARK-551: the overtake meets the verification of the first ticket. A quick ticket of 2 cores read the tickets while
+  // the holder of 4 cores and a waiting full ticket of 5 cores (4 + 5 > 6) were there, passed the full ticket and
+  // paused before its `started` write. The holder ends, the full ticket starts (5 <= 6), and only then the quick
+  // ticket writes `started` (5 + 2 > 6): the earlier full ticket keeps its cores and the quick one revokes. The gate is
+  // the existing `start` pause of this describe, held only by the quick process.
+  test("ARK-T721 a quick ticket that overtook a full ticket and writes started after the full ticket started revokes, and the started cores never pass the budget", async () => {
+    await scenario(async ({ home, spawnWith, waitFor, has, go, stop }) => {
+      const holder = Bun.spawn(["sleep", "300"]);
+      try {
+        const budgetFolder = join(home, "test-budget");
+        mkdirSync(budgetFolder);
+        const earlier = new Date(Date.now() - 60_000).toISOString();
+        writeFileSync(
+          join(budgetFolder, `${holder.pid}-holder.json`),
+          JSON.stringify({
+            run: "holder",
+            pid: holder.pid,
+            cores: 4,
+            arrival: earlier,
+            started: earlier,
+          }),
+        );
+        spawnWith("full", { cores: 5, mode: "full" });
+        await waitFor("full-r1-poll-3"); // published, and waits: 4 + 5 > 6
+        spawnWith("quick", { cores: 2, mode: "quick" }, "start");
+        await waitFor("quick-at-start"); // it passed the full ticket (4 + 2 <= 6) and holds its started write
+        expect(has("full-running")).toBe(false);
+
+        holder.kill("SIGKILL");
+        await holder.exited;
+        await waitFor("full-running"); // the quick ticket is not started yet, so the full ticket runs
+
+        go("quick", "start");
+        await waitFor("quick-after-3"); // its third ticket write is the revocation
+        expect(has("quick-running")).toBe(false);
+        const startedCores = readdirSync(budgetFolder)
+          .filter((name) => name.endsWith(".json"))
+          .map((name) => JSON.parse(readFileSync(join(budgetFolder, name), "utf8")))
+          .filter((ticket) => ticket.started !== undefined)
+          .reduce((sum, ticket) => sum + ticket.cores, 0);
+        expect(startedCores).toBe(5);
+
+        stop("full");
+        await waitFor("quick-running"); // it runs only after the full ticket ended
+      } finally {
+        holder.kill("SIGKILL");
+      }
+    });
   });
 });
 
@@ -1204,4 +1292,247 @@ describe("ark test suite TMPDIR and cores", () => {
     expect(Object.fromEntries(head)).toEqual({ three: "3", eight: "6", whole: "6" });
     expect(tickets()).toEqual([]);
   });
+});
+
+// ARK-551: a quick `ark test` ticket that fits the free cores starts ahead of a blocked full ticket. The budget is 6
+// cores. A holder of 4 started cores and the first waiting full ticket of 3 cores are tickets owned by live `sleep`
+// processes (the full one never starts: its owner is not an `ark test`); the quick and the later full tickets are
+// taken by real `ark test` processes. Every wait is an event with the limit of the test timeout.
+describe("ark test quick overtake", () => {
+  const holderRun = "2026-01-01-HOLD-1";
+  const fullRun = "2026-01-01-FULL-1";
+  // the runs of `quickProjects`
+  let quickTwo: string;
+  let laterTwo: string;
+  let quickThree: string;
+
+  beforeAll(() => {
+    const script = join(fixtures, "suite.sh");
+    const withCores = (cores: number) => (runId: string) => [
+      {
+        name: "sleeper",
+        level: "integration",
+        repo: ".",
+        command: `sh ${script} ${runId} ${fixtures} {report}`,
+        parser: "bun",
+        cores,
+      },
+    ];
+    quickTwo = startRun(quickProjects[0]!, "LOCKQ-2", script, withCores(2));
+    laterTwo = startRun(quickProjects[1]!, "LOCKF-2", script, withCores(2));
+    quickThree = startRun(quickProjects[2]!, "LOCKQ-3", script, withCores(3));
+  });
+
+  afterEach(() => {
+    // the suites read files of the fixture folder, so a stored result of an earlier test would answer for them
+    for (const project of quickProjects)
+      rmSync(join(arkHome, "projects", project, "test-cache"), { recursive: true, force: true });
+  });
+
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const ticketData = (): { run: string; cores: number; started?: string; mode?: string }[] =>
+    tickets().flatMap((name) => {
+      try {
+        return [JSON.parse(readFileSync(join(budgetDirectory(), name), "utf8"))];
+      } catch {
+        return []; // removed between the listing and the read
+      }
+    });
+  const startedCores = () =>
+    ticketData()
+      .filter((ticket) => ticket.started !== undefined)
+      .reduce((sum, ticket) => sum + ticket.cores, 0);
+  const ticketOf = (run: string) => ticketData().find((ticket) => ticket.run === run);
+  const live = () => {
+    const sleeper = Bun.spawn(["sleep", "300"]);
+    startedTests.push(sleeper);
+    return sleeper;
+  };
+
+  /** A holder of 4 started cores and a first waiting full ticket of 3 cores that arrived `waited` minutes ago. */
+  function blockedFull(waited = 1, mode?: "full") {
+    const holder = live();
+    const full = live();
+    writeTicketFile(`${holder.pid}-holder`, {
+      run: holderRun,
+      pid: holder.pid,
+      cores: 4,
+      arrival: minutesAgo(waited + 1),
+      started: minutesAgo(waited + 1),
+    });
+    const fullFile = writeTicketFile(`${full.pid}-full`, {
+      run: fullRun,
+      pid: full.pid,
+      cores: 3,
+      arrival: minutesAgo(waited),
+      ...(mode === undefined ? {} : { mode }),
+    });
+    return { holder, full, fullFile };
+  }
+
+  /** Resolves once the quick or later run printed its waiting line (or ended). */
+  const waits = async (run: Started) => {
+    await Promise.race([run.until("waiting:"), run.process.exited]);
+    expect(run.seen()).toContain("waiting:");
+  };
+
+  test.each([
+    { title: "a full ticket", mode: "full" as const },
+    { title: "a ticket with no mode, as an older runner wrote it", mode: undefined },
+  ])(
+    "ARK-T721 a quick ark test of 2 cores starts at once ahead of $title that waits for 3 cores while 4 are held, and the started cores stay at 6 or less",
+    async ({ mode }) => {
+      writeFileSync(join(fixtures, "hold"), "");
+      const { full, fullFile } = blockedFull(1, mode);
+      const before = readFileSync(fullFile, "utf8");
+
+      const quick = startTest(quickTwo, {}, ["--quick"]);
+      let peak = 0;
+      await waitFor(() => {
+        peak = Math.max(peak, startedCores());
+        return started(quickTwo)();
+      });
+      expect(peak).toBeLessThanOrEqual(6);
+      expect(startedCores()).toBe(6);
+      // the full ticket still waits, is not pruned and is not written by the quick process
+      expect(readFileSync(fullFile, "utf8")).toBe(before);
+      // `executeTest` passed its mode to the budget
+      expect(ticketOf(quickTwo)).toMatchObject({ cores: 2, mode: "quick" });
+      expect(quick.seen()).not.toContain("waiting:");
+
+      const state = ark("chief", "state", "--project", quickProjects[0]!).out;
+      const section = state.split(/^## /m).find((part) => part.startsWith("ark test budget"));
+      expect(section).toMatch(
+        new RegExp(`running: ${quickTwo} \\(pid ${runnerPid(quickTwo)}\\), 2 cores`),
+      );
+      expect(section).toMatch(new RegExp(`waiting: ${fullRun} \\(pid ${full.pid}\\), 3 cores`));
+      expect(section).not.toContain("quick");
+
+      writeFileSync(join(fixtures, "release"), "");
+      await quick.process.exited;
+    },
+  );
+
+  test("ARK-T721 a quick ark test of 3 cores does not start while 4 are held, and starts once they are free", async () => {
+    writeFileSync(join(fixtures, "hold"), "");
+    const { holder, full } = blockedFull();
+
+    const quick = startTest(quickThree, {}, ["--quick"]);
+    await waits(quick);
+    expect(quick.seen()).toContain(`waiting: place 2 of 2; running: ${holderRun} 4 cores`);
+    expect(logLines()).not.toContain(`start ${quickThree}`);
+    expect(ticketOf(quickThree)?.started).toBeUndefined();
+    expect(startedCores()).toBe(4);
+
+    for (const sleeper of [holder, full]) {
+      sleeper.kill("SIGKILL");
+      await sleeper.exited;
+    }
+    await waitFor(started(quickThree));
+    writeFileSync(join(fixtures, "release"), "");
+    await quick.process.exited;
+  });
+
+  test("ARK-T721 an overtaking quick ark test waits for the CPU hold like the first ticket and starts once the suite that holds the cores has ended", async () => {
+    writeFileSync(join(fixtures, "hold"), "");
+    const { holder, full } = blockedFull();
+
+    const quick = startTest(quickTwo, { ARK_FAKE_CPU_PERCENT: "95" }, ["--quick"]);
+    await Promise.race([quick.until("waiting for CPU"), quick.process.exited]);
+    expect(quick.seen()).toMatch(/ark test: waiting for CPU: .*95/);
+    expect(logLines()).not.toContain(`start ${quickTwo}`);
+    expect(ticketOf(quickTwo)?.started).toBeUndefined();
+    expect(startedCores()).toBe(4);
+
+    // the hold applies only while a suite holds cores: with the holder gone the quick ticket is the first
+    for (const sleeper of [holder, full]) {
+      sleeper.kill("SIGKILL");
+      await sleeper.exited;
+    }
+    await waitFor(started(quickTwo));
+    writeFileSync(join(fixtures, "release"), "");
+    await quick.process.exited;
+  });
+
+  test.each([
+    { minutes: 11, passes: false, title: "waits behind" },
+    { minutes: 10, passes: false, title: "waits behind" },
+    { minutes: 9, passes: true, title: "starts ahead of" },
+  ])(
+    "ARK-T722 a quick ark test of 2 cores $title a full ticket that waited $minutes minutes, and a later full ark test never passes it",
+    async ({ minutes, passes }) => {
+      writeFileSync(join(fixtures, "hold"), "");
+      const { fullFile } = blockedFull(minutes);
+      const before = readFileSync(fullFile, "utf8");
+
+      // a later full ark test of 2 cores fits the free cores, but is neither first nor quick
+      const later = startTest(laterTwo);
+      await waits(later);
+      const quick = startTest(quickTwo, {}, ["--quick"]);
+      if (passes) {
+        await waitFor(started(quickTwo));
+        expect(startedCores()).toBe(6);
+      } else {
+        await waits(quick);
+        expect(quick.seen()).toContain(`waiting: place 3 of 3; running: ${holderRun} 4 cores`);
+        expect(logLines()).not.toContain(`start ${quickTwo}`);
+        expect(ticketOf(quickTwo)?.started).toBeUndefined();
+        expect(startedCores()).toBe(4);
+      }
+      expect(logLines()).not.toContain(`start ${laterTwo}`);
+      expect(ticketOf(laterTwo)?.started).toBeUndefined();
+      // a process writes only its own ticket
+      expect(readFileSync(fullFile, "utf8")).toBe(before);
+    },
+  );
+
+  // The edge of the bound and the clock it reads. A frozen clock gives one Date.now(): a ticket that arrived exactly
+  // 10 minutes before is never passed, one millisecond less is. The `now` option is a test clock for the waiting line
+  // (ARK-T155 moves it by 31 s on every read); here it starts 2 minutes ahead, so a bound that read it would block
+  // the 9-minute ticket.
+  test.each([
+    { waited: 600_000, passes: false, title: "waits behind" },
+    { waited: 599_999, passes: true, title: "starts ahead of" },
+  ])(
+    "ARK-T722 a quick ticket $title a full ticket that waited $waited ms by the real clock, whatever the injected clock says",
+    async ({ waited, passes }) => {
+      const cpuBefore = process.env.ARK_FAKE_CPU_PERCENT;
+      process.env.ARK_FAKE_CPU_PERCENT = "0";
+      const frozen = Date.now();
+      setSystemTime(frozen);
+      let clock = frozen + 120_000;
+      const lines: string[] = [];
+      const budget = openTestBudget("2026-01-01-QUICK-1", 6, {
+        mode: "quick",
+        minimumFreeMemoryPercent: 0,
+        maximumSwapGigabytes: 1000,
+        now: () => (clock += 31_000),
+        print: (line) => lines.push(line),
+      });
+      try {
+        const { fullFile } = blockedFull(waited / 60_000);
+        const before = readFileSync(fullFile, "utf8");
+        const taking = budget.take(2);
+        if (passes) {
+          const taken = await taking;
+          expect(taken.cores).toBe(2);
+          expect(startedCores()).toBe(6);
+          taken.release();
+        } else {
+          const closed = taking.catch((err: Error) => err.message);
+          await waitFor(() => lines.some((line) => line.startsWith("waiting:")));
+          expect(ticketOf("2026-01-01-QUICK-1")?.started).toBeUndefined();
+          expect(startedCores()).toBe(4);
+          budget.close();
+          expect(await closed).toContain("closed");
+        }
+        expect(readFileSync(fullFile, "utf8")).toBe(before);
+      } finally {
+        budget.close();
+        setSystemTime();
+        if (cpuBefore === undefined) delete process.env.ARK_FAKE_CPU_PERCENT;
+        else process.env.ARK_FAKE_CPU_PERCENT = cpuBefore;
+      }
+    },
+  );
 });
