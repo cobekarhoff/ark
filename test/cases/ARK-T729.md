@@ -1,6 +1,6 @@
 ---
 id: ARK-T729
-title: ARK-T729 ark merge-request status prints ci: failed for a GitLab pipeline that failed, and never passed
+title: "ARK-T729 ark merge-request status prints ci: failed for a GitLab pipeline that failed, and never passed"
 level: integration
 technique: equivalence classes (a failed GitLab pipeline whose failed-job request fails, against GitHub with named checks)
 priority: medium

@@ -1,10 +1,10 @@
 ---
 id: ARK-T30
-title: ARK-T30 the every-file timeout check of ARK-T31 refuses a git-heavy test with a short, missing or unresolved timeout and passes one with a limit
+title: "ARK-T30 the every-file timeout check of ARK-T31 refuses a git-heavy test with a short, missing or unresolved timeout and passes one with a limit"
 level: integration
-technique: boundary values (10 s and a named constant below 30 s against the 30 s minimum) and equivalence classes (each helper call, a number against a named constant, a test with its own limit against one that borrows the limit of a later test in its chunk)
+technique: "boundary values (10 s and a named constant below 30 s against the 30 s minimum) and equivalence classes (each helper call, a number against a named constant, a test with its own limit against one that borrows the limit of a later test in its chunk)"
 priority: medium
-risk: the ARK-T31 check misses a git-heavy test: one built through generatedScenario(, submoduleRun( or openRun( with no timeout, one with a named constant below 30 seconds, or one whose named constant does not resolve passes unseen; a test with no limit that sits before a loop-declared test with a limit reads that limit and passes, or a git-heavy test declared inside a `for` loop is never split out; or the check flags a test that only has a helper definition in its chunk, so main goes red
+risk: "the ARK-T31 check misses a git-heavy test: one built through generatedScenario(, submoduleRun( or openRun( with no timeout, one with a named constant below 30 seconds, or one whose named constant does not resolve passes unseen; a test with no limit that sits before a loop-declared test with a limit reads that limit and passes, or a git-heavy test declared inside a `for` loop is never split out; or the check flags a test that only has a helper definition in its chunk, so main goes red"
 status: active
 changed_by: 2026-11-20-ARK-600-1
 ---
