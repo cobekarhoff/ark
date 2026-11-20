@@ -53,6 +53,17 @@ afterEach(() => {
     }
 });
 
+// Descriptors that a case holds open on a named pipe so that a file blocks reading it; closed when the case ends.
+const heldDescriptors: number[] = [];
+afterEach(() => {
+  for (const descriptor of heldDescriptors.splice(0))
+    try {
+      closeSync(descriptor);
+    } catch {
+      // already closed
+    }
+});
+
 /** The text a child printed, with a promise for the point where a line shows. */
 class Output {
   text = "";
@@ -74,11 +85,11 @@ class Output {
       watcher.done();
   }
 
-  until(needle: string): Promise<void> {
+  until(needle: string, limit: WaitLimit): Promise<void> {
     const { promise, resolve: done } = Promise.withResolvers<void>();
     if (this.text.includes(needle)) done();
     else this.#watchers.push({ needle, done });
-    return promise;
+    return bounded(promise, limit);
   }
 
   count(needle: string): number {
@@ -86,17 +97,61 @@ class Output {
   }
 }
 
-/** Resolves when `ready()` holds, re-checked on every change of `directory`. */
-function waitFor(directory: string, ready: () => boolean): Promise<void> {
+/** A time limit for one wait, and the name that its error carries when the limit passes (ARK-527). */
+interface WaitLimit {
+  within: number;
+  name: string;
+}
+
+/** Resolves when `ready()` holds, re-checked on every change of `directory`; rejects with the name of `limit` after its time. */
+function waitFor(directory: string, ready: () => boolean, limit: WaitLimit): Promise<void> {
   const { promise, resolve: done } = Promise.withResolvers<void>();
   const check = () => {
-    if (!ready()) return;
-    watcher.close();
-    done();
+    if (ready()) done();
   };
   const watcher = watch(directory, check);
   check();
-  return promise;
+  return bounded(promise, limit).finally(() => watcher.close());
+}
+
+/**
+ * Every wait carries a time limit and a name: a wait that never ends rejects with `no <name> within <ms> ms`. The
+ * timer is the real deadline of a wait on a real process, not a pause.
+ */
+function bounded<T>(promise: Promise<T>, { within, name }: WaitLimit): Promise<T> {
+  const { promise: expired, reject } = Promise.withResolvers<never>();
+  const deadline = AbortSignal.timeout(within);
+  deadline.addEventListener("abort", () => reject(new Error(`no ${name} within ${within} ms`)));
+  return Promise.race([promise, expired]);
+}
+
+/** The exit of a child and then the end of its output, each with the roomy limit. Resolves to the exit code. */
+async function finish(run: {
+  child: { exited: Promise<number> };
+  output: Output;
+}): Promise<number> {
+  const code = await bounded(run.child.exited, { within: passLimit, name: "exit of the child" });
+  await bounded(run.output.done, { within: passLimit, name: "end of the output" });
+  return code;
+}
+
+// ARK-527 rows: a wait that must pass gets a roomy limit (a failure guard on a loaded 4-core runner, not a speed
+// assertion); the wait that a row proves fails gets a short one. A row asserts that the failing wait rejects with its
+// name, and that it did so far below the 90 s test timeout.
+const passLimit = 20_000;
+const failLimit = 500;
+const rowTimeout = 60_000;
+const rejectionCeiling = 5_000;
+const waitingLineLimit: WaitLimit = { within: passLimit, name: "waiting line" };
+
+async function expectNamedRejection(wait: () => Promise<unknown>, name: RegExp): Promise<void> {
+  const startedAt = performance.now();
+  const error = await wait().then(
+    () => new Error("the wait resolved"),
+    (caught: unknown) => caught,
+  );
+  expect(String((error as Error)?.message)).toMatch(name);
+  expect(performance.now() - startedAt).toBeLessThan(rejectionCeiling);
 }
 
 const alive = (pid: number): boolean => {
@@ -147,12 +202,15 @@ process.exit(0);`,
     { env: environment(home), stdin: "pipe", stdout: "pipe", stderr: "inherit" },
   );
   started.push({ pid: holder.pid, group: false });
-  await new Output(holder.stdout).until("held");
+  await new Output(holder.stdout).until("held", {
+    within: passLimit,
+    name: "ticket of the holder",
+  });
   return {
     release: async () => {
       void holder.stdin.write("x");
       void holder.stdin.flush();
-      await holder.exited;
+      await bounded(holder.exited, { within: passLimit, name: "exit of the holder" });
     },
   };
 }
@@ -164,16 +222,50 @@ import { join } from "node:path";
 const markers = ${JSON.stringify(markers)};
 `;
 
-/** The fake suite: `a`, `b`, `c` and `gate`. Each opens the write end of `alive-<name>` (a pipe, when the case made it) and keeps it until its worker ends. */
-function suiteFiles(markers: string, failing = false): Record<string, string> {
-  const files: Record<string, string> = {
-    "bunfig.toml": `[test]\npreload = [${JSON.stringify(preload)}]\n`,
-  };
-  for (const name of ["a", "b", "c"])
-    files[`test/${name}.test.ts`] = `${header(markers)}test("FAKE-1-AC1 ${name}", () => {
+type Variant = "stuck-before-marker" | "stuck-after-marker" | "leak";
+
+/** The files of the fake suite that open an `alive-<name>` pipe, `gate` last: `stuck` replaces `a`, `leak` has none. */
+const aliveNames = (variant?: Variant): string[] =>
+  variant === "leak"
+    ? ["a", "b", "gate"]
+    : variant
+      ? ["stuck", "b", "c", "gate"]
+      : ["a", "b", "c", "gate"];
+
+/**
+ * The fake suite: `a`, `b`, `c` and `gate`. Each opens the write end of `alive-<name>` (a pipe, when the case made
+ * it) and keeps it until its worker ends. A `variant` replaces one file: `stuck` replaces `a` and blocks reading a
+ * named pipe that the case holds open (it writes `ran-stuck` before or after it blocks), `leak` replaces `c` and
+ * leaves a detached `sleep` that holds the output of the run. `gate` also blocks on the pipe `hang`, when the case
+ * made one. `preload: false` leaves out the `bunfig.toml` preload.
+ */
+function suiteFiles(
+  markers: string,
+  options: { failing?: boolean; variant?: Variant; preload?: boolean } = {},
+): Record<string, string> {
+  const files: Record<string, string> = {};
+  if (options.preload !== false)
+    files["bunfig.toml"] = `[test]\npreload = [${JSON.stringify(preload)}]\n`;
+  for (const name of aliveNames(options.variant).filter((entry) => entry !== "gate"))
+    files[`test/${name}.test.ts`] =
+      name === "stuck"
+        ? `${header(markers)}test("FAKE-1-AC1 stuck", () => {
+  openSync(join(markers, "alive-stuck"), "w");
+  ${options.variant === "stuck-after-marker" ? 'appendFileSync(join(markers, "ran-stuck"), process.pid + "\\n");' : ""}
+  readFileSync(openSync(join(import.meta.dir, "..", "stuck"), "r"));
+});
+`
+        : `${header(markers)}test("FAKE-1-AC1 ${name}", () => {
   openSync(join(markers, "alive-${name}"), "w");
   appendFileSync(join(markers, "ran-${name}"), process.pid + "\\n");
   appendFileSync(join(markers, "runs.log"), process.cwd() + " ${name}\\n");
+});
+`;
+  if (options.variant === "leak")
+    files["test/leak.test.ts"] = `${header(markers)}test("FAKE-1-AC1 leak", () => {
+  const child = Bun.spawn(["sleep", "600"], { stdout: "inherit", stderr: "inherit", stdin: "ignore", detached: true });
+  child.unref();
+  appendFileSync(join(markers, "leak-pid"), String(child.pid));
 });
 `;
   files["test/gate.test.ts"] = `${header(markers)}test("FAKE-1-AC1 gate", () => {
@@ -184,9 +276,11 @@ function suiteFiles(markers: string, failing = false): Record<string, string> {
   appendFileSync(join(markers, "runs.log"), process.cwd() + " gate\\n");
   if (pipe !== null) readFileSync(pipe);
   appendFileSync(join(markers, "ran-gate"), process.pid + "\\n");
+  const hang = join(import.meta.dir, "..", "hang");
+  if (existsSync(hang) && statSync(hang).isFIFO()) readFileSync(openSync(hang, "r"));
 });
 `;
-  if (failing)
+  if (options.failing)
     files["test/failing.test.ts"] = `import { expect, test } from "bun:test";
 test("FAKE-1-AC1 failing", () => { expect(1).toBe(2); });
 `;
@@ -218,6 +312,10 @@ function makeFixture(
     failing?: boolean;
     /** `test_max_load` of the project; absent means the core-count default. */
     maxLoad?: number;
+    variant?: Variant;
+    preload?: boolean;
+    /** Named pipes in the scratch folder (`stuck`, `hang`) that the case holds open and never writes. */
+    blockers?: string[];
   } = {},
 ): Fixture {
   const home = tempArkHome();
@@ -230,9 +328,13 @@ function makeFixture(
         ? realpathSync(mkdtempSync(join(tmpdir(), "bare-elsewhere-")))
         : workspace;
   mkdirSync(directory, { recursive: true });
-  for (const [name, content] of Object.entries(suiteFiles(markers, options.failing))) {
+  for (const [name, content] of Object.entries(suiteFiles(markers, options))) {
     mkdirSync(join(directory, name, ".."), { recursive: true });
     writeFileSync(join(directory, name), content);
+  }
+  for (const name of options.blockers ?? []) {
+    Bun.spawnSync(["mkfifo", join(directory, name)]);
+    heldDescriptors.push(openSync(join(directory, name), constants.O_RDWR));
   }
   writeProject("demo", {
     workspace,
@@ -246,7 +348,7 @@ function makeFixture(
   let gateDescriptor = -1;
   const ended: Record<string, Promise<number>> = {};
   if (options.pipes) {
-    for (const name of ["a", "b", "c", "gate"]) {
+    for (const name of aliveNames(options.variant)) {
       const pipe = join(markers, `alive-${name}`);
       Bun.spawnSync(["mkfifo", pipe]);
       const reader = Bun.spawn(["cat", pipe], { stdout: "ignore" });
@@ -258,9 +360,12 @@ function makeFixture(
     // holds a read-write descriptor, so the reader never blocks on open and sees the end of file on close.
     gateDescriptor = openSync(gate, constants.O_RDWR);
   }
+  // A marker line counts only when complete: `appendFileSync` creates the file, then writes, so a file can exist empty.
   const markerLines = (name: string): string[] =>
     existsSync(join(markers, name))
-      ? readFileSync(join(markers, name), "utf8").trim().split("\n")
+      ? readFileSync(join(markers, name), "utf8")
+          .split("\n")
+          .filter((line) => line !== "")
       : [];
   return {
     home,
@@ -300,8 +405,10 @@ const ownerTicketFiles = (fixture: Fixture): string[] =>
     : [];
 
 /** Resolves when a bare run has written its ticket, which is the point where the run waits or holds. */
-const bareTicketWritten = (fixture: Fixture) =>
-  waitFor(fixture.storeDirectory(), () => ownerTicketFiles(fixture).length > 0);
+const bareTicketWritten = (
+  fixture: Fixture,
+  limit: WaitLimit = { within: passLimit, name: "ticket of the bare run" },
+) => waitFor(fixture.storeDirectory(), () => ownerTicketFiles(fixture).length > 0, limit);
 
 const cpuCores = Math.min(availableParallelism(), 3);
 
@@ -338,7 +445,7 @@ test.each([
     // A serial run prints live. A --parallel worker's output reaches the pipe when its file ends, so there the
     // wait is read from the ticket store.
     if (parallel) await bareTicketWritten(fixture);
-    else await run.output.until(waitingLine);
+    else await run.output.until(waitingLine, waitingLineLimit);
 
     expect(fixture.ran()).toEqual([]);
     expect(run.child.exitCode).toBeNull();
@@ -348,14 +455,13 @@ test.each([
     expect(chiefState()).toContain(`- waiting: bun test (pid ${run.child.pid}), ${asks} cores`);
 
     await holder.release();
-    await waitFor(fixture.markers, () => fixture.markerLines("started-gate").length > 0);
+    await waitForMarkers(fixture, ["started-gate"]);
     if (parallel) {
-      for (const name of ["a", "b", "c"])
-        await waitFor(fixture.markers, () => fixture.markerLines(`ran-${name}`).length > 0);
+      await waitForMarkers(fixture, ["ran-a", "ran-b", "ran-c"]);
       // A worker that ran another file than `gate` has ended while `gate` still runs: the ticket stays.
       for (const name of ["a", "b", "c"])
         if (fixture.pidOf(`ran-${name}`) !== fixture.pidOf("started-gate"))
-          await fixture.ended[name];
+          await bounded(fixture.ended[name]!, { within: passLimit, name: `end of alive-${name}` });
     }
     expect(readTestLock().running).toMatchObject([
       { run: "bun test", pid: run.child.pid, cores: asks },
@@ -364,8 +470,8 @@ test.each([
     expect(chiefState()).toContain(`- running: bun test (pid ${run.child.pid}), ${asks} cores`);
 
     fixture.openGate();
-    expect(await run.child.exited).toBe(0);
-    await run.output.done;
+    expect(await finish(run)).toBe(0);
+    // One claimant prints, once: a test of the bare run spends time between the ticket and the release.
     expect(run.output.count(waitingLine)).toBe(1);
     for (const name of ["a", "b", "c", "gate"])
       expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
@@ -378,10 +484,9 @@ test("ARK-T683 a bun test whose cores fit the budget starts at once and prints n
   const fixture = makeFixture({ pipes: true });
   const holder = await startHolder(fixture.home, 1);
   const run = bunTest(fixture.directory, ["--parallel=2"], environment(fixture.home));
-  await waitFor(fixture.markers, () => fixture.markerLines("started-gate").length > 0);
+  await waitForMarkers(fixture, ["started-gate"]);
   fixture.openGate();
-  expect(await run.child.exited).toBe(0);
-  await run.output.done;
+  expect(await finish(run)).toBe(0);
   expect(run.output.text).not.toContain(waitingLine);
   for (const name of ["a", "b", "c", "gate"])
     expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
@@ -406,15 +511,114 @@ macOnly(
       },
     });
     started.push({ pid: run.pid, group: false });
-    await output.until(waitingLine);
+    await output.until(waitingLine, waitingLineLimit);
     expect(fixture.ran()).toEqual([]);
 
     await holder.release();
-    await waitFor(fixture.markers, () => fixture.markerLines("started-gate").length > 0);
+    await waitForMarkers(fixture, ["started-gate"]);
     fixture.openGate();
-    expect(await run.exited).toBe(0);
+    expect(await bounded(run.exited, { within: passLimit, name: "exit of the child" })).toBe(0);
     expect(output.count(waitingLine)).toBe(1);
   },
+);
+
+const waitForMarkers = async (fixture: Fixture, names: string[], within = passLimit) => {
+  for (const name of names)
+    await waitFor(fixture.markers, () => fixture.markerLines(name).length > 0, { within, name });
+};
+
+// ARK-527: each row reaches one wait that its held inner run never satisfies, and asserts that this wait rejects with
+// its name inside its own short limit. Every wait the row passes first carries a roomy limit.
+test(
+  "ARK-T683 11a a stuck file that never writes its marker fails the wait for the marker inside its limit",
+  async () => {
+    const fixture = makeFixture({ variant: "stuck-before-marker", blockers: ["stuck"] });
+    const holder = await startHolder(fixture.home, 3);
+    bunTest(fixture.directory, ["--parallel=3"], environment(fixture.home));
+    await bareTicketWritten(fixture, { within: passLimit, name: "ticket of the bare run" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate", "ran-b", "ran-c"]);
+    await expectNamedRejection(
+      () => waitForMarkers(fixture, ["ran-stuck"], failLimit),
+      /ran-stuck/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11b a worker blocked in its file fails the wait for the end of its pipe inside its limit",
+  async () => {
+    const fixture = makeFixture({
+      variant: "stuck-after-marker",
+      pipes: true,
+      blockers: ["stuck"],
+    });
+    const holder = await startHolder(fixture.home, 3);
+    bunTest(fixture.directory, ["--parallel=3"], environment(fixture.home));
+    await bareTicketWritten(fixture, { within: passLimit, name: "ticket of the bare run" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate", "ran-b", "ran-c", "ran-stuck"]);
+    await expectNamedRejection(
+      () => bounded(fixture.ended.stuck!, { within: failLimit, name: "end of alive-stuck" }),
+      /alive-stuck/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11c a run with no preload fails the wait for the waiting line inside its limit",
+  async () => {
+    const fixture = makeFixture({ preload: false });
+    await startHolder(fixture.home, 3);
+    const run = bunTest(fixture.directory, [], environment(fixture.home));
+    await expectNamedRejection(
+      () => run.output.until(waitingLine, { within: failLimit, name: "waiting line" }),
+      /waiting line/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11d a file that blocks after the release fails the wait for the exit of the child inside its limit",
+  async () => {
+    const fixture = makeFixture({ pipes: true, blockers: ["hang"] });
+    const holder = await startHolder(fixture.home, 3);
+    const run = bunTest(fixture.directory, [], environment(fixture.home));
+    await run.output.until(waitingLine, { within: passLimit, name: "waiting line" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate"]);
+    fixture.openGate();
+    await expectNamedRejection(
+      () => bounded(run.child.exited, { within: failLimit, name: "exit of the child" }),
+      /exit of the child/,
+    );
+  },
+  rowTimeout,
+);
+
+test(
+  "ARK-T683 11e a process that holds the output fails the wait for the end of the output inside its limit",
+  async () => {
+    const fixture = makeFixture({ variant: "leak", pipes: true });
+    const holder = await startHolder(fixture.home, 3);
+    const run = bunTest(fixture.directory, [], environment(fixture.home));
+    await run.output.until(waitingLine, { within: passLimit, name: "waiting line" });
+    await holder.release();
+    await waitForMarkers(fixture, ["started-gate"]);
+    fixture.openGate();
+    expect(await bounded(run.child.exited, { within: passLimit, name: "exit of the child" })).toBe(
+      0,
+    );
+    started.push({ pid: Number(fixture.markerLines("leak-pid")[0]), group: false });
+    await expectNamedRejection(
+      () => bounded(run.output.done, { within: failLimit, name: "end of the output" }),
+      /end of the output/,
+    );
+  },
+  rowTimeout,
 );
 
 // ARK-T695. The configured limit is C/2 or 2*C, never the core count C, and each load lies between it and C, so a run
@@ -425,6 +629,7 @@ const loadLine = (load: number, limit: number) =>
 
 /** Kills a detached `bun test` and its workers by its own pid, the one this case started. */
 const stopRun = (child: { pid: number }) => process.kill(-child.pid, "SIGKILL");
+const loadLineLimit: WaitLimit = { within: passLimit, name: "load line" };
 
 test("ARK-T695 a whole-suite bun test holds on the load of test_max_load below the core count, runs no file, prints one load line, and wears the bun test prefix", async () => {
   const fixture = makeFixture({ maxLoad: coreCount / 2 });
@@ -448,21 +653,20 @@ test("ARK-T695 a whole-suite bun test holds on the load of test_max_load below t
     },
   });
   started.push({ pid: parallel.pid, group: true });
-  await output.until("waiting for load");
+  await output.until("waiting for load", loadLineLimit);
   expect(fixture.ran()).toEqual([]);
   expect(parallel.exitCode).toBeNull();
   expect(readTestLock().waiting).toMatchObject([{ run: "bun test", pid: parallel.pid, cores: 3 }]);
   expect(chiefState()).toContain(`- waiting: bun test (pid ${parallel.pid}), 3 cores`);
   stopRun(parallel);
-  await parallel.exited;
+  await bounded(parallel.exited, { within: passLimit, name: "exit of the child" });
 
   // A serial run prints live: the one line names the load and the limit, under the wrapper of the bare caller.
   const serial = bunTest(fixture.directory, [], environmentOfLoad);
-  await serial.output.until("waiting for load");
+  await serial.output.until("waiting for load", loadLineLimit);
   expect(fixture.ran()).toEqual([]);
   stopRun(serial.child);
-  await serial.child.exited;
-  await serial.output.done;
+  await finish(serial);
   const lines = serial.output.text.split("\n").filter((line) => line.includes("waiting for load"));
   expect(lines).toHaveLength(1);
   expect(lines[0]).toContain(loadLine(load, coreCount / 2));
@@ -477,8 +681,7 @@ test("ARK-T695 a whole-suite bun test runs every file and prints no load line wh
     ["--parallel=3"],
     environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(1.5 * coreCount) }),
   );
-  expect(await run.child.exited, run.output.text).toBe(0);
-  await run.output.done;
+  expect(await finish(run), run.output.text).toBe(0);
   expect(run.output.text).not.toContain("waiting for load");
   for (const name of ["a", "b", "c", "gate"])
     expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
@@ -491,8 +694,7 @@ test("ARK-T695 a whole-suite bun test of a project with no test_max_load takes t
     ["--parallel=3"],
     environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(coreCount) }),
   );
-  expect(await equal.child.exited, equal.output.text).toBe(0);
-  await equal.output.done;
+  expect(await finish(equal), equal.output.text).toBe(0);
   expect(equal.output.text).not.toContain("waiting for load");
 
   const above = coreCount + 0.1;
@@ -501,10 +703,9 @@ test("ARK-T695 a whole-suite bun test of a project with no test_max_load takes t
     [],
     environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(above) }),
   );
-  await held.output.until("waiting for load");
+  await held.output.until("waiting for load", loadLineLimit);
   stopRun(held.child);
-  await held.child.exited;
-  await held.output.done;
+  await finish(held);
   expect(held.output.text).toContain(loadLine(above, coreCount));
 });
 
@@ -516,8 +717,7 @@ test("ARK-T695 a file run and an ark test child start at once on a load above te
     ["test/a.test.ts"],
     environment(fixture.home, { ARK_FAKE_LOAD_ONE: load }),
   );
-  expect(await fileRun.child.exited, fileRun.output.text).toBe(0);
-  await fileRun.output.done;
+  expect(await finish(fileRun), fileRun.output.text).toBe(0);
   expect(fileRun.output.text).not.toContain("waiting for load");
   expect(fixture.markerLines("ran-a")).toHaveLength(1);
 
@@ -529,8 +729,7 @@ test("ARK-T695 a file run and an ark test child start at once on a load above te
       [budgetHeldVariable]: "held",
     }),
   );
-  expect(await child.child.exited, child.output.text).toBe(0);
-  await child.output.done;
+  expect(await finish(child), child.output.text).toBe(0);
   expect(child.output.text).not.toContain("waiting for load");
   expect(ownerTicketFiles(fixture)).toEqual([]);
 });
@@ -544,8 +743,7 @@ test.each([
     const fixture = makeFixture();
     const holder = await startHolder(fixture.home, 3);
     const run = bunTest(fixture.directory, args, environment(fixture.home));
-    expect(await run.child.exited).toBe(0);
-    await run.output.done;
+    expect(await finish(run)).toBe(0);
     expect(run.output.text).not.toContain(waitingLine);
     for (const name of ran) expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
     // The file of an ended pid stays until a reader prunes it, and no reader ran: a run that took a ticket shows here.
@@ -562,8 +760,7 @@ test("ARK-T684 a whole-suite bun test with the ark test marker starts at once, a
     ["test", "--parallel=3"],
     environment(fixture.home, { [budgetHeldVariable]: "held" }),
   );
-  expect(await marked.child.exited).toBe(0);
-  await marked.output.done;
+  expect(await finish(marked)).toBe(0);
   expect(marked.output.text).not.toContain(waitingLine);
   expect(ownerTicketFiles(fixture)).toEqual([]);
 
@@ -574,12 +771,34 @@ test("ARK-T684 a whole-suite bun test with the ark test marker starts at once, a
   expect(fixture.markerLines("runs.log")).toHaveLength(linesBefore);
   expect(readTestLock().waiting).toMatchObject([{ run: "bun test", pid: control.child.pid }]);
   await holder.release();
-  expect(await control.child.exited).toBe(0);
-  await control.output.done;
-  expect(control.output.count(waitingLine)).toBe(1);
+  expect(await finish(control)).toBe(0);
+  // The release may pass before the worker's first look at the tickets: then the cores are free, and no line is right.
+  expect(control.output.count(waitingLine)).toBeLessThanOrEqual(1);
 });
 
-test("ARK-T684 ark test runs its whole-suite head suite, base run and census run with no second wait on its own cores", async () => {
+test(
+  "ARK-T684 6 a bare run that never takes a ticket fails the wait for its ticket inside its limit",
+  async () => {
+    const fixture = makeFixture({ preload: false });
+    await startHolder(fixture.home, 3);
+    const control = bunTest(fixture.directory, ["test", "--parallel=3"], environment(fixture.home));
+    expect(
+      await bounded(control.child.exited, { within: passLimit, name: "exit of the child" }),
+    ).toBe(0);
+    await expectNamedRejection(
+      () => bareTicketWritten(fixture, { within: failLimit, name: "ticket of the bare run" }),
+      /ticket of the bare run/,
+    );
+    expect(ownerTicketFiles(fixture)).toEqual([]);
+  },
+  rowTimeout,
+);
+
+const wholeSuiteCommand =
+  "bun test test --parallel=<cores> --reporter=junit --reporter-outfile={report}";
+
+/** A started run of project `demo` whose cli suite runs `command` in a scratch repo, with `ark test` of it running. */
+function startArkTest(command: string) {
   const home = tempArkHome();
   const markers = realpathSync(mkdtempSync(join(tmpdir(), "bare-markers-")));
   const workspace = tempGitRepo(suiteFiles(markers));
@@ -589,16 +808,7 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
     test_budget_cores: 3,
     test_min_free_memory_percent: 0,
     test_max_swap_gb: 1000,
-    suites: [
-      {
-        name: "cli",
-        level: "e2e",
-        repo: ".",
-        cores: 3,
-        command: "bun test test --parallel=<cores> --reporter=junit --reporter-outfile={report}",
-        parser: "bun",
-      },
-    ],
+    suites: [{ name: "cli", level: "e2e", repo: ".", cores: 3, command, parser: "bun" }],
     roles,
   });
   const ticket = writeTicket("demo", "FAKE-1", [
@@ -668,15 +878,41 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
   const startedInWorktree = () =>
     existsSync(join(markers, "started-gate")) &&
     readFileSync(join(markers, "started-gate"), "utf8").includes(` ${worktree}\n`);
-  await waitFor(markers, startedInWorktree);
+  return {
+    runId,
+    runDirectory,
+    worktree,
+    markers,
+    gateDescriptor,
+    caller,
+    output,
+    startedInWorktree,
+  };
+}
+
+test("ARK-T684 ark test runs its whole-suite head suite, base run and census run with no second wait on its own cores", async () => {
+  const {
+    runId,
+    runDirectory,
+    worktree,
+    markers,
+    gateDescriptor,
+    caller,
+    output,
+    startedInWorktree,
+  } = startArkTest(wholeSuiteCommand);
+  await waitFor(markers, startedInWorktree, {
+    within: 30_000,
+    name: "started-gate of the head worktree",
+  });
 
   // The head suite runs: the store holds its ticket only, and no bare-run ticket.
   expect(readTestLock().running).toMatchObject([{ run: runId, cores: 3 }]);
   expect(readTestLock().waiting).toEqual([]);
 
   closeSync(gateDescriptor);
-  const code = await caller.exited;
-  await output.done;
+  const code = await bounded(caller.exited, { within: 50_000, name: "exit of ark test" });
+  await bounded(output.done, { within: passLimit, name: "end of the output" });
   expect(code, output.text).toBe(0);
   expect(output.text).not.toContain(waitingLine);
   expect(readFileSync(join(runDirectory, "results", "cli.log"), "utf8")).not.toContain(waitingLine);
@@ -689,6 +925,25 @@ test("ARK-T684 ark test runs its whole-suite head suite, base run and census run
   expect(baseRuns).toHaveLength(8);
   expect(new Set(baseRuns.map((line) => line.split(" ")[0])).size).toBe(1);
 });
+
+test("ARK-T684 7 an ark test head suite that never starts its gate file fails the wait for the start inside its limit", async () => {
+  const { markers, startedInWorktree } = startArkTest(
+    "bun test test/a.test.ts test/b.test.ts --parallel=<cores> --reporter=junit --reporter-outfile={report}",
+  );
+  // The head suite ran its files, so the missing `started-gate` is the file that `command` leaves out.
+  await waitFor(markers, () => existsSync(join(markers, "ran-b")), {
+    within: 20_000,
+    name: "ran-b of the head suite",
+  });
+  await expectNamedRejection(
+    () =>
+      waitFor(markers, startedInWorktree, {
+        within: failLimit,
+        name: "started-gate of the head worktree",
+      }),
+    /started-gate/,
+  );
+}, 30_000);
 
 test("ARK-T684 a whole-suite bun test that a test of a held bare run starts does not wait on the cores its parent holds", async () => {
   const home = tempArkHome();
@@ -723,8 +978,7 @@ test("FAKE-1-AC1 spawn", async () => {
     roles,
   });
   const run = bunTest(workspace, ["--parallel=3"], environment(home, { ARK_PROJECT: "demo" }));
-  expect(await run.child.exited, run.output.text).toBe(0);
-  await run.output.done;
+  expect(await finish(run), run.output.text).toBe(0);
   expect(run.output.text).not.toContain(waitingLine);
   expect(readFileSync(join(markers, "nested-code"), "utf8")).toBe("0");
   expect(readFileSync(join(markers, "nested-output"), "utf8")).not.toContain(waitingLine);
