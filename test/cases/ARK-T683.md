@@ -4,9 +4,9 @@ title: ARK-T683 a whole-suite bun test started outside ark test waits for the sh
 level: integration
 technique: state transition (budget full, released, one file still running) with equivalence classes on the whole-suite command line (no path, directory, --parallel=N) and on the way to the project (ARK_PROJECT, run worktree path)
 priority: high
-risk: A bare `bun test` or `bun test test --parallel=3` starts its files while `ark test` runs hold the budget (host load 20 to 63, timing failures in other runs); or the wait fires once per file in a `--parallel` run, takes one ticket per file, frees the ticket when any worker other than the one that still runs a file ends, or never shows its line; or a validator's `bun test` inside a run worktree finds no project and skips the wait
+risk: A bare `bun test` or `bun test test --parallel=3` starts its files while `ark test` runs hold the budget (host load 20 to 63, timing failures in other runs); or the wait fires once per file in a `--parallel` run, takes one ticket per file, frees the ticket when any worker other than the one that still runs a file ends, or never shows its line; or a validator's `bun test` inside a run worktree finds no project and skips the wait; or a held inner run that does not reach a state the row waits for (a marker that never comes, a worker that never ends, a waiting line that never shows, a child that never exits after the release, an output pipe that stays open after the child exits; each as on the Linux CI runner) leaves the row hung to the 90 s test timeout, with a failure at a later line that names no cause, instead of a named failure of the wait
 status: active
-changed_by: 2026-11-15-ARK-513-1
+changed_by: 2026-11-19-ARK-527-1
 ---
 
 ## Objective
@@ -22,6 +22,7 @@ Expected: with the budget full, no file runs and one waiting line shows; after t
 - The environment of every `bun test` child the case starts is built, not inherited: the environment of the case minus the `ark test` marker (the name `run()` in `cli/test-run.ts` sets), `BUN_TEST_WORKER_ID`, `JEST_WORKER_ID`, `ARK_PROJECT` and `ARK_HOME`; then `ARK_HOME` is the temp folder, and `ARK_PROJECT` is set only in the row that says so. Reason: the case itself may run under `ark test` (the marker would make the child never wait) or under an outer `bun test --parallel` (the worker variables would make a serial child read the command line of its parent).
 - The holder is a real child process: `openTestBudget("holder", 3, ...)` and `await budget.take(<cores>)` from `cli/test-lock.ts`, then it blocks reading its standard input until the case writes to it (the release). Its ticket pid is live.
 - No sleeps: the case waits on events (a line read from the child's output, a marker file, process exit).
+- A marker counts as written only when it holds a complete line: a file appends with create then write, so a marker file that exists and is still empty is not written yet, and neither a wait for it nor a read of its pid sees it. Without this rule a read of the pid gives no pid, the case takes a worker that also runs `gate` for another worker, and waits for end-of-file of a pipe that `gate` still holds (the Linux hang of ARK-527).
 
 ## Steps
 
@@ -35,6 +36,12 @@ Expected: with the budget full, no file runs and one waiting line shows; after t
 8. Repeat 1 to 6, with a new fixture and holder, for `bun test --parallel=3` with cwd a run worktree under `ARK_HOME/projects/demo/runs/<run>/workspace` (not the project `workspace`), once with `ARK_PROJECT=demo` and once with only the path to find the project.
 9. With the holder holding 1 of 3 cores, start `bun test --parallel=2`, wait until `started-gate` exists and close the `gate` descriptor: it asks 2 and fits.
 10. Start `bun test --parallel=3` under a pseudo-terminal of its own (`Bun.spawn` with `terminal`), with the budget full. Read the terminal output until the waiting line shows, check that no `ran-*` marker exists, release the holder and the gate, wait for exit. Skipped off macOS.
+11. Bounded waits (the failure of the wait itself). Each row below has its own fixture and holder, replaces or adds one file, and reaches exactly one failing wait that no earlier wait of the row can excuse: the earlier waits of the row are the ones of steps 2 to 6 and all pass. Every wait of the row runs with the case's own time limit, below the 90 s test timeout. The case ends every process it started by pid when the row is done. The rows are 11a to 11e.
+    - 11a, marker never comes. Command line `bun test --parallel=3`. A file `stuck` replaces `a`: it opens `alive-stuck` for writing as the other files do, then blocks reading a named pipe `stuck` that the case holds open and never writes. It never appends `ran-stuck`. Release the holder; wait for `started-gate`, then for every `ran-*` marker of step 5. The wait for `ran-stuck` is the failing one.
+    - 11b, a worker never ends. Command line `bun test --parallel=3`. The file `stuck` replaces `a` and appends `ran-stuck` first, then blocks as in 11a, with `alive-stuck` still open. Release the holder and run the waits of step 5. All markers exist, and the worker that runs `stuck` is blocked in it, so its pid differs from the `gate` pid: the wait for the end of that worker's `alive-stuck` pipe is reached and is the failing one.
+    - 11c, the waiting line never shows. Command line `bun test` (serial) in a scratch copy with no `bunfig.toml` preload, holder holding 3 of 3 cores: the run never waits and prints no waiting line. The wait for the waiting line in the output of step 2 is the failing one.
+    - 11d, the child never exits after the release. Command line `bun test` (serial) with the preload. `gate` reads its pipe until end-of-file as before, then blocks reading a second named pipe `hang` that the case holds open and never writes. Run steps 2 and 5, close the `gate` descriptor as in step 6, then wait for the child to exit: that wait is the failing one.
+    - 11e, the output pipe stays open after the child exits. Command line `bun test` (serial) with the preload. A file `leak` replaces `c`: it starts a detached process with the standard output and error of the run inherited, which lives until the case ends it by pid, and records that pid in a marker. Run steps 2, 5 and 6. The child exits 0 (the wait for exit passes); the wait for the end of its output is the failing one.
 
 ## Expected results
 
@@ -47,6 +54,7 @@ Expected: with the budget full, no file runs and one waiting line shows; after t
 - Step 8: both ways to the project wait the same way.
 - Step 9: all files run with no wait and no waiting line (cores fit).
 - Step 10: the waiting line shows live in the terminal output while no file runs, and exactly one waiting line shows in the whole output.
+- Step 11: in each row the one failing wait rejects with an error that names what it waited for (11a the marker `ran-stuck`, 11b the end of `alive-stuck`, 11c the waiting line, 11d the exit of the child, 11e the end of the output), inside its own time limit and below the 90 s test timeout; the case asserts that rejection and its elapsed time, and passes. At the head before this run each of these waits is unbounded: the row fails at its own row test timeout (a limit set on the row, shorter than the 90 s default) and not at a named wait error, so each row is red proof. The rows do not depend on the Linux cause: each state is built on any host.
 
 ## Screenshot checkpoints
 
