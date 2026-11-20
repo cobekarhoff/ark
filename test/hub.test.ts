@@ -4177,10 +4177,9 @@ test("ARK-T321 the conversation routes answer agents, role groups, spans, events
   for (const build of await Promise.all(builds)) expect(build.status).toBe(200);
 }, 60_000);
 
-// AC4 of ARK-344: the budgets of the 2,000-message case ARK-T322.
+// AC4 of ARK-344: the page budgets of the 2,000-message case ARK-T322. AC1 of ARK-512: no wall-time bound on /api/conversation.
 const pageBudgetMilliseconds = 200;
-const conversationBudgetMilliseconds = 1000;
-test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and the project conversation answers within 1 s", async () => {
+test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and every project conversation request under load returns the full, ready conversation", async () => {
   isolatedEnvironment();
   const base = Date.now();
   const runs = Array.from(
@@ -4258,7 +4257,8 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
   const { baseUrl } = await start();
   // 20 runs and 2,000 messages sit 100 minutes apart, so a 48 h window holds them all.
   const path = `/api/conversation?since=${encodeURIComponent(new Date(base - 48 * 3_600_000).toISOString())}&until=${encodeURIComponent(new Date(base + 60_000).toISOString())}`;
-  const timed = async () => {
+  type TimedReply = { milliseconds: number; status: number; reply: ProjectReply };
+  const timed = async (): Promise<TimedReply> => {
     const requestedAt = performance.now();
     const response = await fetch(`${baseUrl}${path}`);
     const reply = (await response.json()) as ProjectReply;
@@ -4280,15 +4280,18 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
   expect(cold.status).toBe(200);
   expect(allMessagesOf(cold.reply)).toHaveLength(2000);
   expect(cold.reply.runs).toHaveLength(20);
-  expect(cold.milliseconds, "cold /api/conversation").toBeLessThan(conversationBudgetMilliseconds);
-
   // / and /nope while the conversation is requested again and again.
   let building = true;
   const conversationTimes: number[] = [];
+  const replies: TimedReply[] = [];
   // Four clients ask at once, so the worker's queue is never empty.
   const background = Promise.all(
     Array.from({ length: 4 }, async () => {
-      while (building) conversationTimes.push((await timed()).milliseconds);
+      while (building) {
+        const reply = await timed();
+        replies.push(reply);
+        conversationTimes.push(reply.milliseconds);
+      }
     }),
   );
   const latencies: Record<string, number[]> = { "/": [], "/nope": [] };
@@ -4308,9 +4311,16 @@ test("ARK-T322 with 2,000 messages and 20 runs the hub pages keep their p95 and 
   );
   for (const [route, value] of Object.entries(p95))
     expect(value, `p95 of ${route}`).toBeLessThan(pageBudgetMilliseconds);
-  expect(Math.max(...conversationTimes), "/api/conversation under load").toBeLessThan(
-    conversationBudgetMilliseconds,
-  );
+  // A loaded host slows a request and does not change what it returns, so no wall-time bound sits on /api/conversation:
+  // every reply is the full, ready conversation, read no earlier than the cold one.
+  expect(conversationTimes.length, "builds").toBeGreaterThan(0);
+  for (const reply of replies) {
+    expect(reply.status).toBe(200);
+    expect(reply.reply.directory).toBe("ready");
+    expect(allMessagesOf(reply.reply)).toHaveLength(2000);
+    expect(reply.reply.runs).toHaveLength(20);
+    expect(Date.parse(reply.reply.read_at)).toBeGreaterThanOrEqual(Date.parse(cold.reply.read_at));
+  }
 }, 120_000);
 
 // ---------------------------------------------------------------- ARK-339
