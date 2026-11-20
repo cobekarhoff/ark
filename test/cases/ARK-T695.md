@@ -1,46 +1,47 @@
 ---
 id: ARK-T695
-title: "ARK-T695 a whole-suite bun test started outside ark test waits on the load of test_max_load, prints one load line, runs no file while it waits, and starts at the limit"
+title: "ARK-T695 a whole-suite bun test started outside ark test waits on CPU use over 90 percent while a suite runs, ignores the 1-minute load, starts when nothing runs, and prints one CPU line"
 level: integration
-technique: "boundary values (a configured limit below and above the core-count default, a load between them; the default with the key absent) on the bare-run admission, state transition (waiting on load, running)"
+technique: "equivalence classes (a suite running or not; CPU above the limit or below it with a high load) on the bare-run admission, state transition (waiting on CPU, running)"
 priority: high
-risk: "A whole-suite `bun test` run by hand on a loaded host (the host the ticket targets) starts its files into a load of 20 to 63, because `holdTestBudget` passes no load limit to `openTestBudget`; or it ignores `test_max_load` of `ark.yml` and uses the core-count default (so a configured limit above the default still holds, or one below it still admits); or the load wait is printed for every file of a `--parallel` run; or a run inside `ark test` or a file run waits on the load as well, and so deadlocks on its own load"
+risk: "A whole-suite `bun test` run by hand on a busy host starts its files into CPU use of 95 percent because `holdTestBudget` does not reach the CPU hold; or it still reads the 1-minute load, so a host at 5 percent CPU and a load of 30 holds it; or, with nothing running, its owner ticket does not take the idle exception and it waits for ever; or the CPU wait is printed for every file of a `--parallel` run; or a run inside `ark test` or a file run waits on the CPU as well, and so deadlocks on its own reading"
 status: active
-changed_by: 2026-11-18-ARK-515-1
+changed_by: 2026-11-20-ARK-586-1
 ---
 
 ## Objective
 
-Prove a whole-suite bare `bun test` (`cli/bare-test-budget.ts`) is held by the same load rule as `ark test`: no file runs while the load is above `test_max_load` of the project's `ark.yml`, exactly one `waiting for load` line shows, and the files run when the load is at or under the configured limit, whether that limit is below or above the core-count default.
+Prove a whole-suite bare `bun test` (`cli/bare-test-budget.ts`) is held by the same CPU rule as `ark test`: while another suite runs and CPU use is above 90 percent no file runs and exactly one CPU line shows; at 5 percent CPU with a load of 30 it runs; with nothing running it runs at CPU 99.
 
 Gate answers:
 
-1. Protects the bare path of AC1 ("held by the same rule") and the exemptions of ARK-T684 (file argument, `ark test` child, nested run) on the load rule.
-2. A regression that fails it: `holdTestBudget` omits `maximumLoad` (the bare run ignores the load, or the key and falls back to the core count), or the load line prints once for each worker.
-3. ARK-T683 and ARK-T684 prove the bare wait on cores only; ARK-T692 proves the rule through `ark test`. Neither reaches the bare entry, which is a separate call site of `openTestBudget`.
-4. No hook beyond the seam of ARK-T692: the child is a real `bun test` with the preload of the scratch repo, and `ARK_FAKE_LOAD_ONE` is in its built environment. The preload of this repo sets `ARK_FAKE_LOAD_ONE` to `0` with `??=` only after `holdTestBudget()` has run, so the value the case sets is the one the hold reads.
+1. Protects the bare path of AC1 and AC2 ("held by the same rule") and the exemptions of ARK-T684 (file argument, `ark test` child, nested run) on the CPU rule.
+2. A regression that fails it: `holdTestBudget` bypasses the CPU hold, still reads the load, or the owner ticket of a bare run is not handled by the idle exception; the CPU line prints once for each worker.
+3. ARK-T683 and ARK-T684 prove the bare wait on cores only; ARK-T709 and ARK-T710 prove the rule through `ark test`. Neither reaches the bare entry, which is a separate call site of `openTestBudget` with an `owner` ticket for the coordinator.
+4. No hook beyond the seams of ARK-T710: the child is a real `bun test` with the preload of the scratch repo, and `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD_ONE` are in its built environment. The preload of this repo sets only `ARK_FAKE_CPU_PERCENT`, with `??=` and only after `holdTestBudget()` has run (or not at all), so the value the case sets is the one the hold reads.
 
 ## Preconditions
 
-- The fixture and the built environment of ARK-T683: temp `ARK_HOME`, project `demo`, scratch git repo with the repo's `bunfig.toml` preload and marker-writing test files `a`, `b` and `c`; no holder, the budget is free. The built environment keeps or sets `ARK_FAKE_LOAD_ONE` (a number) and no marker of `ark test`.
-- `C` is `os.availableParallelism()` of the host, read by the case. `ark.yml` of `demo` sets `test_max_load` as the step says: `C/2` (below the default) or `2*C` (above it). Every load used lies between the configured limit and the default, so omitting the project value changes the outcome on any host with `C >= 1`.
+- The fixture and the built environment of ARK-T683: temp `ARK_HOME`, project `demo` with `test_budget_cores: 3`, scratch git repo with the repo's `bunfig.toml` preload and marker-writing test files `a`, `b` and `c`, and no marker of `ark test`. The built environment keeps or sets `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD_ONE` (numbers) as the step says.
+- Fresh state per scenario. Each scenario below (steps 1, 2, 3, 4 and 5) starts from its own temp `ARK_HOME`, scratch repo, marker directory and holder, with no `ran-*` marker and no earlier result: an earlier scenario cannot supply a marker or a cached result (ARK-T163).
+- A holder as in ARK-T683, but it holds 1 of the 3 cores, so the cores of `--parallel=2` still fit and only the CPU hold can wait.
 - No sleeps: events only (the ticket file, an output line, a marker file, exit).
 
 ## Steps
 
-1. `test_max_load: C/2`; `ARK_FAKE_LOAD_ONE=0.75*C` (above the limit, under the default `C`: a bare run that ignores the key admits). Start `bun test --parallel=3` in the scratch repo, cwd the project `workspace`, as a detached child with no terminal. A `--parallel` run's output reaches the pipe when its first file ends, so wait until the run's ticket exists in the store (its waiting point). Check that no `ran-*` marker exists and the child is alive; read the ticket and `ark chief state`.
-2. Stop the child through its PID. Start serial `bun test` (no flag) with the same limit and load; read its output until the waiting line shows; check that no `ran-*` marker exists; stop it.
-3. `test_max_load: 2*C`; `ARK_FAKE_LOAD_ONE=1.5*C` (above the default `C`, under the limit: a bare run that ignores the key holds). Start `bun test --parallel=3`. Wait for exit; read the output and the markers.
-4. Remove `test_max_load` from `ark.yml`. Load `C` runs; load `C + 0.1` holds as in step 1 (stop it).
-5. With `test_max_load: C/2` and the load `0.75*C` (above the limit), run `bun test test/a.test.ts` (a file argument), and `bun test test --parallel=3` with the marker of `ark test` (copy the name from `run()` in `cli/test-run.ts`).
+1. Fresh state. Holder running. `ARK_FAKE_CPU_PERCENT=95`, `ARK_FAKE_LOAD_ONE=0`. Start `bun test --parallel=2` in the scratch repo, cwd the project `workspace`, on a terminal of its own (a `--parallel` worker opens `/dev/tty`, so the CPU line shows live; with only a pipe the output reaches the case when the first file ends, and the ticket alone cannot tell the case that the hold was read, so a release right after the ticket could come before the hold). Wait until the CPU line shows (the hold was read). Check that no `ran-*` marker exists and the child is alive; read the ticket and `ark chief state`. Then release the holder (nothing runs, readings unchanged), wait for exit, and read the whole terminal output.
+2. Fresh state. Holder running, same readings. Start serial `bun test` (no flag); read its output until the waiting line shows; check that no `ran-*` marker exists; stop it through its PID.
+3. Fresh state. Holder running. `ARK_FAKE_CPU_PERCENT=5`, `ARK_FAKE_LOAD_ONE=30`. Start `bun test --parallel=2`. Wait for exit; read the output and the markers.
+4. Fresh state. No holder (nothing runs). `ARK_FAKE_CPU_PERCENT=99`, `ARK_FAKE_LOAD_ONE=30`. Start `bun test --parallel=2`. Wait for exit.
+5. Fresh state. Holder running, `ARK_FAKE_CPU_PERCENT=95`: run `bun test test/a.test.ts` (a file argument), and `bun test test --parallel=2` with the marker of `ark test` (copy the name from `run()` in `cli/test-run.ts`).
 
 ## Expected results
 
-- Step 1: no `ran-*` marker; one waiting ticket with label `bun test`; `ark chief state` lists it as `waiting: bun test (pid N)`.
-- Step 2: exactly one output line that contains `waiting for load` and names the load `0.75*C` and the limit `C/2`; the bare caller wraps it, so the line starts `bun test: ` (the case does not require the prefix to be removed and does not assert the text before `waiting for load`); no `waiting for memory` line; no marker.
-- Step 3: all files run (every `ran-*` marker), the child exits 0, and the whole output holds no `waiting for load` line.
-- Step 4: the default is the core count: `C` runs and `C + 0.1` holds, with the load line naming the limit `C`. The project value is read by the bare run, not only the default: step 1 held and step 3 ran on the same host where the default would give the opposite result.
-- Step 5: both start at once with no waiting line (the exemptions of ARK-T684 hold for the load as well).
+- Step 1: while held: no `ran-*` marker; one waiting ticket with label `bun test`; `ark chief state` lists it as `waiting: bun test (pid N)`. After the release: the child exits 0, every `ran-*` marker exists, and the output of that invocation holds exactly one line that contains `waiting for CPU` (not one for each of the two workers or each file) and no `waiting for memory` line.
+- Step 2: exactly one output line that contains `waiting for CPU` and names `95` and the limit `90`; the bare caller wraps it, so the line starts `bun test: ` (the case does not assert the text before `waiting for CPU`); no `waiting for memory` line; no `1-minute load`; no marker.
+- Step 3: all files run (every `ran-*` marker), the child exits 0, and the whole output holds no `waiting for` line.
+- Step 4: all files run and the child exits 0 with no `waiting for` line: the owner ticket takes the idle exception.
+- Step 5: both start at once with no waiting line (the exemptions of ARK-T684 hold for the CPU as well).
 
 ## Screenshot checkpoints
 

@@ -265,7 +265,6 @@ compose: <compose command> # omit when the project has no compose file
 test_budget_cores: <cores all ark test runs of the host share; omit for floor(0.6 x cores)>
 test_min_free_memory_percent: <percent of memory that must be free before ark test starts a suite; omit for 20>
 test_max_swap_gb: <GB of swap used above which ark test starts no suite; omit for 8>
-test_max_load: <1-minute load average above which ark test starts no suite; a fraction is valid; inclusive; omit for the core count>
 suites:
   - name: <unique name>
     level: <integration | e2e>
