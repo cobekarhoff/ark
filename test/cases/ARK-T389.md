@@ -6,7 +6,7 @@ technique: "equivalence classes (one class for each level of ark.yml), boundary 
 priority: high
 risk: "a typo in ark.yml passes the config check with no word, so `merge_request: none` leaves the default `open` and the first run pushes branches and opens MRs of a project that must stay local; or the check covers the top level only and a typo in a role, a suite, a repo entry, a check or pr_writing still passes; or the error gives a wrong guess for a key with no near match"
 status: active
-changed_by: 2026-11-13-ARK-332-1
+changed_by: 2026-11-18-ARK-515-1
 ---
 
 ## Objective
@@ -30,7 +30,7 @@ changed_by: 2026-11-13-ARK-332-1
    - check: `checks[0].comand` (beside `checks[0].command`)
    - pr_writing: `pr_writing.reviwers` (beside `pr_writing.reviewers`)
 2. Load a copy with a top-level key that is near to no valid key (`zzzzzz: 1`).
-3. Load a copy with a valid key and no typo at each level (all known keys of the reference: top-level, each role, each suite key, each check key `name`, `repo`, `command`, `cores`, `repos.<path>.base` and each `pr_writing` key `reviewers`, `tier_floor`, `sensitive_paths`, `one_way_paths`, `agent_authored`, `title_prefix`).
+3. Load a copy with a valid key and no typo at each level (all known keys of the reference: top-level, including `test_max_load` with a fraction such as `7.5`, which loads as `7.5`, each role, each suite key, each check key `name`, `repo`, `command`, `cores`, `repos.<path>.base` and each `pr_writing` key `reviewers`, `tier_floor`, `sensitive_paths`, `one_way_paths`, `agent_authored`, `title_prefix`).
 
 ## Expected results
 
