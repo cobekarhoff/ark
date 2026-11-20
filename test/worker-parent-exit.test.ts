@@ -85,7 +85,7 @@ test("FAKE-1-AC1 ${name}", () => {
  */
 const longFile = (name: string) => (markers: string) =>
   `${imports}test("FAKE-1-AC1 ${name}", async () => {
-  writeFileSync(join(${JSON.stringify(markers)}, "pid-${name}"), String(process.pid));
+  writeFileSync(join(${JSON.stringify(markers)}, "pid-${name}"), process.pid + "\\n");
   const { promise, resolve } = Promise.withResolvers();
   let tick = 0;
   const timer = setInterval(() => {
@@ -223,11 +223,12 @@ test("ARK-T708 a serial bun test run that the host started with parent pid 1 kee
   await forked.exited;
   await waitFor(
     markers,
-    () => existsSync(join(markers, "pid-1")),
+    () => lineOf(markers, "pid-1") !== null,
     "start of the serial run",
     30_000,
-  ).then(() => started.push(Number(readFileSync(join(markers, "pid-1"), "utf8"))));
-  const pid = Number(readFileSync(join(markers, "pid-1"), "utf8"));
+  );
+  const pid = Number(lineOf(markers, "pid-1")![0]);
+  started.push(pid);
   const parent = Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)])
     .stdout.toString()
     .trim();
