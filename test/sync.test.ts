@@ -1040,11 +1040,11 @@ function generatedScenario(
     options.onOrigin?.(clone);
   });
   if (options.syncDelaySeconds !== undefined) {
-    // installed after the fixture commits and pushes, so only the fetch of the sync is slowed
-    const hookPath = join(
-      git(worktree, "rev-parse", "--path-format=absolute", "--git-path", "hooks"),
-      "reference-transaction",
-    );
+    // installed after the fixture commits and pushes, so only the fetch of the sync is slowed;
+    // a local core.hooksPath keeps the hook out of a global hooks folder
+    const hooksDirectory = mkdtempSync(join(tmpdir(), "ark-sync-hooks-"));
+    git(worktree, "config", "core.hooksPath", hooksDirectory);
+    const hookPath = join(hooksDirectory, "reference-transaction");
     writeFileSync(
       hookPath,
       `#!/bin/sh\n[ "$1" = prepared ] && grep -q refs/remotes/ && sleep ${options.syncDelaySeconds}\nexit 0\n`,
@@ -1261,7 +1261,6 @@ test(
         config: variant.config ?? {
           generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }],
         },
-        // 4 syncs of 8 s each pass the 30 s default limit, as a loaded host does
         syncDelaySeconds: 8,
       });
       const before = treeState(scenario.worktree);
