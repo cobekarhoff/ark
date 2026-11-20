@@ -7,7 +7,7 @@ How to test, wait, handle processes and prove a claim, for any repo Ark works in
 - A test earns its keep: it fails for a credible regression, and no other test already owns that contract. Prefer integration and E2E tests at the real boundary: a unit test of a pure function is the cheap exception. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate), [Principles: Proof](principles.md#proof)
 - Wait on an event with a limit, never for a fixed time. A fixed sleep is too short on a loaded host and too long on an idle one, and it hides the event that the test needs.
 - A limit that a test must shorten (a timeout, an interval) is set by an environment variable that the code reads, so the test sets a short limit and production keeps its own.
-- Prove a race fix with a real load run: repeat the test in parallel, next to the suite. A delay injected into a shared fake lands on whichever call runs first, so the test then fails only part of the time.
+- Prove a race fix with a real load run: repeat the test in parallel, next to the suite. To show the bug before the fix, add an opt-in delay that only the call under test gets, so the test fails every time without the fix. A delay in a shared fake lands on every caller, and on whichever call runs first, so keep it out of the fake. Repeat the proof as separate test processes, because one process keeps module state between repeats.
 - While you iterate, run the tests that the change affects. Before the MR, run the full suite once.
 - Report a flaky test, with its name and how it failed. Never rerun until green and call that proof. A retry that the test tool does itself is the tool's report of a flaky test, not your proof.
 
