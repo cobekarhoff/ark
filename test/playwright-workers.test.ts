@@ -22,12 +22,15 @@ function list(command: string): {
   const env: Record<string, string | undefined> = { ...process.env, CI: "true" };
   // a junit report path would replace the reporter of the config
   delete env.PLAYWRIGHT_JUNIT_OUTPUT_FILE;
+  // bun test --parallel workers set JEST_WORKER_ID; Playwright refuses to start when it sees it
+  delete env.JEST_WORKER_ID;
   const result = Bun.spawnSync(["bash", "-c", `${command} --list --reporter=json`], {
     cwd: repositoryRoot,
     env,
     stdout: "pipe",
     stderr: "pipe",
   });
+  expect(result.exitCode, result.stderr.toString()).toBe(0);
   const listing = JSON.parse(result.stdout.toString()) as Listing;
   const collect = (suite: ListedSuite): { id: string; file: string }[] => [
     ...(suite.specs ?? []),
