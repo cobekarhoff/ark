@@ -13,6 +13,7 @@ const read = (file: string) => readFileSync(join(root, file), "utf8");
 const sharedFiles = [
   "skills/shared/rules.md",
   "skills/shared/worker-protocol.md",
+  "skills/shared/engineering.md",
   "skills/shared/principles.md",
 ];
 const workerSkillFiles = ["evaluator", "designer", "implementer", "validator", "reviewer"].map(
@@ -47,7 +48,7 @@ test("ARK-T410 every literal `ark run close <run> <outcome>` in the skills uses 
   }
 });
 
-test("ARK-T86 every phase the docs and skills name is one the reducer emits", () => {
+test("ARK-T716 every phase the docs and skills name is one the reducer emits", () => {
   const files = [
     "CONTEXT.md",
     "README.md",
@@ -161,26 +162,27 @@ test("ARK-T412 every portless, orca tab create and ark ui command in the run-lea
   ).toBeGreaterThanOrEqual(1);
 });
 
-test("ARK-T85 every link in principles.md points to a file and heading that exist", () => {
+test("ARK-T85 every link in principles.md and engineering.md points to a file and heading that exist", () => {
   const skillDirectory = join(root, "skills/shared");
   const slug = (heading: string) =>
     heading
       .toLowerCase()
       .replace(/[^\p{L}\p{N} _-]/gu, "")
       .replace(/ /g, "-");
-  const principles = read("skills/shared/principles.md");
-  const links = [...principles.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1]!);
-  expect(links.length).toBeGreaterThan(0);
-  for (const link of links) {
-    const [path, anchor] = link.split("#");
-    const file = join(skillDirectory, path!);
-    expect(existsSync(file), `${link}: file missing`).toBe(true);
-    if (anchor) {
-      const slugs = readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => /^#{1,6} /.test(line))
-        .map((line) => slug(line.replace(/^#+ /, "").trim()));
-      expect(slugs, `${link}: heading missing`).toContain(anchor);
+  for (const sharedFile of ["skills/shared/principles.md", "skills/shared/engineering.md"]) {
+    const links = [...read(sharedFile).matchAll(/\]\(([^)\s]+)\)/g)].map((match) => match[1]!);
+    expect(links.length, sharedFile).toBeGreaterThan(0);
+    for (const link of links) {
+      const [path, anchor] = link.split("#");
+      const file = join(skillDirectory, path!);
+      expect(existsSync(file), `${sharedFile} ${link}: file missing`).toBe(true);
+      if (anchor) {
+        const slugs = readFileSync(file, "utf8")
+          .split("\n")
+          .filter((line) => /^#{1,6} /.test(line))
+          .map((line) => slug(line.replace(/^#+ /, "").trim()));
+        expect(slugs, `${sharedFile} ${link}: heading missing`).toContain(anchor);
+      }
     }
   }
 });
