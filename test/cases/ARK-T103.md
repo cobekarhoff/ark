@@ -5,8 +5,9 @@ level: integration
 technique: equivalence classes (one defect per check) on a fixture project
 priority: medium
 risk: a failing typecheck, lint, format or test command no longer stops the CI command sequence, so a defect merges
-status: active
-changed_by: 2026-11-07-ARK-330-1
+status: retired
+retired_reason: "`.github/workflows/ci.yml`, `.githooks/pre-commit` and the checks of `ark test` run the same typecheck, lint, format and test commands; the test only typed the CI command list again"
+changed_by: 2026-11-19-ARK-456-1
 ---
 
 ## Objective

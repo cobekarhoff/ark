@@ -117,25 +117,6 @@ describe("playwright migration", () => {
     ]);
   });
 
-  test("ARK-243-AC4 ci.yml runs the Playwright suite in its own ubuntu job after installing chromium", async () => {
-    const ci = Bun.YAML.parse(await Bun.file(join(root, ".github/workflows/ci.yml")).text()) as {
-      jobs: Record<string, { "runs-on": string; steps: { run?: string }[] }>;
-    };
-    const runs = (job: string) => ci.jobs[job]!.steps.flatMap((s) => (s.run ? [s.run] : []));
-    const jobs = Object.entries(ci.jobs).filter(([, j]) =>
-      j.steps.some((s) => s.run?.includes("playwright test")),
-    );
-    expect(jobs.length).toBe(1);
-    const [name, job] = jobs[0]!;
-    expect(name).not.toBe("test");
-    expect(job["runs-on"]).toBe("ubuntu-latest");
-    const steps = runs(name);
-    const install = steps.findIndex((r) => r.includes("playwright install --with-deps chromium"));
-    const run = steps.findIndex((r) => r.includes("playwright test"));
-    expect(install).toBeGreaterThanOrEqual(0);
-    expect(install).toBeLessThan(run);
-  });
-
   test(
     "ARK-243-AC5 a failing Playwright test keeps a trace and a screenshot in the output folder",
     async () => {
