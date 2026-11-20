@@ -3899,7 +3899,7 @@ const agentOfMessage = (reply: ProjectReply, id: string, side: "from" | "to") =>
 test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the last good value, and marks it truncated or stale", async () => {
   isolatedEnvironment();
   const { run, messages, orca } = conversationFixture();
-  const state = installFakeTools({ orca });
+  const state = installFakeTools({ orca, orcaInboxDelaySeconds: 0.5 });
   process.env.ARK_HUB_INTERVAL_MS = "100";
   const { baseUrl } = await start();
   delete process.env.ARK_HUB_INTERVAL_MS;
@@ -3955,10 +3955,19 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
   expect(frame).not.toContain("SECRET-BODY");
   expect(snapshotText).not.toContain("SECRET-BODY");
 
-  // A failed read keeps the first value with its read time; the other Orca sources stay ok.
+  // A failed read keeps the last good value (the same messages, marked stale); the other Orca sources stay ok.
+  // A loaded host can start a read before this write and publish it after: wait for a read that passed the failure check, then write.
+  const passedReads = () => {
+    const file = join(state, "orca.inboxpassed");
+    return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
+  };
+  const before = passedReads();
+  while (passedReads() === before) await delay(10);
+  const lastGood = await conversationWhen<ProjectReply>(baseUrl, (reply) => !reply.stale);
   writeFakeToolState(state, { orca, orcaInboxFails: true });
   const stale = await conversationWhen<ProjectReply>(baseUrl, (reply) => reply.stale);
-  expect(stale.read_at).toBe(first.read_at);
+  // A read that began before the write may publish after it, so the stale read time is only bounded below.
+  expect(Date.parse(stale.read_at)).toBeGreaterThanOrEqual(Date.parse(lastGood.read_at));
   expect(allMessagesOf(stale)).toEqual(allMessagesOf(first));
   const afterFailure = (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
   expect(afterFailure.sources.orca.ok).toBe(true);

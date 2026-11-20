@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { readChiefUnread } from "../cli/chief.ts";
 import { now } from "../cli/clock.ts";
@@ -13,7 +13,7 @@ import {
   type StepWindow,
 } from "../cli/events.ts";
 import { isDropped } from "../cli/findings.ts";
-import { loadConfig } from "../cli/config.ts";
+import { hubConfig, primeHubConfig } from "./config.ts";
 import {
   orcaOrchestration,
   orcaPages,
@@ -31,6 +31,7 @@ import { frontmatter } from "../cli/ticket.ts";
 import type { Directory, DirectoryWorker, InboxMessage } from "./conversation.ts";
 import { readEventsLeniently } from "./run-detail.ts";
 import { readRoadmap, type RoadmapTicket } from "./roadmap.ts";
+import { yielder } from "./yield.ts";
 import { parseTicketDocument, whyOf, withoutCodeMarks } from "./ticket-document.ts";
 import type {
   Agent,
@@ -62,6 +63,8 @@ export type ArkRun = {
   /** The `repos` block of `plan.yml`; empty when there is none or no plan. */
   repos: PlanRepo[];
   windows: StepWindow[];
+  /** Size and mtime of `metrics.json` of a closed run (null: none, or the run is open): the key of its cost. */
+  metrics: string | null;
 };
 export type ArkValue = {
   runs: ArkRun[];
@@ -141,6 +144,28 @@ export function readTicketDocument(entry: TicketFile): { document: TicketDocumen
   }
 }
 
+/** `signatureOf` through the thread pool: a slow stat on a loaded host never holds the event loop (ARK-533). */
+const signatureOfAsync = async (file: string): Promise<string | null> => {
+  try {
+    const stats = await stat(file);
+    return `${stats.size}:${stats.mtimeMs}`;
+  } catch {
+    return null;
+  }
+};
+
+/** `readdir` through the thread pool; an absent folder lists nothing. */
+const namesIn = async (directory: string): Promise<string[]> => {
+  try {
+    return await readdir(directory);
+  } catch {
+    return [];
+  }
+};
+
+/** Run names, newest first: the sort of 250 names by `localeCompare` took 44 ms, a collator sorts them in a few. */
+const runOrder = new Intl.Collator(undefined, { numeric: true });
+
 /**
  * Reads Ark's files again only where a file changed (size and mtime). A run whose log is being
  * written at this moment can end on a half line: that run keeps its last good value.
@@ -152,10 +177,11 @@ export function createArkReader() {
     { signature: string; ticket: TicketView; document: TicketDocument | null }
   >();
   const fileCache = new Map<string, { signature: string; text: string | null }>();
+  const roadmapCache = new Map<string, { key: string; value: ProjectRoadmap }>();
 
   /** A text file read again only when its size or mtime changed; null when it is missing or unreadable. */
-  function readText(file: string): string | null {
-    const signature = signatureOf(file);
+  async function readText(file: string): Promise<string | null> {
+    const signature = await signatureOfAsync(file);
     if (signature === null) return null;
     const known = fileCache.get(file);
     if (known?.signature === signature) return known.text;
@@ -170,9 +196,11 @@ export function createArkReader() {
   }
 
   /** `ticket_source` of `ark.yml`; `local` (the default) for a project with no ark.yml or a value that is not one of the three. */
-  function ticketSourceOf(project: string): string {
+  async function ticketSourceOf(project: string): Promise<string> {
     try {
-      const fields = Bun.YAML.parse(readText(join(projectDirectory(project), "ark.yml")) ?? "") as {
+      const fields = Bun.YAML.parse(
+        (await readText(join(projectDirectory(project), "ark.yml"))) ?? "",
+      ) as {
         ticket_source?: unknown;
       } | null;
       const value = fields?.ticket_source;
@@ -182,9 +210,9 @@ export function createArkReader() {
     }
   }
 
-  function roadmapOf(project: string, tickets: TicketView[]): ProjectRoadmap {
-    const markdown = readText(join(projectDirectory(project), "ROADMAP.md"));
-    if (markdown === null) return { none: ticketSourceOf(project) };
+  async function roadmapOf(project: string, tickets: TicketView[]): Promise<ProjectRoadmap> {
+    const markdown = await readText(join(projectDirectory(project), "ROADMAP.md"));
+    if (markdown === null) return { none: await ticketSourceOf(project) };
     // A ticket whose front matter did not read has no real status: it waits in Review.
     const known: RoadmapTicket[] = tickets.map((ticket) => ({
       id: ticket.id,
@@ -193,19 +221,31 @@ export function createArkReader() {
       milestone: ticket.milestone,
       depends_on: ticket.depends_on,
     }));
+    // The roadmap is parsed again only when its text or a ticket's fields changed (the parse took 48 ms on each pass).
+    const key = `${markdown}\0${JSON.stringify(known)}`;
+    const cached = roadmapCache.get(project);
+    if (cached?.key === key) return cached.value;
     const result = readRoadmap(markdown, known);
-    return result.ok
+    const value: ProjectRoadmap = result.ok
       ? result.roadmap
       : { error: result.errors.map((error) => `line ${error.line}: ${error.message}`).join(" ") };
+    roadmapCache.set(project, { key, value });
+    return value;
   }
 
-  function readRun(directory: string): ArkRun | null {
+  async function readRun(directory: string): Promise<ArkRun | null> {
     const log = join(directory, "events.ndjson");
-    const logSignature = signatureOf(log);
+    const logSignature = await signatureOfAsync(log);
     if (logSignature === null) return null;
-    const signature = `${logSignature}|${signatureOf(join(directory, "plan.yml"))}`;
+    const signature = `${logSignature}|${await signatureOfAsync(join(directory, "plan.yml"))}`;
     const known = runCache.get(directory);
-    if (known?.signature === signature) return known.run;
+    if (known?.signature === signature) {
+      // `ark retro` writes metrics.json after the run closed, without a new event: only a closed run is looked at again.
+      if (known.run.state.phase !== "closed") return known.run;
+      const metrics = await signatureOfAsync(join(directory, "metrics.json"));
+      if (metrics !== known.run.metrics) known.run = { ...known.run, metrics };
+      return known.run;
+    }
     try {
       const events = readEventsLeniently(directory);
       if (events.length === 0) return null;
@@ -216,13 +256,16 @@ export function createArkReader() {
         plan = loaded.steps;
         repos = loaded.repos;
       } catch {}
+      const state = deriveState(events);
       const run = {
         directory,
-        state: deriveState(events),
+        state,
         events,
         plan,
         repos,
         windows: stepWindows(events),
+        metrics:
+          state.phase === "closed" ? await signatureOfAsync(join(directory, "metrics.json")) : null,
       };
       runCache.set(directory, { signature, run });
       return run;
@@ -231,8 +274,8 @@ export function createArkReader() {
     }
   }
 
-  function readTicket(project: string, file: string, name: string) {
-    const signature = signatureOf(file);
+  async function readTicket(project: string, file: string, name: string) {
+    const signature = await signatureOfAsync(file);
     if (signature === null) return null;
     const known = ticketCache.get(file);
     if (known?.signature === signature) return known;
@@ -246,41 +289,57 @@ export function createArkReader() {
     return parsed;
   }
 
-  return {
-    /** Every run (open and closed, newest first) and every ticket of every project. */
-    read(): ArkValue {
-      const runs: ArkRun[] = [];
-      const tickets: TicketView[] = [];
-      const ticketFiles = new Map<TicketView, TicketFile>();
-      const roadmap: Record<string, ProjectRoadmap> = {};
-      for (const project of listProjects()) {
-        const runsRoot = runsDirectory(project);
-        if (existsSync(runsRoot)) {
-          for (const name of readdirSync(runsRoot)) {
-            const run = readRun(join(runsRoot, name));
-            if (run) runs.push(run);
-          }
-        }
-        const ticketsRoot = join(projectDirectory(project), "tickets");
-        const projectTickets: TicketView[] = [];
-        if (existsSync(ticketsRoot)) {
-          for (const name of readdirSync(ticketsRoot).sort()) {
-            if (!ticketFile.test(name)) continue;
-            const file = join(ticketsRoot, name);
-            const read = readTicket(project, file, name);
-            if (!read) continue;
-            projectTickets.push(read.ticket);
-            ticketFiles.set(read.ticket, { file, document: read.document });
-          }
-        }
-        tickets.push(...projectTickets);
-        roadmap[project] = roadmapOf(project, projectTickets);
+  async function pass(): Promise<ArkValue> {
+    const runs: ArkRun[] = [];
+    const tickets: TicketView[] = [];
+    const ticketFiles = new Map<TicketView, TicketFile>();
+    const roadmap: Record<string, ProjectRoadmap> = {};
+    const yieldIfLong = yielder();
+    const projects = listProjects();
+    // A project's config loads in a worker thread, before `compose()` asks for it (a load in the loop held it for 200 ms).
+    await Promise.all(projects.map(primeHubConfig));
+    for (const project of projects) {
+      const runsRoot = runsDirectory(project);
+      for (const name of await namesIn(runsRoot)) {
+        const run = await readRun(join(runsRoot, name));
+        if (run) runs.push(run);
+        await yieldIfLong();
       }
-      runs.sort((left, right) =>
-        right.state.run.localeCompare(left.state.run, undefined, { numeric: true }),
-      );
-      return { runs, tickets, ticketFiles, roadmap };
-    },
+      const ticketsRoot = join(projectDirectory(project), "tickets");
+      const projectTickets: TicketView[] = [];
+      for (const name of (await namesIn(ticketsRoot)).sort()) {
+        if (!ticketFile.test(name)) continue;
+        const file = join(ticketsRoot, name);
+        const listed = await readTicket(project, file, name);
+        await yieldIfLong();
+        if (!listed) continue;
+        projectTickets.push(listed.ticket);
+        ticketFiles.set(listed.ticket, { file, document: listed.document });
+      }
+      tickets.push(...projectTickets);
+      roadmap[project] = await roadmapOf(project, projectTickets);
+    }
+    runs.sort((left, right) => runOrder.compare(right.state.run, left.state.run));
+    return { runs, tickets, ticketFiles, roadmap };
+  }
+
+  // At most one pass runs and one waits: a change that lands during a pass needs another pass, and a pass that
+  // yields must never finish after a newer one and put older data back.
+  let current: Promise<ArkValue> | null = null;
+  let queued: Promise<ArkValue> | null = null;
+  function read(): Promise<ArkValue> {
+    if (!current) return (current = pass().finally(() => (current = null)));
+    return (queued ??= current
+      .catch(() => {})
+      .then(() => {
+        queued = null;
+        return read();
+      }));
+  }
+
+  return {
+    /** Every run (open and closed, newest first) and every ticket of every project. Yields to the event loop between runs and tickets (ARK-533). */
+    read,
     /** Folders to watch: each run folder (events.ndjson, plan.yml), the runs roots, the tickets folders and each project folder (ROADMAP.md, ark.yml). */
     watchPaths(): string[] {
       const paths: string[] = [];
@@ -313,8 +372,10 @@ export async function readQueues(): Promise<Map<string, QueueRead>> {
   const reads = await Promise.all(
     projects.map(async (project): Promise<QueueRead> => {
       let concurrency: number | null = null;
+      // The first config of a project walks its workspace: a worker thread loads it, never the loop.
+      await primeHubConfig(project);
       try {
-        concurrency = loadConfig(project).concurrency;
+        concurrency = hubConfig(project).concurrency;
       } catch {
         // An ark.yml that does not load leaves the limit unknown; it never hides the queue.
       }

@@ -6,7 +6,7 @@ technique: "boundary values (count == limit, count < limit), state transition (g
 priority: high
 risk: "a failed or limit-capped read shows a partial inbox as complete, an inbox failure drops runs/terminals/waits, bodies leak into the snapshot"
 status: active
-changed_by: 2026-11-12-ARK-344-1
+changed_by: 2026-11-20-ARK-520-1
 ---
 
 ## Objective
@@ -22,7 +22,7 @@ Prove that the hub reads `orca orchestration inbox --json --full --limit <large>
 
 1. Connect a page to /events. Wait for the first inbox read (read 1, count below the limit N).
 2. Read the conversation value (through GET /api/conversation or the module accessor the plan names). Check the arguments logged for the `inbox` call and each stored message. Record the messages and the read time (the first good value).
-3. Make the fake `inbox` fail; wait for the next read; read the value again. Also read /api/snapshot and the runs, terminals and waits it holds.
+3. Read the value again right before the failure and record its read time (the last good read time). Make the fake `inbox` fail; wait for the value to be marked `stale`; read it. A read that began before the failure may still publish after it, so the stale value may carry a newer read time than the last good one. Also read /api/snapshot and the runs, terminals and waits it holds.
 4. Restore the fake; wait for a read; check the stale flag clears.
 5. Read N from the `--limit N` argument in the call log. Make the fake return exactly N messages; wait for the next read; check the truncated flag. Make it return fewer than N; check it clears.
 6. Fetch /api/snapshot and a /events frame; search them for a message body string.
@@ -32,7 +32,7 @@ Prove that the hub reads `orca orchestration inbox --json --full --limit <large>
 - The `inbox` call carries `--json`, `--full` and `--limit <N>` with N larger than the fixture's initial message count.
 - Each message keeps id, type, subject, body, thread, Orca run, created time and delivered time; the message with no delivered time has `delivered_at` null, not `created_at`.
 - The value carries a read time.
-- After the failed read (step 3) the value is the first good value of step 2: the same messages, marked `stale`, with its read time unchanged; runs, terminals and waits are still present in the snapshot.
+- After the failed read (step 3) the value is marked `stale` and holds the same messages as the first good value of step 2; its read time is not earlier than the last good read time of step 3 (never compared for equality with the first read, never bounded above by the time of the failure); runs, terminals and waits are still present in the snapshot.
 - After the next good read the value is fresh and `stale` is false.
 - With exactly N messages returned, the value is `truncated`; with fewer than N it is not.
 - No message body appears in /api/snapshot or any /events frame.

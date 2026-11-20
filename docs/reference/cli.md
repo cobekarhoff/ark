@@ -1040,8 +1040,11 @@ ark services status [--project <name>]
 
 Prints one line for each service of the project: `not installed`, `loaded` (loaded, no process) or
 `running` with `pid <n>` (from `launchctl list <label>`), and `last log: <last line of its log>`.
-`ark chief state` prints the same lines under its Services heading. A project with `merge_requests:
-none` shows the auto-merger as not installed. --project falls back to ARK_PROJECT.
+Then one `Hub` line from `GET /api/health` of the live hub (found by its lock file in ARK_HOME):
+`answered in <n> ms, loop lag <n> ms`, or `stalled: no answer in 5 s` when it does not answer in 5
+s, or `no hub running` (no lock, a dead pid or a refused connection; exit 0). `ark chief state`
+prints the same lines under its Services heading. A project with `merge_requests: none` shows the
+auto-merger as not installed. --project falls back to ARK_PROJECT.
 ```
 
 <!-- generated:commands:end -->
