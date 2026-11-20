@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { availableParallelism, cpus } from "node:os";
+import { cpus } from "node:os";
 import { defaultMaximumSwapGigabytes, defaultMinimumFreeMemoryPercent } from "./host.ts";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
@@ -90,8 +90,6 @@ export type ProjectConfig = {
   test_min_free_memory_percent: number;
   /** `ark test` starts no suite while swap used is above this many GB. Inclusive: equal admits. Default 8. */
   test_max_swap_gb: number;
-  /** `ark test` starts no suite while the 1-minute load average is above this. Inclusive: equal admits. Fractions are valid. Default the core count. */
-  test_max_load: number;
   roles: Record<Role, RoleConfig> & {
     evaluator?: RoleConfig;
     designer?: RoleConfig;
@@ -131,7 +129,6 @@ const topLevelKeys = keysOf<ProjectConfig>({
   test_budget_cores: true,
   test_min_free_memory_percent: true,
   test_max_swap_gb: true,
-  test_max_load: true,
   roles: true,
   repos: true,
   concurrency: true,
@@ -248,13 +245,6 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     const value = fields[key] ?? fallback;
     if (!Number.isInteger(value) || (value as number) < minimum)
       fail(`${key} must be an integer >= ${minimum}`);
-    return value as number;
-  };
-  /** A positive number, a fraction included. */
-  const positiveNumber = (fields: Fields, key: string, fallback: number): number => {
-    const value = fields[key] ?? fallback;
-    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
-      fail(`${key} must be a number > 0`);
     return value as number;
   };
 
@@ -542,7 +532,6 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       defaultMinimumFreeMemoryPercent,
     ),
     test_max_swap_gb: integer(fields, "test_max_swap_gb", 0, defaultMaximumSwapGigabytes),
-    test_max_load: positiveNumber(fields, "test_max_load", availableParallelism()),
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
     escalation_rounds: integer(fields, "escalation_rounds", 0, 2),

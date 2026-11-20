@@ -6,7 +6,7 @@ technique: "boundary values (free memory at, below and above the floor; swap at,
 priority: high
 risk: "Admission ignores memory, so a swapping host takes more test suites; or the wait prints on every poll; or a reading that fails blocks every test forever instead of admitting with 'memory: unchecked'"
 status: active
-changed_by: 2026-11-18-ARK-515-1
+changed_by: 2026-11-20-ARK-586-1
 ---
 
 ## Objective
@@ -15,9 +15,9 @@ Prove the admission of `ark test` (the CPU budget of ARK-390) also holds a suite
 
 ## Preconditions
 
-- Temp project and temp `ARK_HOME` with a run and one cheap suite whose command writes a marker file. The test lock folder is in the temp `ARK_HOME`; the CPU budget has free cores, and the 1-minute load reads 0 (`ARK_FAKE_LOAD_ONE=0`, set by the preload, so a busy host never holds the case on load: the load hold is ARK-T692), so only memory can hold the suite.
+- Temp project and temp `ARK_HOME` with a run and one cheap suite whose command writes a marker file. The test lock folder is in the temp `ARK_HOME`; the CPU budget has free cores, and no other suite runs in that store, so the CPU hold never applies (it holds only while another suite runs: ARK-T709) and only memory can hold the suite.
 - `ark.yml` keys `test_min_free_memory_percent` and `test_max_swap_gb` unset (defaults 20 and 8), then set to other values for the last step.
-- A fake host reading supplied at the real boundary: the commands or file the real reader parses (macOS `memory_pressure` and `sysctl vm.swapusage` on a temp `PATH`, Linux a temp `/proc/meminfo` path), rewritten by the test while `ark test` runs. No hook in product code is added for the memory test; the load is held at 0 by the seam of ARK-T692.
+- A fake host reading supplied at the real boundary: the commands or file the real reader parses (macOS `memory_pressure` and `sysctl vm.swapusage` on a temp `PATH`, Linux a temp `/proc/meminfo` path), rewritten by the test while `ark test` runs. No hook in product code is added for the memory test.
 
 ## Steps
 

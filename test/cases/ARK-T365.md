@@ -6,7 +6,7 @@ technique: "equivalence classes (load far above the core count with idle CPU, th
 priority: high
 risk: "Master Chief holds new runs for hours on a host with idle cores because the hold still keys on the 5-minute load average, which short git and bun processes of `ark test` raise without using CPU (2026-11-12: load 15-33, CPU 2.6%)"
 status: active
-changed_by: 2026-11-13-ARK-434-1
+changed_by: 2026-11-20-ARK-586-1
 ---
 
 ## Objective
@@ -17,7 +17,7 @@ Prove `ark chief state` prints `hold new runs: no` when the 5-minute load is far
 
 - Temp project and temp `ARK_HOME`, no test lock tickets, no live Orca.
 - Healthy memory, swap and disk through the fake host of ARK-T187 (50 percent free, 2 GB swap, disk above its limit).
-- Test seam of `chief state`: `ARK_FAKE_CPU_PERCENT` replaces the CPU reading of the ~1 s sample, and `ARK_FAKE_LOAD` replaces the 5-minute load. They are read only by `ark chief state`. `os.cpus()` and `os.loadavg()` cannot be faked through PATH. The busy limit is the constant 90 percent.
+- Test seam of `chief state`: `ARK_FAKE_CPU_PERCENT` replaces the CPU reading of the ~1 s sample, and `ARK_FAKE_LOAD` replaces the 5-minute load. `ARK_FAKE_CPU_PERCENT` is also read on the admission path of `ark test` (ARK-T710); `ARK_FAKE_LOAD` is read only by `ark chief state`. `os.cpus()` and `os.loadavg()` cannot be faked through PATH. The busy limit is the constant 90 percent.
 - The load is 500, which is above the core count of any host, so the old load rule would hold. The ticket's 22 on 10 cores is a load over the core count; 500 keeps the case failing before the change on any machine.
 
 ## Steps

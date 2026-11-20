@@ -5,8 +5,9 @@ level: integration
 technique: "boundary values (load below, at and just above the limit; an integer, a fractional and the default limit) and equivalence classes (a readable load, a missing reading, a bad config value)"
 priority: high
 risk: "`ark test` starts a suite into a host at load 37 to 117 on 10 cores, so every timing test of the run fails and the failed run costs hours (ARK-499: 3 full tests, about 4 h); or the limit is exclusive and a load equal to it holds; or the default is not the core count; or a fractional limit is refused or truncated; or a missing load reading holds every run forever; or the load reason is printed under the memory prefix, or on every poll; or the load reason enters `holdReasons` and `ark chief state` starts to hold new runs"
-status: active
-changed_by: 2026-11-18-ARK-515-1
+status: retired
+retired_reason: "the 1-minute load hold and its key test_max_load are gone (ARK-586): ARK-T710 owns the CPU hold of ark test, ARK-T709 its idle exception, and ARK-T365 and ARK-T366 keep the chief state boundary that load never holds"
+changed_by: 2026-11-20-ARK-586-1
 ---
 
 ## Objective

@@ -310,7 +310,7 @@ function runnerPid(run: string): number {
 /** Starts `ark test <run>` as a child process of the temp ARK_HOME with its stdout collected. */
 function startTest(run: string, extraEnvironment: Record<string, string> = {}): Started {
   const child = Bun.spawn(["bun", arkEntry, "test", run], {
-    env: { ...process.env, ARK_HOME: arkHome, ARK_FAKE_LOAD_ONE: "0", ...extraEnvironment },
+    env: { ...process.env, ARK_HOME: arkHome, ARK_FAKE_CPU_PERCENT: "0", ...extraEnvironment },
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -926,8 +926,11 @@ describe("ark chief state host", () => {
     process.env.ARK_FAKE_LOAD = String(load);
   };
   beforeEach(() => seam(10, 2));
+  const cpuBefore = process.env.ARK_FAKE_CPU_PERCENT;
   afterEach(() => {
-    delete process.env.ARK_FAKE_CPU_PERCENT;
+    // The preload pins a CPU of 0 for every test of the worker: put it back, never leave the real CPU.
+    if (cpuBefore === undefined) delete process.env.ARK_FAKE_CPU_PERCENT;
+    else process.env.ARK_FAKE_CPU_PERCENT = cpuBefore;
     delete process.env.ARK_FAKE_LOAD;
   });
 

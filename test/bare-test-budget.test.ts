@@ -177,8 +177,8 @@ function environment(
     delete merged[name];
   delete merged.ARK_HOME;
   if (home !== null) merged.ARK_HOME = home;
-  // ARK-515: a load of 0, so the one waiting line of a case is the budget line on a busy host; a case that tests the load sets its own.
-  merged.ARK_FAKE_LOAD_ONE = "0";
+  // ARK-586: a CPU of 0, so the one waiting line of a case is the budget line on a busy host; a case that tests the CPU sets its own.
+  merged.ARK_FAKE_CPU_PERCENT = "0";
   Object.assign(merged, extra);
   return Object.fromEntries(
     Object.entries(merged).filter(([, value]) => value !== undefined),
@@ -316,8 +316,6 @@ function makeFixture(
     pipes?: boolean;
     budget?: number | null;
     failing?: boolean;
-    /** `test_max_load` of the project; absent means the core-count default. */
-    maxLoad?: number;
     variant?: Variant;
     preload?: boolean;
     /** Adds a file `probe` that records the marker value its worker sees. */
@@ -348,7 +346,6 @@ function makeFixture(
     workspace,
     ticket_source: "local",
     ...(options.budget === null ? {} : { test_budget_cores: options.budget ?? 3 }),
-    ...(options.maxLoad === undefined ? {} : { test_max_load: options.maxLoad }),
     suites: [{ name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles,
   });
@@ -629,104 +626,90 @@ test(
   rowTimeout,
 );
 
-// ARK-T695. The configured limit is C/2 or 2*C, never the core count C, and each load lies between it and C, so a run
-// that ignores the project's test_max_load (and reads the default C) gets the opposite result.
-const coreCount = availableParallelism();
-const loadLine = (load: number, limit: number) =>
-  `waiting for load: 1-minute load ${Number(load.toFixed(2))} is above the limit ${limit}`;
+// ARK-T695. A bare run takes the CPU rule of `ark test`: it waits on CPU use over 90 percent only while a suite runs,
+// and the 1-minute load never holds it.
+const cpuWaiting = "waiting for CPU";
+const cpuLineLimit: WaitLimit = { within: passLimit, name: "CPU line" };
 
-/** Kills a detached `bun test` and its workers by its own pid, the one this case started. */
-const stopRun = (child: { pid: number }) => process.kill(-child.pid, "SIGKILL");
-const loadLineLimit: WaitLimit = { within: passLimit, name: "load line" };
-
-test("ARK-T695 a whole-suite bun test holds on the load of test_max_load below the core count, runs no file, prints one load line, and wears the bun test prefix", async () => {
-  const fixture = makeFixture({ maxLoad: coreCount / 2 });
-  const load = 0.75 * coreCount;
-  const environmentOfLoad = environment(fixture.home, {
-    ARK_FAKE_LOAD_ONE: String(load),
-  });
-
-  mkdirSync(fixture.storeDirectory(), { recursive: true }); // the store the lock reads; no holder made it
-  // A --parallel worker opens /dev/tty, so its load line shows on a terminal of its own while the run waits. The line is
-  // printed only after a reading found the load above the limit, so it is the event that a file has not started past it;
-  // that the hold lasts over later readings is ARK-T694 at the budget.
+test("ARK-T695 a --parallel bun test waits on CPU use over 90 percent while a suite runs, runs no file, starts when that suite ends, and prints one CPU line", async () => {
+  const fixture = makeFixture();
+  const holder = await startHolder(fixture.home, 1);
+  // A --parallel worker opens /dev/tty, so its CPU line shows on a terminal of its own while the run waits. The line
+  // is printed only after a sample found the CPU above the limit: it is the event that the hold was read, so the
+  // release below never comes before the hold.
   const output = new Output();
-  const parallel = Bun.spawn([process.execPath, "test", "--parallel=3"], {
+  const run = Bun.spawn([process.execPath, "test", "--parallel=2"], {
     cwd: fixture.directory,
-    env: environmentOfLoad,
+    env: environment(fixture.home, { ARK_FAKE_CPU_PERCENT: "95", ARK_FAKE_LOAD_ONE: "0" }),
     terminal: {
       cols: 120,
       rows: 24,
       data: (_terminal: unknown, data: Uint8Array) => output.feed(new TextDecoder().decode(data)),
     },
   });
-  started.push({ pid: parallel.pid, group: true });
-  await output.until("waiting for load", loadLineLimit);
+  started.push({ pid: run.pid, group: true });
+  await output.until(cpuWaiting, cpuLineLimit);
   expect(fixture.ran()).toEqual([]);
-  expect(parallel.exitCode).toBeNull();
-  expect(readTestLock().waiting).toMatchObject([{ run: "bun test", pid: parallel.pid, cores: 3 }]);
-  expect(chiefState()).toContain(`- waiting: bun test (pid ${parallel.pid}), 3 cores`);
-  stopRun(parallel);
-  await bounded(parallel.exited, { within: passLimit, name: "exit of the child" });
+  expect(run.exitCode).toBeNull();
+  expect(readTestLock().waiting).toMatchObject([{ run: "bun test", pid: run.pid, cores: 2 }]);
+  expect(chiefState()).toContain(`- waiting: bun test (pid ${run.pid}), 2 cores`);
 
-  // A serial run prints live: the one line names the load and the limit, under the wrapper of the bare caller.
-  const serial = bunTest(fixture.directory, [], environmentOfLoad);
-  await serial.output.until("waiting for load", loadLineLimit);
-  expect(fixture.ran()).toEqual([]);
-  stopRun(serial.child);
-  await finish(serial);
-  const lines = serial.output.text.split("\n").filter((line) => line.includes("waiting for load"));
-  expect(lines).toHaveLength(1);
-  expect(lines[0]).toContain(loadLine(load, coreCount / 2));
-  expect(lines[0]!.startsWith("bun test: ")).toBe(true);
-  expect(serial.output.text).not.toContain("waiting for memory");
-});
-
-test("ARK-T695 a whole-suite bun test runs every file and prints no load line when the load is above the core count but at or under test_max_load", async () => {
-  const fixture = makeFixture({ maxLoad: 2 * coreCount });
-  const run = bunTest(
-    fixture.directory,
-    ["--parallel=3"],
-    environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(1.5 * coreCount) }),
-  );
-  expect(await finish(run), run.output.text).toBe(0);
-  expect(run.output.text).not.toContain("waiting for load");
+  // The suite that ran ends: nothing runs, so the same reading no longer holds.
+  await holder.release();
+  expect(await bounded(run.exited, { within: passLimit, name: "exit of the child" })).toBe(0);
   for (const name of ["a", "b", "c", "gate"])
     expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
+  expect(output.count(cpuWaiting)).toBe(1); // one for the run, not one for each worker or file
+  expect(output.count("waiting for memory")).toBe(0);
 });
 
-test("ARK-T695 a whole-suite bun test of a project with no test_max_load takes the core count: a load equal to it runs, a load 0.1 above it holds", async () => {
+test("ARK-T695 a serial bun test waits on CPU use over 90 percent while a suite runs, runs no file, prints one CPU line, and wears the bun test prefix", async () => {
   const fixture = makeFixture();
-  const equal = bunTest(
-    fixture.directory,
-    ["--parallel=3"],
-    environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(coreCount) }),
-  );
-  expect(await finish(equal), equal.output.text).toBe(0);
-  expect(equal.output.text).not.toContain("waiting for load");
-
-  const above = coreCount + 0.1;
-  const held = bunTest(
+  await startHolder(fixture.home, 1);
+  const run = bunTest(
     fixture.directory,
     [],
-    environment(fixture.home, { ARK_FAKE_LOAD_ONE: String(above) }),
+    environment(fixture.home, { ARK_FAKE_CPU_PERCENT: "95", ARK_FAKE_LOAD_ONE: "0" }),
   );
-  await held.output.until("waiting for load", loadLineLimit);
-  stopRun(held.child);
-  await finish(held);
-  expect(held.output.text).toContain(loadLine(above, coreCount));
+  await run.output.until(cpuWaiting, cpuLineLimit);
+  expect(fixture.ran()).toEqual([]);
+  process.kill(-run.child.pid, "SIGKILL"); // the detached run and its workers, by the pid this case started
+  await finish(run);
+  const lines = run.output.text.split("\n").filter((line) => line.includes(cpuWaiting));
+  expect(lines).toHaveLength(1);
+  expect(lines[0]!.startsWith("bun test: ")).toBe(true);
+  expect(lines[0]).toMatch(/\b95(\.0)?\b.*\b90\b/);
+  expect(run.output.text).not.toContain("1-minute load");
+  expect(run.output.text).not.toContain("waiting for memory");
 });
 
-test("ARK-T695 a file run and an ark test child start at once on a load above test_max_load", async () => {
-  const fixture = makeFixture({ maxLoad: coreCount / 2 });
-  const load = String(0.75 * coreCount);
-  const fileRun = bunTest(
-    fixture.directory,
-    ["test/a.test.ts"],
-    environment(fixture.home, { ARK_FAKE_LOAD_ONE: load }),
-  );
+test.each([
+  { title: "CPU 5 percent and a load of 30 while a suite runs", cpu: "5", holder: true },
+  { title: "CPU 99 percent and a load of 30 with no suite running", cpu: "99", holder: false },
+])(
+  "ARK-T695 a --parallel bun test runs every file and prints no waiting line at $title",
+  async ({ cpu, holder }) => {
+    const fixture = makeFixture();
+    if (holder) await startHolder(fixture.home, 1);
+    const run = bunTest(
+      fixture.directory,
+      ["--parallel=2"],
+      environment(fixture.home, { ARK_FAKE_CPU_PERCENT: cpu, ARK_FAKE_LOAD_ONE: "30" }),
+    );
+    expect(await finish(run), run.output.text).toBe(0);
+    expect(run.output.text).not.toContain("waiting for");
+    for (const name of ["a", "b", "c", "gate"])
+      expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
+  },
+);
+
+test("ARK-T695 a file run and an ark test child start at once on CPU use over 90 percent while a suite runs", async () => {
+  const fixture = makeFixture();
+  await startHolder(fixture.home, 1);
+  const hot = { ARK_FAKE_CPU_PERCENT: "95", ARK_FAKE_LOAD_ONE: "0" };
+  const fileRun = bunTest(fixture.directory, ["test/a.test.ts"], environment(fixture.home, hot));
   expect(await finish(fileRun), fileRun.output.text).toBe(0);
-  expect(fileRun.output.text).not.toContain("waiting for load");
+  expect(fileRun.output.text).not.toContain(cpuWaiting);
   expect(fixture.markerLines("ran-a")).toHaveLength(1);
 
   // The marker an `ark test` child carries: the pid of a live run that holds a started ticket (here a 1-core holder).
@@ -734,13 +717,10 @@ test("ARK-T695 a file run and an ark test child start at once on a load above te
   const child = bunTest(
     fixture.directory,
     ["test", "--parallel=3"],
-    environment(fixture.home, {
-      ARK_FAKE_LOAD_ONE: load,
-      [budgetHeldVariable]: String(holder.pid),
-    }),
+    environment(fixture.home, { ...hot, [budgetHeldVariable]: String(holder.pid) }),
   );
   expect(await finish(child), child.output.text).toBe(0);
-  expect(child.output.text).not.toContain("waiting for load");
+  expect(child.output.text).not.toContain(cpuWaiting);
   expect(ownerTicketFiles(fixture)).toEqual([]);
   await holder.release();
 });
@@ -1200,7 +1180,7 @@ test("ARK-T707 a whole-suite bun test starts at once under the marker of a live 
     });
     expect(repo.ranX(), name).toBe(false);
     expect(waiting.output.count(waitingLine), name).toBeLessThanOrEqual(1);
-    stopRun(waiting.child);
+    process.kill(-waiting.child.pid, "SIGKILL"); // the detached run this case started, by its own pid
     await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
   }
 
@@ -1239,7 +1219,7 @@ test("ARK-T707 a whole-suite bun test takes its own ticket under the marker of a
   const waiting = bunTest(blocked.directory, ["test", "--parallel=3"], projectEnvironment);
   await waitsForBudget(fixture, waiting.child, (ticket) => ticket.pid === waiting.child.pid);
   expect(blocked.ranX()).toBe(false);
-  stopRun(waiting.child);
+  process.kill(-waiting.child.pid, "SIGKILL"); // the detached run this case started, by its own pid
   await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
   await holder.release();
 });
