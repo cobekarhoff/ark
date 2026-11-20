@@ -347,28 +347,33 @@ test("ARK-T668 project-autocommit.sh dates its log lines: a failed pass after a 
       .stdout.toString()
       .split("\n")
       .filter(Boolean);
+  /** Ends the loop by its own pid first, so no further pass starts, then the `sleep` child it had (ARK-514). */
   const endLoop = async () => {
     if (loop === undefined) return;
-    const killedSleeps = sleepChildren();
-    for (const sleepPid of killedSleeps) process.kill(Number(sleepPid));
-    // Slowed on purpose (ARK-514 red proof): the loop ends late, after the pass that the killed sleep let it start.
-    while (sleepChildren().every((sleepPid) => killedSleeps.includes(sleepPid))) {
-      if (loop.exitCode !== null) break;
-      await nextTick();
-    }
+    const sleepPids = sleepChildren();
     loop.kill();
     await loop.exited;
+    for (const sleepPid of sleepPids) process.kill(Number(sleepPid));
     loop = undefined;
   };
-  /** Starts the loop, and returns once its first pass is over: the loop process has a `sleep` child. */
-  const loopFirstPass = async () => {
-    const started = Bun.spawn(["sh", "-c", command, script, scratch, log, ""], {
+  const startLoop = () => {
+    loop = Bun.spawn(["sh", "-c", command, script, scratch, log, ""], {
       env: environment("ark"),
     });
-    loop = started;
+  };
+  const loopEndedError = () => new Error(`the loop ended with ${loop?.exitCode}:\n${readLog()}`);
+  /** Returns once the last non-empty line of the log matches: the pass that wrote it is over. */
+  const loopLogLine = async (pattern: RegExp) => {
+    while (!pattern.test(linesOf(readLog()).at(-1) ?? "")) {
+      if (loop?.exitCode !== null) throw loopEndedError();
+      await nextTick();
+    }
+  };
+  /** Starts the loop, and returns once its first pass is over: the loop process has a `sleep` child. An idle pass logs no line. */
+  const loopFirstPass = async () => {
+    startLoop();
     while (sleepChildren().length === 0) {
-      if (started.exitCode !== null)
-        throw new Error(`the loop ended with ${started.exitCode}:\n${readLog()}`);
+      if (loop?.exitCode !== null) throw loopEndedError();
       await nextTick();
     }
   };
@@ -439,31 +444,33 @@ test("ARK-T668 project-autocommit.sh dates its log lines: a failed pass after a 
     // 7. The loop writes the same failure line as --once, last in its pass, and survives it.
     setTicket("done");
     writeFileSync(lock, "");
-    await loopFirstPass();
+    startLoop();
+    await loopLogLine(failedLine);
     expect(loop?.exitCode).toBeNull();
     expect(commits()).toBe(2);
     staleLockIsLeft();
+    await endLoop();
     const afterLoopStale = readLog();
     expect(afterLoopStale.startsWith(afterRemoved)).toBe(true);
     expect(linesOf(afterLoopStale.slice(afterRemoved.length)).slice(0, -1).join("\n")).toContain(
       "index.lock",
     );
     expect(lastLine()).toMatch(failedLine);
-    await endLoop();
 
     // 8. The lock is removed: the loop commits once and logs one dated line; a loop with no change logs nothing.
     rmSync(lock);
-    await loopFirstPass();
+    startLoop();
+    await loopLogLine(committedLine);
     expect(loop?.exitCode).toBeNull();
     expect(commits()).toBe(3);
     expect(lastFiles()).toEqual(["tickets/ARK-1.md"]);
+    await endLoop();
     const afterLoopCommit = readLog();
     expect(afterLoopCommit.startsWith(afterLoopStale)).toBe(true);
     const loopCommitPass = linesOf(afterLoopCommit.slice(afterLoopStale.length));
     expect(loopCommitPass).toHaveLength(1);
     expect(loopCommitPass[0]).toMatch(committedLine);
     expect(loopCommitPass[0]).not.toContain("autocommit failed");
-    await endLoop();
     await loopFirstPass();
     expect(commits()).toBe(3);
     expect(readLog()).toBe(afterLoopCommit);
