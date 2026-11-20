@@ -1255,12 +1255,18 @@ test(
         conflicting: ["GEN.txt", "README.md", "notes/a.md"],
         config: {},
       },
-      // 4 syncs of 8 s each pass the 30 s default limit, as a loaded host does
-      syncDelaySeconds: 8,
-    });
-    const before = treeState(scenario.worktree);
+    ];
+    for (const variant of scenarios) {
+      const scenario = generatedScenario(variant.conflicting, {
+        config: variant.config ?? {
+          generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }],
+        },
+        // 4 syncs of 8 s each pass the 30 s default limit, as a loaded host does
+        syncDelaySeconds: 8,
+      });
+      const before = treeState(scenario.worktree);
 
-    const synced = ark("worktree", "sync", scenario.runId);
+      const synced = ark("worktree", "sync", scenario.runId);
 
       expect(synced.code, variant.name).toBe(1);
       expect(synced.err, variant.name).toContain("repo .:");
