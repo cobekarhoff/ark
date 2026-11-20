@@ -4,7 +4,7 @@ title: "ARK-T163 a passed head or base result is reused with a message; a change
 level: integration
 technique: equivalence classes on the cache key (head, base commit, test file hash, command, mode) with boundary on one changed component each; decision table for passed against failed
 priority: high
-risk: a failed result is stored and blocks the retry that clears a flake; a key that leaves out a component (second repo head, suite command, quick against full mode, test file hash) serves a stale result; a reused result drops evidence, criterion status or base_passed; or the pre-run of the files that failed in the last test (ARK-551) stores a passed result for the head key, or its extra start is counted as a suite start
+risk: a failed result is stored and blocks the retry that clears a flake; a key that leaves out a component (second repo head, suite command, quick against full mode, test file hash) serves a stale result; or a reused result drops evidence, criterion status or base_passed
 status: active
 changed_by: 2026-11-20-ARK-551-1
 ---
@@ -36,7 +36,7 @@ Prove that `ark test` reuses a stored passed result for the head key and for the
 - Step 3: evidence files, results and criterion statuses are equal to step 1.
 - Step 4: (a)(b) start the head suite again and the base result is reused; (c) starts the base suite again, with the base commit unchanged; (d) starts the base suite again with the copied test hash unchanged and no reuse message for the base result, which proves the base commit is part of the key; (e) starts both again.
 - Step 4f: in both directions the second run starts the suite again (counter grows) and prints no reuse message for the mode-changed key, because the only stored entry has the other mode.
-- Step 5: the first run starts the file twice (initial start and retry), the suite fails, exit 1, and the stored head result is recorded as failed and not offered for reuse; the second run, with the same key, starts the pre-run of the failed file (one head start, through `base_command` with the file), then the suite again (counter grows by one more start, no `reused` message), passes, exit 0, and only then stores a passed result; the pre-run stores none. The third run reuses that result (the last event passed, so no pre-run starts).
+- Step 5: the first run starts the file twice (initial start and retry), the suite fails, exit 1, and the stored head result is recorded as failed and not offered for reuse; the second run, with the same key, starts the pre-run of the failed file first (one head start, through `base_command` with the file), then the suite again (counter grows by one more start, no `reused` message), passes, exit 0, and only then stores a passed result. The third run reuses that result (the last event passed, so no pre-run starts).
 - Step 6: a failed base result runs again and `base_passed` is not taken from it.
 - Step 7: the checks run on every call, reused or not.
 
