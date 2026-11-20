@@ -63,7 +63,7 @@ bunx playwright test test/pw/<file>.pw.ts    # one browser spec
 
 `bun test` never runs a spec: `bunfig.toml` ignores `test/pw/**`, and `playwright.config.ts` takes only `test/pw/**/*.pw.ts`. `bun test --parallel` is the `test` script of `package.json`. A run of one file never waits for the test budget.
 
-`bun test --rerun-each=N <one file>` is the quick repeat of a flaky test, in place of N separate processes. The preload of `test/tmpdir-preload.ts` removes the temp root (`bun-test-*`) and the fake host root after repeat N, so every repeat finds them. It supports one file in one process: no `--parallel`, no several files, and the spaced form `--rerun-each N` removes the roots after repeat 1. A one-file run takes no cores from the test budget; a whole-suite `--rerun-each` waits like any bare `bun test`. One process keeps module state and process-level timing between repeats, so 20 separate `bun test` processes beside the loaded suite stay the proof of a race or load fix.
+`bun test --rerun-each=N <one file>` is the quick repeat of a flaky test, in place of N separate processes. The preload of `test/tmpdir-preload.ts` removes the temp root (`bun-test-*`) and the fake host root after repeat N, so every repeat finds them. It supports one file in one process: no `--parallel`, no several files. A one-file run takes no cores from the test budget; a whole-suite `--rerun-each` waits like any bare `bun test`. One process keeps module state and process-level timing between repeats, so 20 separate `bun test` processes beside the loaded suite stay the proof of a race or load fix.
 
 ## A whole-suite `bun test` waits for the test budget
 
