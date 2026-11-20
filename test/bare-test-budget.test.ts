@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   watch,
   writeFileSync,
 } from "node:fs";
@@ -125,12 +126,18 @@ function bounded<T>(promise: Promise<T>, { within, name }: WaitLimit): Promise<T
   return Promise.race([promise, expired]);
 }
 
-/** The exit of a child and then the end of its output, each with the roomy limit. Resolves to the exit code. */
-async function finish(run: {
-  child: { exited: Promise<number> };
-  output: Output;
-}): Promise<number> {
-  const code = await bounded(run.child.exited, { within: passLimit, name: "exit of the child" });
+/**
+ * The exit of a child and then the end of its output, each with the roomy limit. Resolves to the exit code. `name` is what
+ * a timeout says did not exit.
+ */
+async function finish(
+  run: {
+    child: { exited: Promise<number> };
+    output: Output;
+  },
+  name = "exit of the child",
+): Promise<number> {
+  const code = await bounded(run.child.exited, { within: passLimit, name });
   await bounded(run.output.done, { within: passLimit, name: "end of the output" });
   return code;
 }
@@ -1084,18 +1091,27 @@ test("ARK-T685 a failing test file fails the run with exit 1 and the failure tex
 // wait only while the named run is alive and holds a started ticket. The value is learned from a real held run, never
 // copied from the source.
 
-/** A scratch repo with the repo preload and one file `x` that records its pid in `ran-x` and, when `hold` is set, blocks on a pipe the case holds open. */
-function makeProbeRepo(options: { hold?: boolean } = {}) {
+/**
+ * A scratch repo with the repo preload and one file `x` that records its pid in `ran-x` and, when `hold` is set, blocks on a
+ * pipe the case holds open. The file opens the pipe before it writes `ran-x`, so a case that closes its end of the pipe on
+ * seeing `ran-x` cannot leave the file opening a pipe with no writer. `holdDelay` (ms, opt-in) pauses the file right after
+ * it writes `ran-x`, so that close happens while the file still waits to read.
+ */
+function makeProbeRepo(options: { hold?: boolean; holdDelay?: number } = {}) {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "bare-probe-")));
   const markers = realpathSync(mkdtempSync(join(tmpdir(), "bare-probe-markers-")));
   writeFileSync(join(directory, "bunfig.toml"), `[test]\npreload = [${JSON.stringify(preload)}]\n`);
   mkdirSync(join(directory, "test"));
+  const pause = options.holdDelay
+    ? `  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${options.holdDelay});\n`
+    : "";
   writeFileSync(
     join(directory, "test", "x.test.ts"),
     `${header(markers)}test("FAKE-1-AC1 x", () => {
-  appendFileSync(join(markers, "ran-x"), process.pid + "\\n");
   const hold = join(import.meta.dir, "..", "hold");
-  if (existsSync(hold) && statSync(hold).isFIFO()) readFileSync(openSync(hold, "r"));
+  const holding = existsSync(hold) && statSync(hold).isFIFO() ? openSync(hold, "r") : -1;
+  appendFileSync(join(markers, "ran-x"), process.pid + "\\n");
+${pause}  if (holding >= 0) readFileSync(holding);
 });
 `,
   );
@@ -1188,20 +1204,20 @@ test("ARK-T707 a whole-suite bun test starts at once under the marker of a live 
   expect(await finish(holder), holder.output.text).toBe(0);
 });
 
-test("ARK-T707 a whole-suite bun test takes its own ticket under the marker of a run that has ended, and waits under it while a new holder holds the cores", async () => {
+test("ARK-T707 ARK-T715 a whole-suite bun test takes its own ticket under the marker of a run that has ended, and waits under it while a new holder holds the cores", async () => {
   const fixture = makeFixture({ pipes: true, probe: true });
   const first = bunTest(fixture.directory, ["--parallel=3"], environment(fixture.home));
   await waitForMarkers(fixture, ["started-gate", "marker-value"]);
   const marker = fixture.markerLines("marker-value")[0]!;
   fixture.openGate();
-  expect(await finish(first), first.output.text).toBe(0);
+  expect(await finish(first, "exit of the first run"), first.output.text).toBe(0);
 
   const projectEnvironment = environment(fixture.home, {
     ARK_PROJECT: "demo",
     [budgetHeldVariable]: marker,
   });
   // No holder now: the run takes the free cores through a ticket of its own, so the marker of the ended run is not what lets it start.
-  const free = makeProbeRepo({ hold: true });
+  const free = makeProbeRepo({ hold: true, holdDelay: 1000 });
   const taking = bunTest(free.directory, ["test", "--parallel=3"], projectEnvironment);
   await free.started({
     within: passLimit,
@@ -1210,8 +1226,10 @@ test("ARK-T707 a whole-suite bun test takes its own ticket under the marker of a
   expect(readTestLock().running).toMatchObject([
     { run: "bun test", pid: taking.child.pid, cores: 3 },
   ]);
+  const released = performance.now();
   free.release();
-  expect(await finish(taking), taking.output.text).toBe(0);
+  expect(await finish(taking, "exit of the run that takes the cores"), taking.output.text).toBe(0);
+  expect(performance.now() - released).toBeLessThan(rejectionCeiling);
 
   // A new holder holds all 3 cores; the marker still names the run that ended.
   const holder = await startHolder(fixture.home, 3);
@@ -1220,9 +1238,85 @@ test("ARK-T707 a whole-suite bun test takes its own ticket under the marker of a
   await waitsForBudget(fixture, waiting.child, (ticket) => ticket.pid === waiting.child.pid);
   expect(blocked.ranX()).toBe(false);
   process.kill(-waiting.child.pid, "SIGKILL"); // the detached run this case started, by its own pid
-  await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
+  await bounded(waiting.child.exited, { within: passLimit, name: "exit of the waiting run" });
   await holder.release();
 });
+
+// ARK-T714: the ARK-T707 test above, run as a real inner `bun test` with a preload that this case owns. The preload is a
+// `--preload` flag, so the `bun test` children of the inner run do not load it. It makes the chosen call of
+// `AbortSignal.timeout(20000)` (the `passLimit` of every wait) expire in a microtask and records how many such calls it
+// saw. A microtask runs before any child exit is read, so a wait whose child is still running always rejects with its name.
+const expireLimitHook = `import { writeFileSync } from "node:fs";
+const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+const expireCall = Number(process.env.EXPIRE_CALL);
+let calls = 0;
+AbortSignal.timeout = (milliseconds: number) => {
+  if (milliseconds !== 20000) return realTimeout(milliseconds);
+  calls += 1;
+  writeFileSync(process.env.EXPIRE_CALL_COUNT_FILE!, String(calls));
+  if (calls !== expireCall) return realTimeout(milliseconds);
+  const expired = new AbortController();
+  queueMicrotask(() => expired.abort());
+  return expired.signal;
+};
+`;
+const innerRunLimit: WaitLimit = { within: 60_000, name: "end of the inner run" };
+
+test("ARK-T714 each wait for the exit of a child in the ARK-T707 test of an ended marker has its own name, so a timeout error says which child did not exit", async () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "bare-names-")));
+  const hook = join(scratch, "expire-limit.ts");
+  const countFile = join(scratch, "calls");
+  writeFileSync(hook, expireLimitHook);
+  const innerRun = async (expireCall: number) => {
+    const run = bunTest(
+      repositoryRoot,
+      [
+        "test/bare-test-budget.test.ts",
+        "-t",
+        "takes its own ticket under the marker of a run that has ended",
+        "--preload",
+        hook,
+      ],
+      environment(null, {
+        EXPIRE_CALL: String(expireCall),
+        EXPIRE_CALL_COUNT_FILE: countFile,
+      }),
+    );
+    const code = await bounded(run.child.exited, innerRunLimit);
+    await bounded(run.output.done, innerRunLimit);
+    return { code, text: run.output.text };
+  };
+  try {
+    const unexpired = await innerRun(0);
+    expect(unexpired.code, unexpired.text).toBe(0);
+    const waitCount = Number(readFileSync(countFile, "utf8"));
+    expect(waitCount).toBeGreaterThanOrEqual(3);
+
+    // One inner run at a time: many together load the host enough to break a check of the inner test that prints no name.
+    const runs: { code: number; text: string }[] = [];
+    for (let expireCall = 1; expireCall <= waitCount; expireCall += 1)
+      runs.push(await innerRun(expireCall));
+    const exitNames: string[] = [];
+    runs.forEach(({ code, text }, index) => {
+      // A wait that had already settled when its limit expired passes the race and prints no name: only failed runs are read.
+      if (code === 0) return;
+      const names = new Set(
+        [...text.matchAll(/error: no (.+?) within 20000 ms/g)].map((match) => match[1]!),
+      );
+      expect(
+        names.size,
+        `inner run with call ${index + 1} expired and failed with no "no <name> within 20000 ms" line:\n${text}`,
+      ).toBe(1);
+      const [name] = names;
+      if (name!.startsWith("exit of")) exitNames.push(name!);
+    });
+    // The exit of the first run, of the run that takes the cores, of the waiting run and of the holder: four waits, four names.
+    expect(exitNames.length, exitNames.join(" | ")).toBe(4);
+    expect(new Set(exitNames).size, exitNames.join(" | ")).toBe(4);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}, 300_000);
 
 test("ARK-T707 a whole-suite bun test that a test of a single-file run starts waits for the budget and starts once the holder releases", async () => {
   const fixture = makeFixture();
