@@ -36,7 +36,7 @@ Every time is a number in a fixture report. The fake suite command copies a prep
 
 Each step runs `ark test <run>` (full, no `--quick`) as a fresh run (a new `# <n>` on the command, see Preconditions), and reads the exit code, stdout and the last `test.completed`.
 
-1. No key. Run twice: once with root `time` 900 (the keyless run, which every later step is read against) and once with a report whose root and `<testcase>` have no `time` attribute.
+1. No key. Run twice: once with root `time` 900 (the keyless run, which steps 2 to 11 are read against) and once with a report whose root and `<testcase>` have no `time` attribute.
 2. `slow_test_s: 2`, no `on_over`, no `time_budget_s`. Root `time` 7.
 3. `time_budget_s: 10`, no `slow_test_s`, no `on_over`. Root `time` 10 (equal to the budget), then root `time` 10.01.
 4. `time_budget_s: 10` and `slow_test_s: 2`, no `on_over`. Root `time` 12.

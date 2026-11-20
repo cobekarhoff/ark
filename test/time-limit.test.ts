@@ -335,7 +335,7 @@ const withoutTimeLines = (output: string): string[] =>
 
 describe("ARK-T741 a full ark test judges each suite's time by its own keys", () => {
   let fixture: Fixture;
-  // The keyless run every later step is read against. Nothing in the stdout of a fresh keyless run changes from run to
+  // The keyless run, which steps 2 to 11 are read against. Nothing in the stdout of a fresh keyless run changes from run to
   // run in this fixture (no refactor head figure, no reuse line), so no line is dropped when two of them are compared.
   let keyless: TestRun;
   beforeAll(() => {
