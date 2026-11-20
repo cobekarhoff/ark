@@ -301,7 +301,7 @@ export async function serve(reader: SnapshotReader, port: number, name?: string)
         if (Number.isNaN(since) || Number.isNaN(until) || since >= until)
           return text("since and until must be ISO times, since before until", 400);
         try {
-          await reader.ready();
+          // `reader.conversation` waits for the first reads itself, for a short bound: `ready()` here waited for the whole first Ark read.
           return conversationReply(await reader.conversation({ kind: "project", since, until }));
         } catch {
           return text("the usage worker could not build the conversation", 502);

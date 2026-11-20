@@ -1086,12 +1086,13 @@ export function createSnapshotReader() {
      * first read of a connected page. Null when no read has succeeded (no page connected, or Orca down), or for a run with no events.
      */
     async conversation(query: ConversationQuery): Promise<ConversationReply | null> {
-      // A cold first read takes an inbox call and up to two seconds for the handle directory: wait a short bound, then answer
-      // "no read yet" (503). The read keeps running.
-      if (!conversation && conversationFirst)
-        await Promise.race([conversationFirst, Bun.sleep(firstConversationWaitMilliseconds)]);
+      // A cold hub waits for the first Ark read (250 runs) and the first inbox read (an Orca call, up to two seconds for the handle
+      // directory): wait a short bound for both together, then answer "no read yet" (503). The reads keep running.
+      const bound = Bun.sleep(firstConversationWaitMilliseconds);
+      if (!slots.ark.value) await Promise.race([this.ready(), bound]);
+      if (!conversation && conversationFirst) await Promise.race([conversationFirst, bound]);
       const held = conversation;
-      if (!held) return null;
+      if (!held || !slots.ark.value) return null;
       const wanted = (slots.ark.value?.runs ?? []).filter(
         (run) => query.kind === "project" || run.state.run === query.run,
       );
