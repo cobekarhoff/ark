@@ -21,14 +21,14 @@ Prove that each handle form maps to exactly one agent of the right kind, that a 
 
 ## Steps
 
-1. Start the hub on the fixture with a page connected and the delay set; fetch GET /api/conversation once and check that it is the `loading` reply with no Master Chief agent; set the delay to 0.
-2. Wait until `msg_1` maps to the Master Chief agent in GET /api/conversation (the ready check: it holds on the first reply built after the directory read lands, and not on the `loading` reply). Then fetch GET /api/run/<run>/conversation and GET /api/conversation.
+1. Start the hub on the fixture with the delay set. The hub's first reply is the `loading` reply, with no Master Chief agent; set the delay to 0 once the hub is up.
+2. Wait until `msg_1` maps to the Master Chief agent in GET /api/conversation (the ready check: it holds on the first reply built after the directory read lands, and not on the `loading` reply). Then read the run and project answers from that reply.
 3. For each handle in the preconditions, find the agent it maps to in the answers.
 4. Count the agents and the messages for the unmapped handle.
 
 ## Expected results
 
-- The first reply, built before the directory read lands, is `loading` and has no Master Chief agent; the case reads every mapping below only from a reply in which `msg_1` maps to the Master Chief agent.
+- The case reads every mapping below only from a reply in which `msg_1` maps to the Master Chief agent, never from the `loading` reply.
 - `run:<Master Chief run id>` maps to the Master Chief agent.
 - `run:<Ark run Orca Run id>`, the run lead's dispatch handle and its terminal handle map to one run lead agent of that run.
 - A worker's dispatch handle and its terminal handle map to one worker agent, with its step and role from the task title; the `impl-api`, `spec-cases-write` and `review-1` titles give role implementer, validator and reviewer in groups Implementers, Validators and Reviewers, and the `evaluator` and `test-case-writer` titles give role group Planning.
