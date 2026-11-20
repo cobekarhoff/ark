@@ -1242,22 +1242,18 @@ test("ARK-T384 ark status refuses a generated entry with an empty path, an empty
   });
 });
 
-test("ARK-T385 a conflict outside the generated list fails the sync as before and the event lists every conflicted path", () => {
-  const scenarios: { name: string; conflicting: string[]; config?: Record<string, unknown> }[] = [
-    { name: "a", conflicting: ["README.md"] },
-    { name: "b", conflicting: ["GEN.txt", "README.md"] },
-    { name: "c", conflicting: ["GEN.txt", "README.md", "notes/a.md"] },
-    {
-      // the paths do not depend on the generated list
-      name: "c without a generated key",
-      conflicting: ["GEN.txt", "README.md", "notes/a.md"],
-      config: {},
-    },
-  ];
-  for (const variant of scenarios) {
-    const scenario = generatedScenario(variant.conflicting, {
-      config: variant.config ?? {
-        generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }],
+test(
+  "ARK-T385 a conflict outside the generated list fails the sync as before and the event lists every conflicted path",
+  () => {
+    const scenarios: { name: string; conflicting: string[]; config?: Record<string, unknown> }[] = [
+      { name: "a", conflicting: ["README.md"] },
+      { name: "b", conflicting: ["GEN.txt", "README.md"] },
+      { name: "c", conflicting: ["GEN.txt", "README.md", "notes/a.md"] },
+      {
+        // the paths do not depend on the generated list
+        name: "c without a generated key",
+        conflicting: ["GEN.txt", "README.md", "notes/a.md"],
+        config: {},
       },
       // 4 syncs of 8 s each pass the 30 s default limit, as a loaded host does
       syncDelaySeconds: 8,
@@ -1266,16 +1262,19 @@ test("ARK-T385 a conflict outside the generated list fails the sync as before an
 
     const synced = ark("worktree", "sync", scenario.runId);
 
-    expect(synced.code, variant.name).toBe(1);
-    expect(synced.err, variant.name).toContain("repo .:");
-    expect(treeState(scenario.worktree), variant.name).toEqual(before);
-    expect(hasMergeHead(scenario.worktree), variant.name).toBe(false);
-    expect(existsSync(join(scenario.worktree, "gen-ran")), variant.name).toBe(false);
-    expect(syncedEvents(scenario.runDirectory), variant.name).toEqual([
-      { repo: ".", conflict: true, conflicts: [...variant.conflicting].sort() },
-    ]);
-  }
-});
+      expect(synced.code, variant.name).toBe(1);
+      expect(synced.err, variant.name).toContain("repo .:");
+      expect(treeState(scenario.worktree), variant.name).toEqual(before);
+      expect(hasMergeHead(scenario.worktree), variant.name).toBe(false);
+      expect(existsSync(join(scenario.worktree, "gen-ran")), variant.name).toBe(false);
+      expect(syncedEvents(scenario.runDirectory), variant.name).toEqual([
+        { repo: ".", conflict: true, conflicts: [...variant.conflicting].sort() },
+      ]);
+    }
+  },
+  // the 8 s fixture delay times the 4 syncs outruns the 30 s default limit
+  { timeout: 120_000 },
+);
 
 test(
   "ARK-T386 the documented Ark generated entry regenerates docs/reference/cli.md when a run and the target both changed cli/ark.ts",
