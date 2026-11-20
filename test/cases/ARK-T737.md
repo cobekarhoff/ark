@@ -30,7 +30,7 @@ Authoring gate:
 - Suite `none`: `changed_command` writes `none-changed-ran`, prints `no test files are affected`, exits 0 and writes an empty JUnit report.
 - Fixture B (real runner): one suite whose `changed_command` is `bun test --changed={base} --reporter=junit --reporter-outfile={report}` in a fake repo with `lib.ts`, `lib.test.ts` (imports `lib.ts`) and `other.test.ts` (imports nothing). One own commit changes `lib.ts`.
 - Fixture C (crash): one suite whose `changed_command` writes `crash-ran`, prints an error to stderr, exits 1 and writes no report.
-- Fixture D (no base): a run whose `state.json` worktree entry has no `base` (as an old `worktree.created`), one suite with `unit`'s `command` and `changed_command` shape.
+- Fixture D (no base): one suite with `unit`'s `command` and `changed_command` shape, in a run whose `events.ndjson` holds a `worktree.created` event that has no `base` (the fixture appends a second `worktree.created` for the same repo, with its `path` and `branch` and no `base`; the later event replaces the first in `deriveState`, `cli/events.ts:278-282`). `ark test` takes `base` from that event (`deriveState(readEvents(directory))`, `cli/test-run.ts:1149`) and never reads `state.json`, so a `state.json` edit cannot reach this path.
 
 ## Steps
 
@@ -43,7 +43,7 @@ Authoring gate:
 ## Expected results
 
 - Step 1:
-  - `unit`: `unit-changed-ran` exists and `unit-full-ran` does not. `unit-base-seen` holds the run's worktree `base` commit (the 40-character sha in `state.json`), never the literal `{base}` and never the head commit.
+  - `unit`: `unit-changed-ran` exists and `unit-full-ran` does not. `unit-base-seen` holds the run's worktree `base` commit (the 40-character sha of the `base` in the `worktree.created` event), never the literal `{base}` and never the head commit.
   - `both`: `both-changed-ran` exists and `both-base-command-ran` does not (`changed_command` wins over `base_files`); `both-base-seen` holds the same `base` sha.
   - `plain`: `plain-full-ran` exists (the whole `command` runs as today).
   - `none`: stdout has a `suite  none` line that says it was skipped with the reason `no test files are affected`, never `passed` with no tests; exit 0.

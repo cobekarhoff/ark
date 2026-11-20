@@ -4,7 +4,7 @@ title: ARK-T740 a quick ark test --keep-going on a suite with changed_command ke
 level: integration
 technique: equivalence classes of quick-run criterion status (every AC failing in the affected set, one AC test outside it) over the readers of the quick head run (caseStatus, quickStatus, the red proof gate)
 priority: high
-risk: the quick branch with `changed_command` does not set the file-selection flag, so an AC whose test is outside the affected set reads `missing` and prints `no test title starts with <id>` although the test exists; or `ark` sends a wrong or literal `{base}` to the `changed_command`, so nothing is selected, the bug run's red proof reads `not run` and the implementer cannot start; or an AC test outside the affected set reads `failing` or `passing` and is accepted as proof that never ran
+risk: the quick branch with `changed_command` does not set the file-selection flag, so an AC whose test is outside the affected set reads `missing` and prints `no test title starts with <id>` although the test exists; or `ark` sends a literal, empty or head-commit `{base}` to the `changed_command`, so nothing is selected, the bug run's red proof reads `not run` and the implementer cannot start; or an AC test outside the affected set reads `failing` or `passing` and is accepted as proof that never ran
 status: active
 changed_by: 2026-11-20-ARK-580-1
 ---
@@ -16,13 +16,13 @@ Prove that for a suite with `changed_command` a quick `ark test <run> --quick --
 Authoring gate:
 
 1. Protects: the readers of a quick head run (the red-proof gate of `ark run step ... start`, `caseStatus`, `quickStatus`) with the new selection source.
-2. Fails when: the `changed_command` branch of `cli/test-run.ts` leaves `fileSelection` unset (the false hint and `missing`), or `mode` is not `quick`, or the `{base}` that the command receives is not the worktree base, so the validator's new files are not in the selection.
+2. Fails when: the `changed_command` branch of `cli/test-run.ts` leaves `fileSelection` unset (the false hint and `missing`), or `mode` is not `quick`, or the `{base}` that the command receives is literal, empty or the head commit, so the validator's new files are not in the selection (a `{base}` that is another ancestor commit is not caught here; ARK-T737 owns the exact sha).
 3. Existing proof misses it: ARK-T720 and ARK-T388 reach the readers with `base_files` selection only; the source of the selection is the new contract. This case adds the transport of the new key, not a second owner of the red-proof gate (ARK-T720) or the hint text (ARK-T388).
 4. No test-only export, flag or hook: the case runs the real `ark` process against the fixture.
 
 ## Preconditions
 
-- Fixture of ARK-T720 (`bugRun`, `kind: bug`, two criteria `AC1` and `AC2`, `FAKE-T1` and `FAKE-T2`, `installFakeOrca()`), with the e2e suite configured with a `changed_command` and no `base_files`. The `changed_command` is a stub that runs `git diff --name-only <its first argument, the {base} value>`, keeps the `*.test.ts` files in that list, runs only those, and writes a JUnit report with `file` on each test. A wrong or literal `{base}` makes the diff fail or list nothing, so nothing is selected.
+- Fixture of ARK-T720 (`bugRun`, `kind: bug`, two criteria `AC1` and `AC2`, `FAKE-T1` and `FAKE-T2`, `installFakeOrca()`), with the e2e suite configured with a `changed_command` and no `base_files`. The `changed_command` is a stub that runs `git diff --name-only <its first argument, the {base} value>`, keeps the `*.test.ts` files in that list, runs only those, and writes a JUnit report with `file` on each test. A literal `{base}`, an empty one or the head commit makes the diff fail or list nothing, so nothing is selected. A `{base}` that is an older ancestor of the validator commit still lists `e2e.test.ts` and the case passes: the exact sha is ARK-T737's.
 - Fixture A: the validator commit adds `e2e.test.ts` with failing `FAKE-T1 ...` and `FAKE-T2 ...` tests; the check fails (the failure switch exists), as in ARK-T720.
 - Fixture B: the validator commit changes `e2e.test.ts` (failing `FAKE-T1 ...`) and adds `other.test.ts` with a failing `FAKE-T2 ...`, but its stub is the same stub with a filter that keeps `e2e.test.ts` only, so `other.test.ts` is left out of the affected set. The check passes.
 
