@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   arkWithin,
   commandLimitMs,
+  limitOr,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
@@ -24,14 +25,16 @@ const roles = {
 };
 const fileProtocol = "protocol.file.allow=always";
 
-const ark = (...args: string[]) => arkWithin(commandLimitMs, ...args);
+/** Read at each call: a stall test sets ARK_TEST_LIMIT_MS after the module is loaded. */
+const ark = (...args: string[]) => arkWithin(limitOr(commandLimitMs), ...args);
 
 /** Runs a command; throws with the command line and stderr on a timeout or a non-zero exit. Returns trimmed stdout. */
 function run(command: string[]): string {
-  const result = Bun.spawnSync(command, { timeout: commandLimitMs });
+  const limitMs = limitOr(commandLimitMs);
+  const result = Bun.spawnSync(command, { timeout: limitMs });
   const line = command.join(" ");
   if (result.exitedDueToTimeout)
-    throw new Error(`${line} timed out after ${commandLimitMs} ms: ${result.stderr.toString()}`);
+    throw new Error(`${line} timed out after ${limitMs} ms: ${result.stderr.toString()}`);
   if (result.exitCode !== 0)
     throw new Error(`${line} failed (exit ${result.exitCode}): ${result.stderr.toString()}`);
   return result.stdout.toString().trim();
@@ -387,22 +390,29 @@ describe("worktree cleanup of composed submodules", () => {
 
 describe("a stalled git or ark command fails at its own limit", () => {
   const testTimeoutMs = 60_000;
+  const stallLimitMs = 1_500;
+  const stallBudgetMs = 5_000;
 
-  /** Runs `call` with a shim named `name` first on PATH; returns what it threw and how long it took. */
+  /** Runs `call` with a shim named `name` first on PATH and, when `limit` is given, ARK_TEST_LIMIT_MS set to it, both restored after; returns what it threw and how long it took. */
   function stalledWith(
     name: string,
     script: string,
     call: () => unknown,
+    limit?: number,
   ): { message: string; elapsedMs: number } {
-    const saved = process.env.PATH;
+    const savedPath = process.env.PATH;
+    const savedLimit = process.env.ARK_TEST_LIMIT_MS;
     const started = Date.now();
     try {
       writeFakeCommand(name, script);
+      if (limit !== undefined) process.env.ARK_TEST_LIMIT_MS = String(limit);
       call();
     } catch (error) {
       return { message: (error as Error).message, elapsedMs: Date.now() - started };
     } finally {
-      process.env.PATH = saved;
+      process.env.PATH = savedPath;
+      if (savedLimit === undefined) delete process.env.ARK_TEST_LIMIT_MS;
+      else process.env.ARK_TEST_LIMIT_MS = savedLimit;
     }
     throw new Error(`the ${name} call returned after ${Date.now() - started} ms and threw nothing`);
   }
@@ -410,39 +420,43 @@ describe("a stalled git or ark command fails at its own limit", () => {
   const limitOf = (message: string): number =>
     Number(message.match(/timed out after (\d+) ms/)?.[1]);
 
-  test("ARK-T400 a git command that stalls fails with its command line, the limit and its stderr", () => {
+  test("ARK-T400 a git command that stalls fails with its command line, the limit ARK_TEST_LIMIT_MS sets and its stderr", () => {
     const directory = tempGitRepo();
     const { message, elapsedMs } = stalledWith(
       "git",
       "echo shim-git-stderr-marker >&2\nexec sleep 90",
       () => git(directory, "add", "--", "x.txt"),
+      stallLimitMs,
     );
     expect(message).toContain(`git -C ${directory} add -- x.txt timed out after `);
     expect(message).toContain("shim-git-stderr-marker");
-    expect(limitOf(message)).toBeGreaterThan(0);
-    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
-    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+    expect(limitOf(message)).toBe(stallLimitMs);
+    expect(elapsedMs).toBeLessThan(stallBudgetMs);
   });
 
-  test("ARK-T400 an ark command that stalls fails with its command line and the limit", () => {
-    const { message, elapsedMs } = stalledWith("bun", "exec sleep 90", () => ark("status"));
+  test("ARK-T400 an ark command that stalls fails with its command line and the limit ARK_TEST_LIMIT_MS sets", () => {
+    const { message, elapsedMs } = stalledWith(
+      "bun",
+      "exec sleep 90",
+      () => ark("status"),
+      stallLimitMs,
+    );
     expect(message).toContain("ark status timed out after ");
-    expect(limitOf(message)).toBeGreaterThan(0);
-    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
-    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+    expect(limitOf(message)).toBe(stallLimitMs);
+    expect(elapsedMs).toBeLessThan(stallBudgetMs);
   });
 
-  test("ARK-T400 a stalled git of tempGitRepo fails with its command line, the limit and its stderr", () => {
+  test("ARK-T400 a stalled git of tempGitRepo fails with its command line, the limit ARK_TEST_LIMIT_MS sets and its stderr", () => {
     const { message, elapsedMs } = stalledWith(
       "git",
       "echo shim-git-stderr-marker >&2\nexec sleep 90",
       () => tempGitRepo({ "stalled-template.txt": "x\n" }),
+      stallLimitMs,
     );
     expect(message).toContain(" init -q -b main timed out after ");
     expect(message).toContain("shim-git-stderr-marker");
-    expect(limitOf(message)).toBeGreaterThan(0);
-    expect(limitOf(message)).toBeLessThan(testTimeoutMs);
-    expect(elapsedMs).toBeLessThan(testTimeoutMs);
+    expect(limitOf(message)).toBe(stallLimitMs);
+    expect(elapsedMs).toBeLessThan(stallBudgetMs);
   });
 
   test("ARK-T400 a git command that fails at once names its command line, exit code and stderr, and no limit", () => {
@@ -454,5 +468,23 @@ describe("a stalled git or ark command fails at its own limit", () => {
       `git -C ${directory} add -- x.txt failed (exit 3): shim-fast-failure`,
     );
     expect(message).not.toContain("timed out");
+  });
+
+  test("ARK-T400 the limit is below the test timeout with ARK_TEST_LIMIT_MS unset, the variable replaces it after import, and a junk value keeps it", () => {
+    const saved = process.env.ARK_TEST_LIMIT_MS;
+    try {
+      delete process.env.ARK_TEST_LIMIT_MS;
+      const unset = limitOr(commandLimitMs);
+      expect(unset).toBeLessThan(testTimeoutMs);
+      process.env.ARK_TEST_LIMIT_MS = String(stallLimitMs);
+      expect(limitOr(commandLimitMs)).toBe(stallLimitMs);
+      for (const junk of ["", "abc", "0", "-5"]) {
+        process.env.ARK_TEST_LIMIT_MS = junk;
+        expect(limitOr(commandLimitMs)).toBe(unset);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.ARK_TEST_LIMIT_MS;
+      else process.env.ARK_TEST_LIMIT_MS = saved;
+    }
   });
 });

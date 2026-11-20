@@ -5,6 +5,7 @@ import { appendEvent } from "../cli/events.ts";
 import { addWorktree, fakeSessionFolder, useFakeOrca } from "./fake-orca.ts";
 import {
   arkWithin,
+  limitOr,
   recordEvaluation,
   startHub as startHubWithin,
   stopHub as stopHubWithoutLimit,
@@ -21,31 +22,35 @@ setDefaultTimeout(30_000);
 
 /** Limit of every process call of this file, below the 30 s test timeout so a stalled call fails with its command line and stderr. */
 const processLimitMs = 25_000;
-const ark = (...args: string[]) => arkWithin(processLimitMs, ...args);
-const tempGitRepo = (files?: Record<string, string>) => tempGitRepoWithin(files, processLimitMs);
+/** Read at each call: a stall test sets ARK_TEST_LIMIT_MS after the module is loaded. */
+const processLimit = () => limitOr(processLimitMs);
+const ark = (...args: string[]) => arkWithin(processLimit(), ...args);
+const tempGitRepo = (files?: Record<string, string>) => tempGitRepoWithin(files, processLimit());
 
-const startHub = () => startHubWithin(processLimitMs);
+const startHub = () => startHubWithin(processLimit());
 
 /** Stops the hub; one that has not exited after the limit is killed and the call throws with the command line, the limit and stderr. */
 async function stopHub(hub: StartedHub["process"]) {
   let timedOut = false;
-  AbortSignal.timeout(processLimitMs).addEventListener("abort", () => {
+  const limitMs = processLimit();
+  AbortSignal.timeout(limitMs).addEventListener("abort", () => {
     timedOut = true;
     hub.kill("SIGKILL");
   });
   await stopHubWithoutLimit(hub);
   if (timedOut)
     throw new Error(
-      `bun hub/main.ts --port 0 timed out after ${processLimitMs} ms: ${await new Response(hub.stderr).text()}`,
+      `bun hub/main.ts --port 0 timed out after ${limitMs} ms: ${await new Response(hub.stderr).text()}`,
     );
 }
 
 /** A git call of this file; throws with the command line, the limit and stderr when it stalls. */
 function git(args: string[], cwd?: string) {
-  const result = Bun.spawnSync(["git", ...args], { cwd, timeout: processLimitMs });
+  const limitMs = processLimit();
+  const result = Bun.spawnSync(["git", ...args], { cwd, timeout: limitMs });
   if (result.exitedDueToTimeout)
     throw new Error(
-      `git ${args.join(" ")} timed out after ${processLimitMs} ms: ${result.stderr.toString()}`,
+      `git ${args.join(" ")} timed out after ${limitMs} ms: ${result.stderr.toString()}`,
     );
   return result;
 }
@@ -946,19 +951,30 @@ test("ARK-T308 two steps started through the current start path each open their 
   }
 });
 
-// ARK-T569: a process call of this file that stalls fails at its own limit, below the 30 s test timeout above.
+// ARK-T569: a process call of this file that stalls fails at the limit ARK_TEST_LIMIT_MS sets, in a few seconds.
 const testTimeoutMs = 30_000;
+const stallLimitMs = 1_500;
+const stallBudgetMs = 5_000;
 
-/** Runs `call` with a shim named `name` first on PATH; returns the message of the error it threw. */
-async function stalledWith(name: string, script: string, call: () => unknown): Promise<string> {
+/** Runs `call` with a shim named `name` first on PATH and ARK_TEST_LIMIT_MS set, both restored after; returns the message of the error it threw and how long the call took. */
+async function stalledWith(
+  name: string,
+  script: string,
+  call: () => unknown,
+): Promise<{ message: string; elapsedMs: number }> {
   const savedPath = process.env.PATH;
+  const savedLimit = process.env.ARK_TEST_LIMIT_MS;
+  const started = Date.now();
   try {
     writeFakeCommand(name, script);
+    process.env.ARK_TEST_LIMIT_MS = String(stallLimitMs);
     await call();
   } catch (error) {
-    return (error as Error).message;
+    return { message: (error as Error).message, elapsedMs: Date.now() - started };
   } finally {
     process.env.PATH = savedPath;
+    if (savedLimit === undefined) delete process.env.ARK_TEST_LIMIT_MS;
+    else process.env.ARK_TEST_LIMIT_MS = savedLimit;
   }
   throw new Error(`the ${name} call returned and threw nothing`);
 }
@@ -966,40 +982,52 @@ async function stalledWith(name: string, script: string, call: () => unknown): P
 const limitOf = (message: string): number => Number(message.match(/timed out after (\d+) ms/)?.[1]);
 const stalledGit = "echo shim-git-stderr-marker >&2\nexec sleep 90";
 
-test("ARK-T569 an ark call that stalls fails with its command line and a limit below the test timeout", async () => {
-  const message = await stalledWith("bun", "exec sleep 90", () => ark("status"));
+test("ARK-T569 an ark call that stalls fails with its command line and the limit ARK_TEST_LIMIT_MS sets", async () => {
+  const { message, elapsedMs } = await stalledWith("bun", "exec sleep 90", () => ark("status"));
   expect(message).toContain("ark status timed out after ");
-  expect(limitOf(message)).toBeGreaterThan(0);
-  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+  expect(limitOf(message)).toBe(stallLimitMs);
+  expect(elapsedMs).toBeLessThan(stallBudgetMs);
 });
 
-test("ARK-T569 a git call of tempGitRepo that stalls fails with its command line, a limit below the test timeout and its stderr", async () => {
-  const message = await stalledWith("git", stalledGit, () =>
+test("ARK-T569 a git call of tempGitRepo that stalls fails with its command line, the limit ARK_TEST_LIMIT_MS sets and its stderr", async () => {
+  const { message, elapsedMs } = await stalledWith("git", stalledGit, () =>
     tempGitRepo({ "worker-start-stalled-template.txt": "x\n" }),
   );
   expect(message).toContain(" init -q -b main timed out after ");
   expect(message).toContain("shim-git-stderr-marker");
-  expect(limitOf(message)).toBeGreaterThan(0);
-  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+  expect(limitOf(message)).toBe(stallLimitMs);
+  expect(elapsedMs).toBeLessThan(stallBudgetMs);
 });
 
-test("ARK-T569 the git status call of snapshotOf that stalls fails with its command line, a limit below the test timeout and its stderr", async () => {
+test("ARK-T569 the git status call of snapshotOf that stalls fails with its command line, the limit ARK_TEST_LIMIT_MS sets and its stderr", async () => {
   const worktree = tempGitRepo();
-  const message = await stalledWith("git", stalledGit, () => dirtyWorktree(worktree));
+  const { message, elapsedMs } = await stalledWith("git", stalledGit, () =>
+    dirtyWorktree(worktree),
+  );
   expect(message).toContain("git status --porcelain");
   expect(message).toContain("shim-git-stderr-marker");
-  expect(limitOf(message)).toBeGreaterThan(0);
-  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+  expect(limitOf(message)).toBe(stallLimitMs);
+  expect(elapsedMs).toBeLessThan(stallBudgetMs);
 });
 
-test("ARK-T569 a hub that never prints its address fails with its command line, a limit below the test timeout and its stderr", async () => {
-  const message = await stalledWith(
+test("ARK-T569 a hub that never prints its address fails with its command line, the limit ARK_TEST_LIMIT_MS sets and its stderr", async () => {
+  const { message, elapsedMs } = await stalledWith(
     "bun",
     "echo shim-hub-stderr-marker >&2\nexec sleep 90",
     startHub,
   );
   expect(message).toContain("bun hub/main.ts --port 0 timed out after ");
   expect(message).toContain("shim-hub-stderr-marker");
-  expect(limitOf(message)).toBeGreaterThan(0);
-  expect(limitOf(message)).toBeLessThan(testTimeoutMs);
+  expect(limitOf(message)).toBe(stallLimitMs);
+  expect(elapsedMs).toBeLessThan(stallBudgetMs);
+});
+
+test("ARK-T569 with ARK_TEST_LIMIT_MS unset the limit of every call of this file is below the test timeout", () => {
+  const saved = process.env.ARK_TEST_LIMIT_MS;
+  delete process.env.ARK_TEST_LIMIT_MS;
+  try {
+    expect(processLimit()).toBeLessThan(testTimeoutMs);
+  } finally {
+    if (saved !== undefined) process.env.ARK_TEST_LIMIT_MS = saved;
+  }
 });
