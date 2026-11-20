@@ -594,7 +594,9 @@ export function createSnapshotReader() {
       const text = JSON.stringify(body);
       if (text === lastBody) return;
       lastBody = text;
-      lastJson = JSON.stringify({ generated_at: new Date(now()).toISOString(), ...body });
+      // The same bytes as stringifying `{ generated_at, ...body }`, without a second pass over a
+      // large body that holds the loop (ARK-606).
+      lastJson = `{"generated_at":"${new Date(now()).toISOString()}",${text.slice(1)}`;
       for (const listener of listeners) listener(lastJson);
     });
   }
