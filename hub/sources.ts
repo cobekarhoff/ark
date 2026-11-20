@@ -462,7 +462,9 @@ export async function readOrca(
   // run in a thread of their own: on the hub's loop they held it over 200 ms (ARK-606, as ARK-533).
   // `env` is the current one: a worker otherwise sees only the environment the process started with,
   // not a PATH or timeout a test sets later.
-  const worker = new Worker(new URL("./orca-worker.ts", import.meta.url), { env: process.env });
+  const worker = new Worker(new URL("./orca-worker.ts", import.meta.url), {
+    env: process.env as Record<string, string>,
+  });
   try {
     const reply = await new Promise<{
       agents: [string, Agent[]][];

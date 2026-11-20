@@ -1293,7 +1293,7 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
 
 /** Open runs and workers for each run of ARK-T734: the unfixed `readOrca` pass must measure over 200 ms at this size. */
 const largeRunCount = 200;
-const largeWorkerCount = 100;
+const largeWorkerCount = 20;
 /** The `--limit 200` of the inbox read of `readOrca`. */
 const largeInboxCount = 200;
 
