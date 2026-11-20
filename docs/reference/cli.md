@@ -102,22 +102,26 @@ ark run step <run> <step> start|finish|interrupted [--failed] [--not-started] [-
     <name>]
 
 Records that a plan step started, finished or was interrupted. `ark run step <run> <step> start`
-also starts the worker of a plan step (not a --merge start) through `orca orchestration
-worker-start` in the step's worktree, as the run lead (`--from` names the run lead's Orca session),
-with the harness and model that `roles` of ark.yml gives the step's role (the pair of plan.yml when
-`roles` has none), and a spec it builds: the role and step id in words, the `Risks` of
-evaluation.md, each line of the `# Learnings applied` comment of plan.yml, each backticked string of
-the ACs the step serves, the `UI skills:` line, for a validator the `Validator rules:` block (no
-bare `bun test`, no kill by name, stop only a PID it started, and for an analysis AC that names `bun
-test` the run's full `ark test <run>`, which runs the `cli` suite command of `ark.yml` inside the
-shared test budget, never that suite command by hand), the rules in `rules.md` of the run folder
-when it exists and, for a reviewer, `Last reviewed head: <sha>`. It refuses before any Orca call
-when the start is not allowed, so a refused start launches no worker. It records step.started, then
-worker.started with the dispatch, the terminal, the harness and the session file (the new session
-file whose cwd is the worktree; `unknown` when none shows in 60 s). When worker-start fails it
-records step.finished with not_started (the round goes back), prints `ark: <step> not started: orca
+also starts the worker of a plan step through `orca orchestration worker-start` in the step's
+worktree, as the run lead (`--from` names the run lead's Orca session), with the harness and model
+that `roles` of ark.yml gives the step's role (the pair of plan.yml when `roles` has none), and a
+spec it builds: the role and step id in words, the `Risks` of evaluation.md, each line of the `#
+Learnings applied` comment of plan.yml, each backticked string of the ACs the step serves, the `UI
+skills:` line, for a validator the `Validator rules:` block (no bare `bun test`, no kill by name,
+stop only a PID it started, and for an analysis AC that names `bun test` the run's full `ark test
+<run>`, which runs the `cli` suite command of `ark.yml` inside the shared test budget, never that
+suite command by hand), the rules in `rules.md` of the run folder when it exists and, for a
+reviewer, `Last reviewed head: <sha>`. It refuses before any Orca call when the start is not
+allowed, so a refused start launches no worker. It records step.started, then worker.started with
+the dispatch, the terminal, the harness, the model and the session file (the new session file whose
+cwd is the worktree; `unknown` when none shows in 60 s). When worker-start fails it records
+step.finished with not_started (the round goes back), prints `ark: <step> not started: orca
 worker-start failed: <message>` and exits 1. The next start of an interrupted step runs `omp
---restore <session>` in a terminal of the step's worktree and binds it as a supervised worker; with
+--restore <session>` in a terminal of the step's worktree and binds it as a supervised worker, only
+when the step's harness and model in plan.yml are those of the interrupted worker (a worker recorded
+with no model counts as unchanged, so only its harness is compared); when plan.yml names another
+harness or model it starts a fresh worker with the plan's pair and prints `worker: fresh (model
+changed: A -> B)` or `worker: fresh (harness changed: X -> Y)` (one line names both changes); with
 no session recorded, a harness with no restore command, or a failed terminal create or bind (the
 failed terminal is closed), it starts a fresh worker whose spec says an earlier worker was
 interrupted and that it must read `git status` and `git diff` before it goes on. Use --failed with
@@ -1443,7 +1447,7 @@ An AC is written `AC1` in its ticket and `CLARA-512/AC1` elsewhere; the old form
 | `worktree.synced`      | `repo`, `conflict`, `target_commit` (optional: the merged origin tip, set when the merge succeeded), `conflicts` (optional: the sorted repo-relative paths that conflicted, set by `ark worktree sync` for any merge that conflicted; a regenerated `generated` merge has `conflict` false and still lists them)                                                                                                                                                                      | `ark worktree sync`; also `ark run step ... finish` of a `--merge` step (clean) and `ark merge-request open` (conflict) |
 | `step.started`         | `step`, `role`, `repo`, `round`, optional `merge` (true)                                                                                                                                                                                                                                                                                                                                                                                                                              | `ark run step ... start`                                                                                                |
 | `step.finished`        | `step`, `outcome` (`succeeded`, `failed` or `interrupted`), optional `merge` (true), optional `not_started` (true: the worker never ran, so the start costs no round)                                                                                                                                                                                                                                                                                                                 | `ark run step ... finish\|interrupted`                                                                                  |
-| `worker.started`       | `step`, `dispatch`, `terminal`, `harness`, `session`                                                                                                                                                                                                                                                                                                                                                                                                                                  | `ark run step ... start` (not a `--merge` start)                                                                        |
+| `worker.started`       | `step`, `dispatch`, `terminal`, `harness`, `model` (optional: a worker recorded before this key has none; a restored worker keeps the model of the interrupted one), `session`                                                                                                                                                                                                                                                                                                        | `ark run step ... start`                                                                                                |
 | `test.completed`       | `passed`, `heads` (commit for each repo), `suites` (`name`, `level`, `passed`, `loadAtStart` and `loadPeak`: the 1-minute load average when the suite started and the highest one sampled while it and its retries ran, `null` for a reused suite and absent in an old event), `criteria` (AC id to `passing`, `failing`, `missing`, or `manual …`), optional `checks` (`name`, `passed` of each project check that ran), optional `red_on_main` (files red on main, a full run only) | `ark test`                                                                                                              |
 | `merge_request.opened` | `repo`, `url`, `number`, `order` (position in merge order), `waits_for` (numbers of the upstream MRs)                                                                                                                                                                                                                                                                                                                                                                                 | `ark merge-request open`                                                                                                |
 | `bump.refreshed`       | `step` (the bump step), `value` (the pin: for a submodule the commit its pointer now names, for any other edge kind the `--to` value)                                                                                                                                                                                                                                                                                                                                                 | `ark bump refresh`                                                                                                      |

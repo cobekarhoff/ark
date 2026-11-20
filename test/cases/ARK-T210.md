@@ -1,17 +1,17 @@
 ---
 id: ARK-T210
-title: ARK-T210 `ark run step <run> <step> start` starts the step's worker through Orca and records the dispatch, the terminal and the session, or `unknown` after 60 s
+title: ARK-T210 `ark run step <run> <step> start` starts the step's worker through Orca and records the dispatch, the terminal, the harness, the model and the session, or `unknown` after 60 s
 level: integration
 technique: state transition (not started to running) with equivalence classes for the session lookup (file shows, file does not show)
 priority: high
-risk: start launches the worker with the wrong harness, model or worktree; records no terminal or session, so a later restore has nothing; waits a real 60 s in a test or records no `unknown` when no session file shows; the `worker.started` record breaks the derivation of old runs
+risk: start launches the worker with the wrong harness, model or worktree; records no terminal, session or model, so a later restore has nothing and a later model switch cannot be seen; waits a real 60 s in a test or records no `unknown` when no session file shows; the `worker.started` record breaks the derivation of old runs
 status: active
-changed_by: 2026-11-10-ARK-359-1
+changed_by: 2026-11-20-ARK-595-1
 ---
 
 ## Objective
 
-Prove that `ark run step <run> <step> start` starts the plan step's worker through Orca in the step's worktree with the harness and model of the plan step, and records the dispatch, the terminal and the session file in the run events, or the session as unknown when no file shows within 60 s.
+Prove that `ark run step <run> <step> start` starts the plan step's worker through Orca in the step's worktree with the harness and model of the plan step, and records the dispatch, the terminal, the harness, the model and the session file in the run events, or the session as unknown when no file shows within 60 s.
 
 ## Preconditions
 
@@ -36,7 +36,7 @@ Prove that `ark run step <run> <step> start` starts the plan step's worker throu
 ## Expected results
 
 - When the step starts, the system shall call the fake Orca `worker-start` once, with the worktree of the step, the harness and the model of the plan step, and exit 0.
-- Case A: the run events shall hold the `step.started` and a worker event with the dispatch id, the terminal handle and the session file path of the fake session folder. `ark status` shall show the step `running`.
+- Case A: the run events shall hold the `step.started` and a worker event with the dispatch id, the terminal handle, the `harness` and the `model` of the plan step and the session file path of the fake session folder. `ark status` shall show the step `running`.
 - Case B: after 60 s on the test clock the run events shall record the session as `unknown`, the step shall show `running`, and the case shall use no real 60 s wait.
 - The worker event shall hold the terminal handle of the string `result.terminal` of the receipt (else the `effects[]` terminal).
 - The start shall launch the harness and model of the plan step; a pair `ark.yml` roles lacks is refused before any Orca call with an error that asks for plan repair.
