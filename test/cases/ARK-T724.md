@@ -31,7 +31,7 @@ Run a full `ark test <run>` once for each row. Read the exit code and the comman
 4. The last has `passed: false` and a suite entry with no `failed_files` (an event written before this ticket), and an entry with `failed_files: []`.
 5. The last event of a failed check stop (`suites: []`).
 6. The failed files are listed for suite `c` (no `base_command`).
-7. The last event lists failed files and `--keep-going` is set. `ark test` reaches the pre-run through the one detached runner, so this is one run of the real command; a caller whose flag differs from the running one exits 1 before any suite (existing behaviour of `callTest`, `docs/reference/cli.md`), and no step here runs it.
+7. The last event lists failed files and `--keep-going` is set. `ark test` reaches the pre-run through the one detached runner, so this is one run of the real command; a caller whose `--keep-going` differs from the live runner's attaches, prints one line to stderr and follows the runner under the runner's flag (`cli/test-runner.ts:290-295`, `docs/reference/cli.md`), so it starts no run of its own, and no step here runs it.
 8. The last event lists gone files that no longer exist at head: `gone-a.test.ts` alone in suite `a`, and `gone-b.test.ts` next to `fails-b.test.ts` (which does exist) in suite `b`.
 9. A passing `--quick` run is the last event after a failed full run.
 
