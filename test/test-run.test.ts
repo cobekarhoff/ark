@@ -712,39 +712,39 @@ describe("ark test checks", () => {
       });
     });
 
-    test("ARK-T720 a quick --keep-going run that records every AC failing is the bug run's red proof, and one that leaves an AC not run is refused", () => {
-      const planCase = (id: string) => ({
-        id,
-        action: "add",
-        level: "e2e",
-        given: [],
-        when: ["run it"],
-        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
-        then: ["it works"],
-        expected: "it works",
-      });
-      const twoCriteria = {
+    const planCase = (id: string) => ({
+      id,
+      action: "add",
+      level: "e2e",
+      given: [],
+      when: ["run it"],
+      // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+      then: ["it works"],
+      expected: "it works",
+    });
+    const twoCriteria = {
+      criteria: ["FAKE-1/AC1", "FAKE-1/AC2"],
+      ticketCriteria: [
+        { id: "AC1", method: "test", verified_by: ["FAKE-T1"] },
+        { id: "AC2", method: "test", verified_by: ["FAKE-T2"] },
+      ],
+      testCases: [planCase("FAKE-T1"), planCase("FAKE-T2")],
+      steps: [validatorStep, implementerStep].map((step) => ({
+        ...step,
         criteria: ["FAKE-1/AC1", "FAKE-1/AC2"],
-        ticketCriteria: [
-          { id: "AC1", method: "test", verified_by: ["FAKE-T1"] },
-          { id: "AC2", method: "test", verified_by: ["FAKE-T2"] },
-        ],
-        testCases: [planCase("FAKE-T1"), planCase("FAKE-T2")],
-        steps: [validatorStep, implementerStep].map((step) => ({
-          ...step,
-          criteria: ["FAKE-1/AC1", "FAKE-1/AC2"],
-        })),
-      };
-      const commitFiles = (runDirectory: string, files: Record<string, string>) => {
-        const worktree = join(runDirectory, "workspace");
-        for (const [name, content] of Object.entries(files))
-          writeFileSync(join(worktree, name), content);
-        for (const args of [
-          ["add", "-A"],
-          ["commit", "-q", "-m", "red tests"],
-        ])
-          Bun.spawnSync(["git", "-C", worktree, ...args]);
-      };
+      })),
+    };
+    const commitFiles = (runDirectory: string, files: Record<string, string>) => {
+      const worktree = join(runDirectory, "workspace");
+      for (const [name, content] of Object.entries(files))
+        writeFileSync(join(worktree, name), content);
+      for (const args of [
+        ["add", "-A"],
+        ["commit", "-q", "-m", "red tests"],
+      ])
+        Bun.spawnSync(["git", "-C", worktree, ...args]);
+    };
+    test("ARK-T720 a quick --keep-going run that records every AC failing is the bug run's red proof, and one that leaves an AC not run is refused", () => {
       installFakeOrca();
 
       // Every AC fails in the quick run, past a failed check: the implementer starts.
@@ -789,6 +789,57 @@ describe("ark test checks", () => {
       expect(refused.code).toBe(1);
       expect(refused.err).toContain("bug run: record a failing ark test of the ACs before the fix");
       expect(readFileSync(join(oneNotRun.runDirectory, "events.ndjson"), "utf8")).not.toContain(
+        '"step.started"',
+      );
+    });
+
+    test("ARK-T740 a quick --keep-going run on a suite with changed_command keeps the bug run's red proof, and an AC test outside the affected set reads not run with no missing hint", () => {
+      // The changed command runs the test files that the diff against {base} lists and `keep` matches; a literal, empty or head {base} lists none.
+      const changedCommand = (keep: string) =>
+        `files=$(git diff --name-only {base} | grep -E '${keep}' | sed 's|^|./|'); bun test --reporter=junit --reporter-outfile={report} $files`;
+      const withChanged = (keep: string) => ({
+        ...twoCriteria,
+        suiteOverrides: { e2e: { changed_command: changedCommand(keep) } },
+      });
+      installFakeOrca();
+
+      // Both AC tests are in the affected set, and a check fails: both read failing and the implementer starts.
+      const inSet = bugRun({ ...withChanged("[.]test[.]ts$"), e2e: [] });
+      writeFileSync(inSet.failureSwitch, "");
+      commitFiles(inSet.runDirectory, {
+        "e2e.test.ts": suiteTests([failing("FAKE-T1 works"), failing("FAKE-T2 works")]),
+      });
+      const red = ark("test", inSet.runId, "--quick", "--keep-going");
+      expect(red.code).toBe(1);
+      expect(red.out).toContain("FAKE-1/AC1  failing");
+      expect(red.out).toContain("FAKE-1/AC2  failing");
+      expect(testCompleted(inSet.runDirectory).at(-1)).toMatchObject({
+        mode: "quick",
+        criteria: { "FAKE-1/AC1": "failing", "FAKE-1/AC2": "failing" },
+      });
+      expect(ark("run", "step", inSet.runId, "build", "start").code).toBe(0);
+
+      // FAKE-T2 sits in other.test.ts, which the changed command leaves out: AC2 reads not run, with no missing hint, and the start is refused.
+      const outOfSet = bugRun({
+        ...withChanged("^e2e[.]test[.]ts$"),
+        e2e: [passing("FAKE-T1 works")],
+      });
+      commitFiles(outOfSet.runDirectory, {
+        "e2e.test.ts": suiteTests([failing("FAKE-T1 works")]),
+        "other.test.ts": suiteTests([failing("FAKE-T2 works")]),
+      });
+      const partial = ark("test", outOfSet.runId, "--quick", "--keep-going");
+      expect(partial.code).toBe(1);
+      expect(partial.out).toMatch(/FAKE-1\/AC2 {2}not run .*via FAKE-T2 missing/);
+      expect(partial.out).not.toContain("no test title starts with");
+      expect(testCompleted(outOfSet.runDirectory).at(-1)).toMatchObject({
+        mode: "quick",
+        criteria: { "FAKE-1/AC1": "failing", "FAKE-1/AC2": "not run" },
+      });
+      const refused = ark("run", "step", outOfSet.runId, "build", "start");
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain("bug run: record a failing ark test of the ACs before the fix");
+      expect(readFileSync(join(outOfSet.runDirectory, "events.ndjson"), "utf8")).not.toContain(
         '"step.started"',
       );
     });

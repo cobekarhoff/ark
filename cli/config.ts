@@ -79,6 +79,8 @@ export type ProjectConfig = {
     base_files?: string;
     /** The command for a list of files at the base: `{files}` is the shell-quoted list, `{report}` as in `command`. */
     base_command?: string;
+    /** What a quick run runs instead of `command` and `base_files`: `{base}` is the run's worktree base commit, `{report}` as in `command`. A full run never reads it. A worktree with no base runs `command`. */
+    changed_command?: string;
     /** Repo paths the suite covers: a folder ends with `/`, else a file. A quick run skips the suite when the diff touches none. */
     paths?: string[];
   }[];
@@ -154,6 +156,7 @@ const suiteKeys = keysOf<ProjectConfig["suites"][number]>({
   cores: true,
   base_files: true,
   base_command: true,
+  changed_command: true,
   paths: true,
 });
 const checkKeys = keysOf<ProjectConfig["checks"][number]>({
@@ -330,6 +333,13 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     const command = text(suite, "command", `suites[${i}].command`);
     if (!command.includes("{report}"))
       fail(`suites[${i}].command must write its JUnit report to {report}`);
+    const changedCommand =
+      suite.changed_command === undefined
+        ? undefined
+        : text(suite, "changed_command", `suites[${i}].changed_command`);
+    for (const placeholder of ["{base}", "{report}"])
+      if (changedCommand !== undefined && !changedCommand.includes(placeholder))
+        fail(`suites[${i}].changed_command must contain ${placeholder}`);
     return {
       name,
       level: oneOf(
@@ -343,6 +353,7 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       parser: oneOf(suite, "parser", `suites[${i}].parser`, parserNames),
       ...(suite.cores !== undefined ? { cores: integer(suite, "cores", 1, 1) } : {}),
       ...(baseFiles !== undefined ? { base_files: baseFiles, base_command: baseCommand } : {}),
+      ...(changedCommand !== undefined ? { changed_command: changedCommand } : {}),
       ...(paths !== undefined ? { paths: paths as string[] } : {}),
     };
   });
