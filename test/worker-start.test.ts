@@ -61,6 +61,8 @@ function git(args: string[], cwd?: string) {
 const orca = useFakeOrca();
 
 const model = "anthropic/claude-sonnet-5-5";
+/** The model a role switch after a provider usage limit moves a step to (ARK-T719). */
+const switchedModel = "anthropic/claude-opus-5-5";
 const ticketId = "ARK-900";
 const acText = [
   "A step starts with `--first` and `second-literal`.",
@@ -123,7 +125,7 @@ const planOf = () => ({
       role: "reviewer",
       repo: ".",
       harness: "omp",
-      model,
+      model: switchedModel,
       needs: [],
       criteria: [`${ticketId}/AC1`],
     },
@@ -160,6 +162,17 @@ afterEach(() => {
   else process.env.ARK_NOW = previousClock;
 });
 
+/** Checks `plan.yml` and records the plan approval again: a new plan hash clears it. */
+function approvePlan(runId: string): void {
+  for (const args of [
+    ["plan", "check", runId],
+    ["gate", "record", runId, "plan", "approve"],
+  ]) {
+    const result = ark(...args);
+    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}${result.out}`);
+  }
+}
+
 /** A building run of `planOf()` with its worktree recorded; `worktree` defaults to a scratch git repo. */
 function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boolean } = {}): Run {
   writeProject("demo", {
@@ -169,7 +182,10 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
     roles: {
       implementer: { harness: "omp", model },
       validator: { harness: "claude", model: "claude-sonnet" },
-      reviewer: { harness: "omp", model },
+      reviewer: { harness: "omp", model: switchedModel },
+      // One role holds one pair; ARK-T719 needs omp/claude with each of the two models.
+      evaluator: { harness: "claude", model },
+      designer: { harness: "claude", model: switchedModel },
     },
   });
   const ticketFile = writeTicket(
@@ -194,13 +210,7 @@ function buildRun(options: { learningLines?: string[]; worktreeInRunFolder?: boo
     join(directory, "plan.yml"),
     `${[...(options.learningLines ?? learnings), "# Learnings read and not applied: not a spec line"].join("\n")}\n${JSON.stringify(planOf())}\n`,
   );
-  for (const args of [
-    ["plan", "check", runId],
-    ["gate", "record", runId, "plan", "approve"],
-  ]) {
-    const result = ark(...args);
-    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}${result.out}`);
-  }
+  approvePlan(runId);
   let worktree: string | undefined;
   if (options.worktreeInRunFolder) {
     worktree = join(directory, "workspace");
@@ -254,6 +264,7 @@ test("ARK-T210 start calls worker-start once with the step's worktree, harness a
   expect(worker.dispatch).toMatch(/^ctx_/);
   expect(Object.keys(orca.terminals())).toEqual([worker.terminal]);
   expect(worker.harness).toBe("omp");
+  expect(worker.model).toBe(model);
   expect(worker.session.startsWith(fakeSessionFolder())).toBe(true);
   expect(existsSync(worker.session)).toBe(true);
   expect(stepStatus(run, "a")).toBe("running");
@@ -495,7 +506,10 @@ test("ARK-T212 the next start of an interrupted step restores the recorded sessi
   const dead = interruptedStep(run, "a", { session: true });
   expect(dead.session).not.toBe("unknown");
   const freshBefore = workerStarts().length;
-  started(run, "a");
+  const result = start(run, "a");
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  expect(result.out).toContain("worker: restored");
   const calls = orca.calls();
   const create = calls.find((call) => call[0] === "terminal" && call[1] === "create")!;
   expect(flagOf(create, "--command")).toBe(`omp --restore ${dead.session}`);
@@ -506,6 +520,8 @@ test("ARK-T212 the next start of an interrupted step restores the recorded sessi
   expect(starts[0]).not.toContain("--agent");
   const restored = workerOf(run.directory, "a");
   expect(restored.session).toBe(dead.session);
+  expect(restored.harness).toBe("omp");
+  expect(restored.model).toBe(model);
   expect(restored.terminal).not.toBe(dead.terminal);
   expect(Object.keys(orca.terminals())).toEqual([restored.terminal]);
   expect(stepStatus(run, "a")).toBe("running");
@@ -552,6 +568,122 @@ for (const failure of ["failTerminalCreate", "failBind"]) {
     expect(stepStatus(run, "a")).toBe("running");
   });
 }
+
+/** Sets the harness and model of `step` in `plan.yml`, as Master Chief does after a usage limit, and approves the plan again. */
+function switchPlan(run: Run, step: string, pair: { harness: string; model: string }): void {
+  const file = join(run.directory, "plan.yml");
+  const lines = readFileSync(file, "utf8").trimEnd().split("\n");
+  const plan = JSON.parse(lines.pop()!);
+  Object.assign(
+    plan.steps.find((entry: { id: string }) => entry.id === step),
+    pair,
+  );
+  writeFileSync(file, `${[...lines, JSON.stringify(plan)].join("\n")}\n`);
+  approvePlan(run.runId);
+}
+
+/** An interrupted step whose dead worker was recorded before ARK-595: a `worker.started` with a session and no `model`. */
+function interruptedOldWorker(run: Run, step: string): string {
+  const session = join(fakeSessionFolder(), "old-worker.jsonl");
+  writeFileSync(session, "{}\n");
+  appendEvent(run.directory, "step.started", { step, role: "implementer", repo: ".", round: 1 });
+  appendEvent(run.directory, "worker.started", {
+    step,
+    dispatch: "ctx_old",
+    terminal: "term_old",
+    harness: "omp",
+    session,
+  });
+  expect(interrupt(run, step).code).toBe(0);
+  return session;
+}
+
+const workerLine = (output: string) =>
+  output.split("\n").find((line) => line.trim().startsWith("worker:")) ?? "";
+
+/** The start a fresh worker with `pair` after an interrupt must make: the plan pair, no restore, the interrupted brief. */
+function expectFreshStart(
+  run: Run,
+  step: string,
+  pair: { harness: string; model: string },
+  changes: string[],
+): void {
+  const result = start(run, step);
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  const line = workerLine(result.out);
+  expect(line).toMatch(/^ {2}worker: fresh \(/);
+  for (const change of changes) expect(line).toContain(change);
+  expect(line).not.toContain("restored");
+  expect(result.out).toContain("brief: an earlier worker was interrupted");
+  expect(orca.calls().some((call) => call[0] === "terminal" && call[1] === "create")).toBe(false);
+  const fresh = orca.workers().at(-1)!;
+  expect(fresh.kind).toBe("agent");
+  expect(flagOf(fresh.args, "--agent")).toBe(pair.harness);
+  expect(flagOf(fresh.args, "--model")).toBe(pair.model);
+  interruptedBrief(fresh.spec);
+  expect(fresh.spec).toContain("`git diff`");
+  const worker = workerOf(run.directory, step);
+  expect(worker.harness).toBe(pair.harness);
+  expect(worker.model).toBe(pair.model);
+  expect(stepStatus(run, step)).toBe("running");
+}
+
+test("ARK-T719 a model switched in plan.yml starts a fresh worker with the new model and names the change", () => {
+  const run = buildRun();
+  interruptedStep(run, "a", { session: true });
+  switchPlan(run, "a", { harness: "omp", model: switchedModel });
+  expectFreshStart(run, "a", { harness: "omp", model: switchedModel }, [
+    `worker: fresh (model changed: ${model} -> ${switchedModel})`,
+  ]);
+});
+
+test("ARK-T719 a harness switched in plan.yml starts a fresh worker on the new harness and names the change", () => {
+  const run = buildRun();
+  interruptedStep(run, "b", { session: true });
+  switchPlan(run, "b", { harness: "claude", model });
+  expectFreshStart(run, "b", { harness: "claude", model }, [
+    "worker: fresh (harness changed: omp -> claude)",
+  ]);
+});
+
+test("ARK-T719 a harness and a model switched together start fresh and one line names both changes", () => {
+  const run = buildRun();
+  interruptedStep(run, "c", { session: true });
+  switchPlan(run, "c", { harness: "claude", model: switchedModel });
+  expectFreshStart(run, "c", { harness: "claude", model: switchedModel }, [
+    "harness changed: omp -> claude",
+    `model changed: ${model} -> ${switchedModel}`,
+  ]);
+});
+
+test("ARK-T719 a worker recorded with no model still restores when its harness is unchanged, and the restored record claims no model", () => {
+  const run = buildRun();
+  const session = interruptedOldWorker(run, "d");
+  switchPlan(run, "d", { harness: "omp", model: switchedModel });
+  const freshBefore = workerStarts().length;
+  const result = start(run, "d");
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  expect(workerLine(result.out)).toMatch(/^ {2}worker: restored/);
+  const create = orca.calls().find((call) => call[0] === "terminal" && call[1] === "create")!;
+  expect(flagOf(create, "--command")).toBe(`omp --restore ${session}`);
+  const starts = workerStarts().slice(freshBefore);
+  expect(starts).toHaveLength(1);
+  expect(starts[0]).not.toContain("--agent");
+  const worker = workerOf(run.directory, "d");
+  expect(worker.harness).toBe("omp");
+  expect(Object.keys(worker)).not.toContain("model");
+});
+
+test("ARK-T719 a worker recorded with no model starts fresh when the plan names another harness", () => {
+  const run = buildRun();
+  interruptedOldWorker(run, "e");
+  switchPlan(run, "e", { harness: "claude", model });
+  expectFreshStart(run, "e", { harness: "claude", model }, [
+    "worker: fresh (harness changed: omp -> claude)",
+  ]);
+});
 
 // ARK-T213: the events are written as the CLI would write them, at fixed instants, so the retro and status
 // code derive them for real. Each run has its own folder under the scratch ARK_HOME.

@@ -472,7 +472,7 @@ ark run step <run> <step> interrupted
 ark run step <run> <step> start
 ```
 
-`interrupted` is refused while Orca lists the terminal of the worker, or when Orca does not answer: wait, and never force it. It gives the round back and keeps the files. The next `start` restores the session of the worker, or briefs a fresh worker when it cannot. Never run `finish` for a step whose worker died.
+`interrupted` is refused while Orca lists the terminal of the worker, or when Orca does not answer: wait, and never force it. It gives the round back and keeps the files. The next `start` restores the session of the worker, or briefs a fresh worker when it cannot, or when the plan now names another harness or model than the worker had (a role switch): then it starts fresh with the plan's pair and prints `worker: fresh (model changed: A -> B)`. A worker recorded with no model is restored unless the harness changed. Never run `finish` for a step whose worker died.
 
 1. Start the step. This records it and starts its worker, in the step's worktree, with the `harness` and `model` of its role and a spec that `ark` builds itself (its first line is `/skill:ark-<role> <run> <step>`, the skill of the step's role; then the role, the step id, the Risks, the applied learnings, the AC strings of the step, the rules and the UI skills). Never start a plan step with `orca orchestration worker-start`.
 

@@ -366,16 +366,30 @@ async function launchWorker(
 
   let worker: StartedWorker | undefined;
   let workerHarness = harness;
+  let workerModel: string | undefined = model;
   let session: string | undefined;
   let how = "fresh";
   let reason = "";
+  let changed = "";
   if (takeover) {
     const previous = lastWorker(events, planStep.id);
     const restore =
       previous && Object.hasOwn(restoreCommands, previous.harness)
         ? restoreCommands[previous.harness]
         : undefined;
-    if (!previous || !previous.session || previous.session === "unknown")
+    // A worker recorded before `model` existed has none: only its harness can differ then.
+    const changes = previous
+      ? [
+          ...(previous.harness !== harness
+            ? [`harness changed: ${previous.harness} -> ${harness}`]
+            : []),
+          ...(previous.model !== undefined && previous.model !== model
+            ? [`model changed: ${previous.model} -> ${model}`]
+            : []),
+        ]
+      : [];
+    if (changes.length) changed = changes.join(", ");
+    else if (!previous || !previous.session || previous.session === "unknown")
       reason = "no session recorded";
     else if (!restore) reason = `harness ${previous.harness} has no restore command`;
     else {
@@ -387,6 +401,7 @@ async function launchWorker(
           worker = bound.value;
           session = previous.session;
           workerHarness = previous.harness;
+          workerModel = previous.model;
           how = "restored";
         } else {
           await closeTerminal(terminal.value);
@@ -394,7 +409,7 @@ async function launchWorker(
         }
       }
     }
-    if (!worker) how = `fresh after interrupt (${reason})`;
+    if (!worker) how = changed ? `fresh (${changed})` : `fresh after interrupt (${reason})`;
   }
 
   const watch = worker ? null : watchSession(harness, worktree);
@@ -424,6 +439,7 @@ async function launchWorker(
     dispatch: worker.dispatch,
     terminal: worker.terminal,
     harness: workerHarness,
+    ...(workerModel === undefined ? {} : { model: workerModel }),
     session: session ?? "unknown",
   });
   return [
