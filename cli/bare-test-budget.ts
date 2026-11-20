@@ -3,7 +3,7 @@ import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type ProjectConfig } from "./config.ts";
 import { isInside, listProjects, projectDirectory } from "./paths.ts";
-import { budgetHeldVariable, openTestBudget } from "./test-lock.ts";
+import { budgetHeldVariable, openTestBudget, runHoldsCores } from "./test-lock.ts";
 
 /** The label of the ticket of a bare `bun test`, read by `ark chief state` and the hub. */
 const ticketLabel = "bun test";
@@ -89,22 +89,20 @@ function showLine(line: string, inWorker: boolean): void {
  * Called by the `bun test` preload. A whole-suite `bun test` started outside `ark test` takes its cores from the
  * test budget of its project and starts its files when they are free. One ticket for each `bun test`, owned by
  * its coordinator: the preload runs again in every --parallel worker for every file, and those runs find the
- * ticket and wait for it. A single-file run, a run under `ark test`, and a host with no project, no readable
- * `ark.yml` or no `ps` start at once: this hook never refuses a run.
+ * ticket and wait for it. A run under `ark test` or under a held bare run (its marker names a live run with a
+ * started ticket), a single-file run, and a host with no project, no readable `ark.yml` or no `ps` start at once:
+ * this hook never refuses a run. A whole-suite run that a single-file run starts holds no cores and waits.
  */
 export async function holdTestBudget(): Promise<void> {
-  if (process.env[budgetHeldVariable]) return;
+  if (runHoldsCores(process.env[budgetHeldVariable])) return;
   try {
     const lines = commandLines([process.pid, process.ppid]);
     // A --parallel worker runs `bun test --test-worker`; its parent holds the arguments the person typed.
     const inWorker = (lines.get(process.pid) ?? "").includes(" --test-worker");
     const coordinator = inWorker ? process.ppid : process.pid;
     const asked = coresOfWholeSuite(lines.get(coordinator) ?? "");
-    if (asked === null) {
-      // A run of test files is outside the budget, and so is every `bun test` that its tests start.
-      process.env[budgetHeldVariable] = "held";
-      return;
-    }
+    // A run of test files is outside the budget and takes no marker: a whole suite its tests start waits like a bare run.
+    if (asked === null) return;
     const config = projectOfFolder(realpathSync(process.cwd()));
     if (config === null) return;
     const cores = Math.min(Math.max(1, asked), config.test_budget_cores);
@@ -127,7 +125,7 @@ export async function holdTestBudget(): Promise<void> {
     });
     await budget.take(cores);
     // A whole-suite `bun test` that a test starts now runs inside these cores.
-    process.env[budgetHeldVariable] = "held";
+    process.env[budgetHeldVariable] = String(coordinator);
   } catch {
     // never fail or hold a run for a problem of the hook
   }

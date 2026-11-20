@@ -20,7 +20,7 @@ import {
   type OrcaRunRow,
   type WorkerRow,
 } from "./orca.ts";
-import { holdReasons, readHost, sampleCpuPercent } from "./host.ts";
+import { holdReasons, readHost, readOrphanedTestWorkers, sampleCpuPercent } from "./host.ts";
 import { hubLines, servicesStatusText } from "./services.ts";
 import { readTestLock } from "./test-lock.ts";
 import { projectDirectory, resolveProject, runsDirectory } from "./paths.ts";
@@ -294,6 +294,7 @@ export async function chiefState(inProject?: string): Promise<void> {
     minimumFreePercent: config.test_min_free_memory_percent,
     maximumSwapGigabytes: config.test_max_swap_gb,
   });
+  const orphans = await readOrphanedTestWorkers();
   const reading = <value>(value: value | null, show: (value: value) => string) =>
     value === null ? "unavailable" : show(value);
   sections.push(
@@ -305,6 +306,7 @@ export async function chiefState(inProject?: string): Promise<void> {
       `cpu: ${reading(host.cpuPercent, (percent) => `${percent.toFixed(1)}%`)}`,
       `free disk: ${reading(host.freeDiskGigabytes, (gigabytes) => `${gigabytes} GB`)}`,
       `tests: running ${running.length}, waiting ${waiting.length}`,
+      `orphaned bun test workers: ${reading(orphans, ({ count, megabytes }) => (count === 0 ? "0" : `${count} (${megabytes} MB)`))}`,
       `hold new runs: ${reasons.length === 0 ? "no" : reasons.join("; ")}`,
     ].join("\n"),
   );

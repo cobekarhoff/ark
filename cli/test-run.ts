@@ -84,7 +84,7 @@ async function run(command: string[], cwd: string, env?: Record<string, string>,
   const childEnv: Record<string, string | undefined> = {
     ...process.env,
     ...env,
-    [budgetHeldVariable]: "held",
+    [budgetHeldVariable]: String(process.pid),
   };
   delete childEnv.JEST_WORKER_ID;
   const child = Bun.spawn(command, {
