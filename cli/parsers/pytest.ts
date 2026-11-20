@@ -48,6 +48,7 @@ export const parsePytest: Parser = ({ report }) => {
     const className = attributes.match(/\bclassname="([^"]*)"/)?.[1] ?? "";
     const file = attributes.match(/\bfile="([^"]*)"/)?.[1];
     const testName = attributes.match(/\bname="([^"]*)"/)?.[1] ?? "";
+    const duration_s = Number(attributes.match(/\btime="([^"]*)"/)?.[1] ?? NaN);
     const criteria = new Set<string>();
     const cases = new Set<string>();
     for (const property of body.matchAll(/<property\s+name="ac"\s+value="([^"]*)"/g)) {
@@ -67,6 +68,7 @@ export const parsePytest: Parser = ({ report }) => {
       cases: [...cases].sort(),
       status,
       ...(file ? { file: unescapeXml(file).replace(/^\.\//, "") } : {}),
+      ...(Number.isFinite(duration_s) ? { duration_s } : {}),
     });
   }
   return results;

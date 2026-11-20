@@ -21,8 +21,9 @@ import { writeOwnerFile } from "./owner-file.ts";
 import { ArkError } from "./errors.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events.ts";
 import { manualStatus, type CriterionStatus } from "./lifecycle.ts";
-import { parsers, type TestResult } from "./parsers/index.ts";
+import { parsers, suiteSecondsOf, type TestResult } from "./parsers/index.ts";
 import { readCaseEntries } from "./test-case.ts";
+import { timeVerdict } from "./time-limit.ts";
 import { baseSide, oldIdsTouched, planMembership } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { checkStage } from "./merge-request.ts";
@@ -523,6 +524,7 @@ async function runSuite(
         failedFiles: [] as string[],
         load: { start: null, peak: null },
         wall_s: cached.wall_s,
+        suite_s: cached.suite_s,
       };
     }
     // ARK-390: a cached suite takes no cores; a suite that runs waits for its cores in the host budget.
@@ -555,6 +557,8 @@ async function runSuite(
     let log = `${command}\n${output}${separator}exit ${outcome.code}\n`;
     const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
     let results = parsers[suite.parser]({ report, stdout: outcome.stdout });
+    // ARK-581: the root `time` of the first report; the retry replaces results of files, not the suite time.
+    const suite_s = suiteSecondsOf(report);
     // A failure at base is data, so only the head side retries.
     const retried =
       sideRun.side === "head"
@@ -617,7 +621,15 @@ async function runSuite(
       storeCached(
         cache.project,
         cache.key,
-        { results, output, log, flaky, wall_s, ...(redOnMain.length > 0 ? { redOnMain } : {}) },
+        {
+          results,
+          output,
+          log,
+          flaky,
+          wall_s,
+          ...(suite_s !== undefined ? { suite_s } : {}),
+          ...(redOnMain.length > 0 ? { redOnMain } : {}),
+        },
         scratch,
       );
     return {
@@ -629,6 +641,7 @@ async function runSuite(
       code: outcome.code,
       load: { start: loadSampler.start, peak: loadSampler.stop() },
       wall_s,
+      suite_s,
     };
   } finally {
     rmSync(scratch, { recursive: true, force: true });
@@ -1322,6 +1335,8 @@ async function executeTest(
     const allResults: TestResult[] = [];
     const provingResults: TestResult[] = [];
     const headResults = new Map<string, TestResult[]>();
+    // ARK-581: what the time verdict needs besides the results, for each head suite that ran.
+    const headTimes = new Map<string, { suite_s: number | undefined; reused: boolean }>();
     const headRun = newSide("head");
     // A quick run is not a gate, so it needs no main check.
     const mainCheck = quick ? undefined : mainCheckOf(config, runId, mirror, state.worktrees);
@@ -1431,17 +1446,18 @@ async function executeTest(
           compose: config.compose,
         });
         headKeys.set(suite.name, key.slice(0, 6));
-        const { results, passed, flaky, failedFiles, reused, code, load, wall_s } = await runSuite(
-          suite,
-          join(mirror, suite.repo),
-          resultsDirectory,
-          headRun,
-          heads[suite.repo]!,
-          template,
-          files,
-          dirty ? undefined : { project, key },
-          mainCheck,
-        );
+        const { results, passed, flaky, failedFiles, reused, code, load, wall_s, suite_s } =
+          await runSuite(
+            suite,
+            join(mirror, suite.repo),
+            resultsDirectory,
+            headRun,
+            heads[suite.repo]!,
+            template,
+            files,
+            dirty ? undefined : { project, key },
+            mainCheck,
+          );
         // A changed command that selects no test file passes with no test: a skip, never `passed`.
         if (changed && passed && results.length === 0) {
           // runSuite recorded a cached empty set as reused; a skipped suite is not reused.
@@ -1453,6 +1469,7 @@ async function executeTest(
         exitCodes.set(suite.name, code);
         allResults.push(...results);
         headResults.set(suite.name, results);
+        headTimes.set(suite.name, { suite_s, reused });
         if (suite.level !== "unit") provingResults.push(...results);
         suites.push({
           name: suite.name,
@@ -1556,9 +1573,27 @@ async function executeTest(
     writeResults(headRun, evidenceDirectory);
     writeResults(baseRun, evidenceDirectory);
     publishEvidence(resultsDirectory, !quick);
+    // ARK-581: one verdict, on the head results of this run (after replay and retry), from the current ark.yml.
+    // A time failure is no suite failure: the suite rows and `failed_files` stay as the tests left them.
+    const timeVerdicts = config.suites.flatMap((suite) => {
+      const head = headTimes.get(suite.name);
+      if (head === undefined) return [];
+      const verdict = timeVerdict({
+        suite,
+        results: headResults.get(suite.name)!,
+        suiteSeconds: head.suite_s,
+        reused: head.reused,
+        quick,
+        entries:
+          suite.slow_test_s === undefined ? [] : readCaseEntries(join(mirror, suite.repo)).entries,
+      });
+      return verdict === null ? [] : [{ name: suite.name, ...verdict }];
+    });
+    const timeFailed = timeVerdicts.filter((verdict) => verdict.failed);
     const passed =
       checks.every((check) => check.passed) &&
       suites.every((suite) => suite.passed) &&
+      timeFailed.length === 0 &&
       Object.entries(criterionStatuses).every(
         ([criterion, status]) =>
           manual.has(criterion) || status === "passing" || status === "not run",
@@ -1602,6 +1637,7 @@ async function executeTest(
       console.log(
         `red on main  ${suite}  ${file}  (fails at the tip of the target branch too, not counted)`,
       );
+    for (const verdict of timeVerdicts) for (const line of verdict.lines) console.log(line);
     console.log(
       `tests      ${passedCount} passed, ${skippedCount} skipped${counted ? ` (base ${baseSkipped}), ${deleted.length} deleted` : ""}`,
     );
@@ -1620,6 +1656,9 @@ async function executeTest(
     const problems = [
       ...checks.filter((check) => !check.passed).map((check) => `check ${check.name} failed`),
       ...suites.filter((suite) => !suite.passed).map((suite) => `suite ${suite.name} failed`),
+      ...timeFailed.map(
+        (verdict) => `suite ${verdict.name} is over its time limit (on_over: fail)`,
+      ),
       ...(state.kind === "refactor" && !quick && !basePassed && hasTestCriterion(directory)
         ? ["refactor run: the suites fail at the base commit"]
         : []),

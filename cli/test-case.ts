@@ -26,7 +26,8 @@ const sections = [
   "Screenshot checkpoints",
 ];
 
-export type CaseEntry = { id: string; level: string; status: string };
+/** `slow_reason`: why the test that carries this id may be slower than `slow_test_s`; absent when the entry gives none (an empty value counts as none). */
+export type CaseEntry = { id: string; level: string; status: string; slow_reason?: string };
 
 /**
  * Reads `test/cases/*.md` of the repo at `root`. An absent folder is valid and gives no entries.
@@ -82,6 +83,7 @@ export function readCaseEntries(
       id: value("id"),
       level: value("level"),
       status: value("status"),
+      ...(value("slow_reason") ? { slow_reason: value("slow_reason") } : {}),
     });
   }
   return { entries, problems };

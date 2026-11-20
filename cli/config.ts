@@ -83,6 +83,12 @@ export type ProjectConfig = {
     changed_command?: string;
     /** Repo paths the suite covers: a folder ends with `/`, else a file. A quick run skips the suite when the diff touches none. */
     paths?: string[];
+    /** Seconds the whole suite may take (the root `time` of its report). A full run only. Omitted: no limit. */
+    time_budget_s?: number;
+    /** Seconds one test may take. Omitted: no limit. */
+    slow_test_s?: number;
+    /** What a time over `time_budget_s` or `slow_test_s` does: `warn` (default) passes, `fail` fails the run. */
+    on_over?: "warn" | "fail";
   }[];
   /** Commands `ark test` runs in the repo's worktree before the suites. They must not write files. */
   checks: { name: string; repo: string; command: string; cores: number }[];
@@ -158,6 +164,9 @@ const suiteKeys = keysOf<ProjectConfig["suites"][number]>({
   base_command: true,
   changed_command: true,
   paths: true,
+  time_budget_s: true,
+  slow_test_s: true,
+  on_over: true,
 });
 const checkKeys = keysOf<ProjectConfig["checks"][number]>({
   name: true,
@@ -251,6 +260,14 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     return value as number;
   };
 
+  const positiveNumber = (fields: Fields, key: string, field: string): number | undefined => {
+    const value = fields[key];
+    if (value === undefined) return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+      fail(`${field} must be a positive number of seconds`);
+    return value as number;
+  };
+
   const onlyKeys = (fields: Fields, field: string, validKeys: readonly string[]): void => {
     for (const key of Object.keys(fields)) {
       if (validKeys.includes(key)) continue;
@@ -340,6 +357,10 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     for (const placeholder of ["{base}", "{report}"])
       if (changedCommand !== undefined && !changedCommand.includes(placeholder))
         fail(`suites[${i}].changed_command must contain ${placeholder}`);
+    const timeBudget = positiveNumber(suite, "time_budget_s", `suites[${i}].time_budget_s`);
+    const slowTest = positiveNumber(suite, "slow_test_s", `suites[${i}].slow_test_s`);
+    if (suite.on_over !== undefined && suite.on_over !== "warn" && suite.on_over !== "fail")
+      fail(`suites[${i}].on_over must be one of warn, fail`);
     return {
       name,
       level: oneOf(
@@ -355,6 +376,9 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
       ...(baseFiles !== undefined ? { base_files: baseFiles, base_command: baseCommand } : {}),
       ...(changedCommand !== undefined ? { changed_command: changedCommand } : {}),
       ...(paths !== undefined ? { paths: paths as string[] } : {}),
+      ...(timeBudget !== undefined ? { time_budget_s: timeBudget } : {}),
+      ...(slowTest !== undefined ? { slow_test_s: slowTest } : {}),
+      ...(suite.on_over !== undefined ? { on_over: suite.on_over as "warn" | "fail" } : {}),
     };
   });
 
