@@ -3899,7 +3899,7 @@ const agentOfMessage = (reply: ProjectReply, id: string, side: "from" | "to") =>
 test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the last good value, and marks it truncated or stale", async () => {
   isolatedEnvironment();
   const { run, messages, orca } = conversationFixture();
-  const state = installFakeTools({ orca });
+  const state = installFakeTools({ orca, orcaInboxDelaySeconds: 0.5 });
   process.env.ARK_HUB_INTERVAL_MS = "100";
   const { baseUrl } = await start();
   delete process.env.ARK_HUB_INTERVAL_MS;
@@ -3956,6 +3956,13 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
   expect(snapshotText).not.toContain("SECRET-BODY");
 
   // A failed read keeps the first value with its read time; the other Orca sources stay ok.
+  // A loaded host can start a read before this write and publish it after: wait for a read that passed the failure check, then write.
+  const passedReads = () => {
+    const file = join(state, "orca.inboxpassed");
+    return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
+  };
+  const before = passedReads();
+  while (passedReads() === before) await delay(10);
   writeFakeToolState(state, { orca, orcaInboxFails: true });
   const stale = await conversationWhen<ProjectReply>(baseUrl, (reply) => reply.stale);
   expect(stale.read_at).toBe(first.read_at);
