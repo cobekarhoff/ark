@@ -746,15 +746,17 @@ ark status [<run>] [--project <name>]
 Prints the state of one run: phase, round, first unfinished step, waiting gate, last test, test
 head, MRs and cost. The test head line is `test head: current` when every worktree is at the head of
 the last test, and one `test head: stale (<repo> tested <8 characters>, now <8 characters>)` line
-for each repo that changed. There is no test head line before the first test. For a project with
-`merge_requests: none` it prints `merge requests: none (local only)` in place of the MR lines, then
-`branch <order> <repo> <branch> <n> commit(s) ahead of <base, 8 characters>` for each worktree whose
-branch has commits beyond its base, in merge order, also after `ark run close <run> handed_off`.
-Without a run, it lists every open run. When gitleaks or osv-scanner is not on PATH it prints a line
-`scanner: <tool> is not installed: brew install <tool>` for each, after the role lines, and still
-exits 0: `ark merge-request open` and `ark run close <run> handed_off` refuse with the same lines.
---project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the
-run in that project only.
+for each repo that changed. There is no test head line before the first test. For a project that
+opens MRs, a run with no MR prints `merge requests: not opened yet`, and a run with MRs prints
+`merge requests:` and one ` <repo> <url>` line for each MR. For a project with `merge_requests:
+none` it prints `merge requests: none (local only)` in place of the MR lines, then `branch <order>
+<repo> <branch> <n> commit(s) ahead of <base, 8 characters>` for each worktree whose branch has
+commits beyond its base, in merge order, also after `ark run close <run> handed_off`. Without a run,
+it lists every open run. When gitleaks or osv-scanner is not on PATH it prints a line `scanner:
+<tool> is not installed: brew install <tool>` for each, after the role lines, and still exits 0:
+`ark merge-request open` and `ark run close <run> handed_off` refuse with the same lines. --project
+limits the config check to one project, like ARK_PROJECT, and with a run it looks for the run in
+that project only.
 
 The list adds the age of the newest event of each open run after the step, as `Nm`, `Nh` or `Nd`
 (largest whole unit; hours up to 47), and ends the line with ` stale` when that age is over 24

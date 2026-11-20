@@ -1208,7 +1208,7 @@ test("ARK-T116 a none project lists each branch with commits beyond its base, be
     eventLines(directory).find((line) => line.includes('"worktree.created"')) as string,
   ).data as { branch: string; base: string };
 
-  // No commit yet: the local-only line replaces `merge requests: none`, and no branch line.
+  // No commit yet: the local-only line, and no branch line.
   const before = ark("status", runId);
   expect(before.code).toBe(0);
   expect(before.out).toContain("merge requests: none (local only)\n");
@@ -1418,24 +1418,24 @@ test("ARK-T108 status exits 0 and still lists the run and its branches when the 
     expect(lines.some((line) => line.startsWith("branch ") && line.includes(repo))).toBe(true);
 });
 
-test("ARK-T470 ARK-295-AC5 an open project and a project with no ark.yml print the unchanged merge requests line", () => {
+test("ARK-T470 an open project and a project with no ark.yml print `merge requests: not opened yet` for a run with no MR", () => {
   const { runId, directory, worktree } = worktreeRun({ merge_requests: "open" });
   commitIn(worktree, "one");
   const open = ark("status", runId);
   expect(open.code).toBe(0);
-  expect(open.out).toMatch(/^merge requests: none$/m);
+  expect(open.out).toMatch(/^merge requests: not opened yet$/m);
   expect(open.out).not.toContain("(local only)");
   expect(localBranchLines(runId)).toEqual([]);
 
   rmSync(join(directory, "../../ark.yml"));
   const missing = ark("status", runId);
   expect(missing.code).toBe(0);
-  expect(missing.out).toMatch(/^merge requests: none$/m);
+  expect(missing.out).toMatch(/^merge requests: not opened yet$/m);
   expect(missing.out).not.toContain("(local only)");
   expect(localBranchLines(runId)).toEqual([]);
 });
 
-test("ARK-T471 ARK-295-AC5 ark status counts a none project with an invalid unrelated field as open instead of failing", () => {
+test("ARK-T471 ark status counts a none project with an invalid unrelated field as open and prints `merge requests: not opened yet`", () => {
   const { runId, directory } = worktreeRun({ merge_requests: "none" });
   const configFile = join(directory, "../../ark.yml");
   writeFileSync(
@@ -1444,8 +1444,50 @@ test("ARK-T471 ARK-295-AC5 ark status counts a none project with an invalid unre
   );
   const result = ark("status", runId);
   expect(result.code).toBe(0);
-  expect(result.out).toMatch(/^merge requests: none$/m);
+  expect(result.out).toMatch(/^merge requests: not opened yet$/m);
   expect(result.out).not.toContain("(local only)");
+});
+
+test("ARK-T696 ark status names an unopened MR: open project says `not opened yet`, none project says `(local only)`, a run with MRs lists them", () => {
+  // `worktreeRun` rewrites the one project file and a ticket has one open run: read each run, then abort it.
+  const unopened = worktreeRun({ merge_requests: "open" });
+  const unopenedStatus = ark("status", unopened.runId);
+  expect(unopenedStatus.code).toBe(0);
+  expect(unopenedStatus.out).toMatch(/^merge requests: not opened yet$/m);
+  expect(unopenedStatus.out).not.toMatch(/^merge requests: none/m);
+  expect(unopenedStatus.out).not.toContain("(local only)");
+
+  expect(ark("run", "close", unopened.runId, "aborted").code).toBe(0);
+  const localOnly = worktreeRun({ merge_requests: "none" });
+  const localOnlyStatus = ark("status", localOnly.runId);
+  expect(localOnlyStatus.code).toBe(0);
+  expect(localOnlyStatus.out).toContain("merge requests: none (local only)\n");
+  expect(localOnlyStatus.out).not.toContain("not opened yet");
+  expect(localOnlyStatus.out).not.toMatch(/^merge requests: none$/m);
+  expect(ark("run", "close", localOnly.runId, "aborted").code).toBe(0);
+
+  const listed = worktreeRun({ merge_requests: "open" });
+  appendEvent(listed.directory, "merge_request.opened", {
+    repo: ".",
+    url: "https://example.com/mr/1",
+    number: 1,
+  });
+  appendEvent(listed.directory, "merge_request.opened", {
+    repo: "docs",
+    url: "https://example.com/mr/2",
+    number: 2,
+  });
+  const listedStatus = ark("status", listed.runId);
+  expect(listedStatus.code).toBe(0);
+  // `ark status` prints `none` elsewhere (current step, waiting gate, last test), so read only the MR block.
+  const lines = listedStatus.out.split("\n");
+  const header = lines.findIndex((line) => line.startsWith("merge requests:"));
+  expect(header).toBeGreaterThan(-1);
+  expect(lines[header]).not.toMatch(/not opened yet|none/);
+  expect(lines.slice(header + 1, header + 3)).toEqual([
+    "  . https://example.com/mr/1",
+    "  docs https://example.com/mr/2",
+  ]);
 });
 
 /** A run with gates.escalation auto whose spent budget `ark run step ... start` answers by auto. */

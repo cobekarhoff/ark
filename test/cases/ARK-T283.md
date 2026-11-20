@@ -6,7 +6,7 @@ technique: characterization snapshot (golden master) with boundary values on arg
 priority: high
 risk: Moving the table into cli/commands/ drops, reorders or alters a command - usage, description, the arity of a flag its usage advertises, minimum or maximum - in a way that --help alone does not show and that moves docs/reference/cli.md with it
 status: active
-changed_by: 2026-11-14-ARK-508-1
+changed_by: 2026-11-19-ARK-464-1
 ---
 
 ## Objective
@@ -26,6 +26,8 @@ ARK-496 changed the `run step` description in the snapshot, together with `cli/c
 ARK-488 changes the `gate record` record: its usage gains `[--criteria <file>]`, `--criteria` is a value flag (the probe of step 3b must report `--criteria needs a value`), and its description names the criteria file (the mapping with `acceptance_criteria`, the run-folder-relative or absolute path, the refusals that write nothing). Minimum 3 and maximum 4 stay. Serves ARK-488/AC1.
 
 ARK-508 changes the `run step` description in the snapshot, together with `cli/commands/run.ts` and `docs/reference/cli.md`: it adds the validator rules to what the spec of `ark run step <run> <step> start` holds. No other record changes.
+
+ARK-464 changes the `status` description in the snapshot, together with `cli/commands/run.ts` and `docs/reference/cli.md`: it adds one sentence on the `merge requests:` line (`merge requests: not opened yet` for an open project whose run has no MR). `bun scripts/cli-reference.ts` regenerates `docs/reference/cli.md` only; the snapshot record of `status` is refreshed with `UPDATE_COMMAND_TABLE=1 bun test test/command-table.test.ts`. The contract of this case does not change. No other record changes.
 
 ## Preconditions
 
@@ -58,6 +60,7 @@ ARK-508 changes the `run step` description in the snapshot, together with `cli/c
 - `test/command-table.snapshot.json` holds the ARK-380 descriptions of `run close`, `merge-request open` and `status` (the security scan and its refusals, the `security.accepted` block, the `Security` section of the MR body, and the `scanner: <tool> is not installed` line of `ark status`); the snapshot is regenerated together with `cli/commands/run.ts` and `cli/commands/merge-request.ts`, and the case still compares the process output with it.
 - The snapshot holds 36 records. `companions sync`, `companion ask`, `companion answer`, `companion advise` and `companion propose` appear in it between `chief handover` and `ui`, with their usage, description, flags (`--project` is a value flag) and argument bounds. The `chief state` description holds the sentence about `ark companions sync` and its `Companions` section, and the `ui` description the Companions view, `GET /api/companions` and the three companion write routes.
 - `gate record` (ARK-488): its usage and its flags hold the `--criteria` value flag, and its description holds the sentence about the criteria file; its minimum and maximum are 3 and 4. Compared with the snapshot as ARK-494 left it, no other field of any record changes for ARK-488.
+- `status` (ARK-464): `test/command-table.snapshot.json` holds the `status` description with the `merge requests: not opened yet` sentence, refreshed with `UPDATE_COMMAND_TABLE=1 bun test test/command-table.test.ts` together with the `cli/commands/run.ts` change (`docs/reference/cli.md` is regenerated separately by `bun scripts/cli-reference.ts`); the case still compares the process output with the snapshot, and every other record is unchanged.
 
 ## Screenshot checkpoints
 

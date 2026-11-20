@@ -1,12 +1,12 @@
 ---
 id: ARK-T317
-title: ARK-T317 ARK-309-AC8 a filter change on Home, Runs and Roadmap sends no request, and / and /nope answer with a p95 under 200 ms
+title: ARK-T317 a filter change on Home, Runs and Roadmap sends no request, and / and /nope answer with a p95 under 200 ms
 level: e2e
 technique: request accounting around a filter change; p95 of two routes
 priority: medium
 risk: "a filter change reads the hub again; `/` or `/nope` takes 200 ms or more at p95"
 status: active
-changed_by: 2026-11-12-ARK-335-1
+changed_by: 2026-11-15-ARK-493-1
 ---
 
 ## Objective

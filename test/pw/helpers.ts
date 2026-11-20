@@ -223,10 +223,15 @@ function quietProcessTools(): { ARK_PS: string; ARK_LSOF: string } {
 
 export type StartedHub = { process: ChildProcess; baseUrl: string };
 
-/** Starts `bun hub/main.ts --port 0` and resolves once it prints its address. `useCleanup` kills it. */
+/**
+ * Starts `bun hub/main.ts --port 0` and resolves once it prints its address. `useCleanup` kills it.
+ * ARK_PROVIDER_LIMITS_MS is 2 s unless a spec sets it, and it wins over ARK_HUB_INTERVAL_MS for the provider limits
+ * (hub/snapshot.ts): under load the first `omp usage` read can hit its 10 s timeout, and at the default 60 s
+ * interval the retry comes after the 60 s chip waits end.
+ */
 export async function startHub(): Promise<StartedHub> {
   const hub = spawn("bun", [join(repositoryRoot, "hub", "main.ts"), "--port", "0"], {
-    env: { ...quietProcessTools(), ...process.env },
+    env: { ...quietProcessTools(), ARK_PROVIDER_LIMITS_MS: "2000", ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
   hubs.push(hub);
