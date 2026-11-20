@@ -28,7 +28,7 @@ Expected: When a sync, merge-request or post-mr test starts a run or builds a sc
 ## Expected results
 
 - Exit code 0, `1 pass`, no non-zero `skip` count.
-- At least one git-heavy test is found in each of the three files, and none lacks a timeout or has one below 30000 milliseconds. This covers the four `generatedScenario(` tests of `test/sync.test.ts`, the `submoduleRun(` and `openRun(` tests of `test/post-mr.test.ts`.
+- At least one git-heavy test is found in each of the three files, and none lacks a timeout or has one below 30000 milliseconds. This covers the five `generatedScenario(` tests of `test/sync.test.ts` (the four ARK-T384 tests and ARK-T385), the `submoduleRun(` and `openRun(` tests of `test/post-mr.test.ts`.
 - The refusals of the guard (no limit, a constant below 30 s, an unresolved name, helper definitions) are proven by ARK-T30.
 
 ## Screenshot checkpoints
