@@ -1076,19 +1076,21 @@ const treeState = (worktree: string) => ({
   generated: readFileSync(join(worktree, "GEN.txt"), "utf8"),
 });
 
-test("ARK-T384 a merge that conflicts only in a generated path is regenerated, committed and pushed as a successful sync", () => {
-  const scenario = generatedScenario(["GEN.txt"]);
-  const worktree = scenario.worktree;
-  appendEvent(scenario.runDirectory, "merge_request.opened", {
-    repo: ".",
-    url: "https://github.com/acme/main/pull/1",
-    number: 1,
-  });
-  leaveUntracked(worktree);
-  const headBefore = git(worktree, "rev-parse", "HEAD");
-  const statusBefore = git(worktree, "status", "--porcelain");
+test(
+  "ARK-T384 a merge that conflicts only in a generated path is regenerated, committed and pushed as a successful sync",
+  () => {
+    const scenario = generatedScenario(["GEN.txt"]);
+    const worktree = scenario.worktree;
+    appendEvent(scenario.runDirectory, "merge_request.opened", {
+      repo: ".",
+      url: "https://github.com/acme/main/pull/1",
+      number: 1,
+    });
+    leaveUntracked(worktree);
+    const headBefore = git(worktree, "rev-parse", "HEAD");
+    const statusBefore = git(worktree, "status", "--porcelain");
 
-  const synced = ark("worktree", "sync", scenario.runId);
+    const synced = ark("worktree", "sync", scenario.runId);
 
     expect(synced.code).toBe(0);
     const head = git(worktree, "rev-parse", "HEAD");
@@ -1117,19 +1119,61 @@ test("ARK-T384 a merge that conflicts only in a generated path is regenerated, c
   { timeout: 120_000 },
 );
 
-test("ARK-T384 a generated command that fails, leaves a conflict marker or dirties the tree aborts the sync as a plain conflict", () => {
-  const variants = [
-    { command: "true", untracked: [] },
-    { command: "false", untracked: [] },
-    { command: "sh gen.sh && echo x > other.txt", untracked: ["other.txt"] },
-    { command: "sh gen.sh && echo x >> src.txt", untracked: [] },
-  ];
-  for (const variant of variants) {
-    const scenario = generatedScenario(["GEN.txt"], {
-      config: { generated: [{ path: "GEN.txt", command: variant.command }] },
+test(
+  "ARK-T384 a generated command that fails, leaves a conflict marker or dirties the tree aborts the sync as a plain conflict",
+  () => {
+    const variants = [
+      { command: "true", untracked: [] },
+      { command: "false", untracked: [] },
+      { command: "sh gen.sh && echo x > other.txt", untracked: ["other.txt"] },
+      { command: "sh gen.sh && echo x >> src.txt", untracked: [] },
+    ];
+    for (const variant of variants) {
+      const scenario = generatedScenario(["GEN.txt"], {
+        config: { generated: [{ path: "GEN.txt", command: variant.command }] },
+      });
+      const worktree = scenario.worktree;
+      leaveUntracked(worktree);
+      const before = treeState(worktree);
+
+      const synced = ark("worktree", "sync", scenario.runId);
+
+      expect(synced.code, variant.command).toBe(1);
+      expect(synced.err, variant.command).toContain("repo .:");
+      // head, GEN.txt and the index are as before; the status differs only by the untracked file the command wrote, which stays
+      const after = treeState(worktree);
+      expect(after.head, variant.command).toBe(before.head);
+      expect(after.generated, variant.command).toBe(before.generated);
+      expect(
+        after.status
+          .split("\n")
+          .filter((line) => !variant.untracked.some((file) => line === `?? ${file}`)),
+        variant.command,
+      ).toEqual(before.status.split("\n"));
+      expect(hasMergeHead(worktree), variant.command).toBe(false);
+      expect(syncedEvents(scenario.runDirectory), variant.command).toEqual([
+        { repo: ".", conflict: true, conflicts: ["GEN.txt"] },
+      ]);
+      expect(syncConflictRepos(scenario.runDirectory), variant.command).toEqual(["."]);
+      // the sync never cleans: what the worktree or the command left untracked stays
+      for (const file of ["lnk", "scratch.txt", ...variant.untracked])
+        expect(existsSync(join(worktree, file)), `${variant.command}: ${file}`).toBe(true);
+    }
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T384 a failed merge with no unmerged path never runs the generated command",
+  () => {
+    const scenario = generatedScenario([], {
+      config: { generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }] },
+      onRun: (worktree) => writeFileSync(join(worktree, "GEN.txt"), "hand edited\n"),
+      onOrigin: (clone) => writeFileSync(join(clone, "new.txt"), "origin\n"),
     });
     const worktree = scenario.worktree;
     leaveUntracked(worktree);
+    writeFileSync(join(worktree, "new.txt"), "untracked\n"); // git refuses to overwrite it, nothing is unmerged
     const before = treeState(worktree);
 
     const synced = ark("worktree", "sync", scenario.runId);
@@ -1147,18 +1191,17 @@ test("ARK-T384 a generated command that fails, leaves a conflict marker or dirti
   { timeout: 120_000 },
 );
 
-test("ARK-T384 a failed merge with no unmerged path never runs the generated command", () => {
-  const scenario = generatedScenario([], {
-    config: { generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }] },
-    onRun: (worktree) => writeFileSync(join(worktree, "GEN.txt"), "hand edited\n"),
-    onOrigin: (clone) => writeFileSync(join(clone, "new.txt"), "origin\n"),
-  });
-  const worktree = scenario.worktree;
-  leaveUntracked(worktree);
-  writeFileSync(join(worktree, "new.txt"), "untracked\n"); // git refuses to overwrite it, nothing is unmerged
-  const before = treeState(worktree);
+test(
+  "ARK-T384 an unstaged edit to an unrelated tracked file survives and the sync fails as a plain conflict",
+  () => {
+    const scenario = generatedScenario(["GEN.txt"], {
+      config: { generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }] },
+    });
+    const worktree = scenario.worktree;
+    writeFileSync(join(worktree, "notes/a.md"), "UNCOMMITTED WORK\n");
+    const headBefore = git(worktree, "rev-parse", "HEAD");
 
-  const synced = ark("worktree", "sync", scenario.runId);
+    const synced = ark("worktree", "sync", scenario.runId);
 
     expect(synced.code).toBe(1);
     expect(readFileSync(join(worktree, "notes/a.md"), "utf8")).toBe("UNCOMMITTED WORK\n");
@@ -1172,26 +1215,6 @@ test("ARK-T384 a failed merge with no unmerged path never runs the generated com
   },
   { timeout: 120_000 },
 );
-
-test("ARK-T384 an unstaged edit to an unrelated tracked file survives and the sync fails as a plain conflict", () => {
-  const scenario = generatedScenario(["GEN.txt"], {
-    config: { generated: [{ path: "GEN.txt", command: "sh gen.sh && touch gen-ran" }] },
-  });
-  const worktree = scenario.worktree;
-  writeFileSync(join(worktree, "notes/a.md"), "UNCOMMITTED WORK\n");
-  const headBefore = git(worktree, "rev-parse", "HEAD");
-
-  const synced = ark("worktree", "sync", scenario.runId);
-
-  expect(synced.code).toBe(1);
-  expect(readFileSync(join(worktree, "notes/a.md"), "utf8")).toBe("UNCOMMITTED WORK\n");
-  expect(existsSync(join(worktree, "gen-ran"))).toBe(false);
-  expect(git(worktree, "rev-parse", "HEAD")).toBe(headBefore);
-  expect(hasMergeHead(worktree)).toBe(false);
-  expect(syncedEvents(scenario.runDirectory)).toEqual([
-    { repo: ".", conflict: true, conflicts: ["GEN.txt"] },
-  ]);
-  expect(syncConflictRepos(scenario.runDirectory)).toEqual(["."]);
 
 test("ARK-T384 ark status refuses a generated entry with an empty path, an empty command or a repeated path", () => {
   withFakeHarnesses(["pi/task"], () => {
