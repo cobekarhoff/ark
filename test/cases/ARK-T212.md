@@ -4,7 +4,7 @@ title: ARK-T212 The next start of an interrupted step restores the recorded sess
 level: integration
 technique: decision table (session recorded, none or unknown, harness without restore command, restore fails)
 priority: high
-risk: the restart restores although the plan's harness or model changed (owned by ARK-T719); the restart ignores the recorded session and loses the worker's context; it runs a restore with the wrong or an unknown session; a failed restore leaves the step running with no worker instead of falling back to a fresh worker; the fresh brief omits the interrupted notice or the `git status`/`git diff` instruction, so a worker redoes or overwrites the work left behind
+risk: the restored worker's event omits the dead worker's `model`, so a later switch compares against nothing; the restart ignores the recorded session and loses the worker's context; it runs a restore with the wrong or an unknown session; a failed restore leaves the step running with no worker instead of falling back to a fresh worker; the fresh brief omits the interrupted notice or the `git status`/`git diff` instruction, so a worker redoes or overwrites the work left behind
 status: active
 changed_by: 2026-11-20-ARK-595-1
 ---
@@ -29,7 +29,7 @@ Prove that the next start of an interrupted step restores the recorded session w
 
 ## Expected results
 
-- (a) the system shall print a `worker: restored` line, shall run `omp --restore <session>` with the recorded path in a terminal of the step's worktree, bound as a supervised Dispatch, and shall make no fresh `worker-start --agent` call. The events shall hold a new worker event for the same step.
+- (a) the system shall print a `worker: restored` line, shall run `omp --restore <session>` with the recorded path in a terminal of the step's worktree, bound as a supervised Dispatch, and shall make no fresh `worker-start --agent` call. The events shall hold a new `worker.started` for the same step with `harness: omp` and `model: A`, the dead worker's own pair.
 - (b), (c) the system shall print a line that starts `worker: fresh`, shall start a fresh worker whose spec says that an earlier worker was interrupted and that it must read `git status` and `git diff` before it goes on, and shall run no restore command.
 - (d) when the restore fails, the system shall fall back to the fresh worker with the same spec text, the step shall show `running` with the new worker, and no terminal of the failed restore shall stay in the fake Orca.
 - No case shall start a real omp or a real Orca process.
