@@ -458,24 +458,40 @@ const isLive = (worker: OrcaWorker): boolean => {
 export async function readOrca(
   openRuns: { run: string; project: string }[],
 ): Promise<OrcaValue | null> {
-  // The parse and map work of a large Orca answer, and the spawns of two reads for each open run,
-  // run in a thread of their own: on the hub's loop they held it over 200 ms (ARK-606, as ARK-533).
-  // `env` is the current one: a worker otherwise sees only the environment the process started with,
-  // not a PATH or timeout a test sets later.
+  const reply = await inOrcaWorker<{
+    agents: [string, Agent[]][];
+    waits: [string, Wait[]][];
+  } | null>({ kind: "pass", openRuns });
+  return reply && { agents: new Map(reply.agents), waits: new Map(reply.waits) };
+}
+
+/** What hub/orca-worker.ts runs: the Orca pass of `readOrca`, or the directory read of `readDirectory`. */
+export type OrcaJob =
+  | { kind: "pass"; openRuns: { run: string; project: string }[] }
+  | {
+      kind: "directory";
+      arkRuns: { run: string; closed: boolean }[];
+      seen: string[];
+      closed: [string, RunWorkers][];
+    };
+
+/**
+ * Runs one Orca job in a thread of its own: the parse and map work of a large Orca answer, and the spawns of
+ * two reads for each open run, held the hub's loop over 200 ms (ARK-606, as ARK-533). `env` is the current
+ * one: a worker otherwise sees only the environment the process started with, not a PATH or timeout a test
+ * sets later.
+ */
+async function inOrcaWorker<T>(job: OrcaJob): Promise<T> {
   const worker = new Worker(new URL("./orca-worker.ts", import.meta.url), {
     env: process.env as Record<string, string>,
   });
   try {
-    const reply = await new Promise<{
-      agents: [string, Agent[]][];
-      waits: [string, Wait[]][];
-    } | null>((resolve, reject) => {
+    return await new Promise<T>((resolve, reject) => {
       worker.onmessage = (event) => resolve(event.data);
       worker.onerror = (event) => reject(new Error(event.message));
       worker.addEventListener("close", () => reject(new Error("the orca worker closed")));
-      worker.postMessage(openRuns);
+      worker.postMessage(job);
     });
-    return reply && { agents: new Map(reply.agents), waits: new Map(reply.waits) };
   } finally {
     worker.terminate();
   }
@@ -735,6 +751,25 @@ export async function readDirectory(
   messages: InboxMessage[],
   closedWorkers: Map<string, RunWorkers>,
 ): Promise<Directory | null> {
+  // The conversation read spawns two Orca reads for each run that has a message: off the loop, as `readOrca`.
+  const seen = messages
+    .flatMap((message) => [message.run_id, message.to_handle, message.from_handle])
+    .filter((handle): handle is string => handle !== null);
+  const reply = await inOrcaWorker<{
+    directory: Directory;
+    closed: [string, RunWorkers][];
+  } | null>({ kind: "directory", arkRuns, seen, closed: [...closedWorkers] });
+  if (!reply) return null;
+  for (const [arkRun, workers] of reply.closed) closedWorkers.set(arkRun, workers);
+  return reply.directory;
+}
+
+/** The directory read itself, run by hub/orca-worker.ts. Null when `run-list` fails. */
+export async function readDirectoryPass(
+  arkRuns: { run: string; closed: boolean }[],
+  seen: Set<string>,
+  closedWorkers: Map<string, RunWorkers>,
+): Promise<Directory | null> {
   const runList = await orcaPages<OrcaRun>("run-list", "runs", ["--full"], orcaTimeoutMilliseconds);
   if (!runList.ok) return null;
   const chiefRuns = runList.value.filter((orcaRun) =>
@@ -761,9 +796,6 @@ export async function readDirectory(
     ].filter((handle): handle is string => typeof handle === "string");
     return [{ arkRun, orcaRun: orcaRun.id, handles }];
   });
-  const seen = new Set(
-    messages.flatMap((message) => [message.run_id, message.to_handle, message.from_handle]),
-  );
   const wanted = leads.filter(
     (lead) =>
       arkRuns.some((known) => known.run === lead.arkRun) &&
