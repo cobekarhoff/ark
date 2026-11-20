@@ -460,7 +460,9 @@ export async function readOrca(
 ): Promise<OrcaValue | null> {
   // The parse and map work of a large Orca answer, and the spawns of two reads for each open run,
   // run in a thread of their own: on the hub's loop they held it over 200 ms (ARK-606, as ARK-533).
-  const worker = new Worker(new URL("./orca-worker.ts", import.meta.url));
+  // `env` is the current one: a worker otherwise sees only the environment the process started with,
+  // not a PATH or timeout a test sets later.
+  const worker = new Worker(new URL("./orca-worker.ts", import.meta.url), { env: process.env });
   try {
     const reply = await new Promise<{
       agents: [string, Agent[]][];
