@@ -17,7 +17,6 @@ import {
   readProviderLimits,
   readQueues,
   readChiefUnreads,
-  signatureOf,
   type InboxRead,
   type RunWorkers,
   type QueueRead,
@@ -131,6 +130,8 @@ const lagTimerMilliseconds = 100;
 const lagWindowMilliseconds = 60_000;
 /** The hub logs a loop lag above this. */
 const lagLogMilliseconds = 1000;
+/** The longest a request waits for the first inbox read (ARK-533: every route answers within 1 s). */
+const firstConversationWaitMilliseconds = 250;
 
 const questions: Record<GateKind, (title: string) => string> = {
   criteria: (title) => `Approve the acceptance criteria for "${title}"?`,
@@ -197,6 +198,8 @@ export function createSnapshotReader() {
   // The latest unread read of each project, failures included: like `queueReads`, so a failing inbox is an `unavailable` entry and never a 0.
   let chiefUnreadReads: ProjectUnread[] | null = null;
   const costs = new Map<string, { key: string; cost: RunCost }>();
+  // The model of each owner's newest session, by run directory: `modelsOf` maps every session file of the run, so it is read again only when the index or the run's events moved.
+  const sessionModelsOf = new Map<string, { key: string; models: Map<string, string> }>();
   // Git facts of multi-repo runs (branch commits ahead, submodule pointers), by run directory. Read by `repoFactsLoop`, never in `viewOf`.
   // `key` is the event count: a closed run is read once; an open run's branches move without an event, so its entry is read again each tick.
   const repoFacts = new Map<string, { key: number; facts: RepoFacts }>();
@@ -225,7 +228,7 @@ export function createSnapshotReader() {
   let lastJson = "";
 
   function costOf(run: ArkRun, closed: boolean): RunCost {
-    const metrics = closed ? signatureOf(join(run.directory, "metrics.json")) : "";
+    const metrics = closed ? run.metrics : "";
     // A closed run's cost is its `metrics.json`: a new usage version never changes it (a re-read of every closed run on each version held the loop, ARK-533).
     const key = closed
       ? `${run.state.events}|${metrics}`
@@ -273,12 +276,21 @@ export function createSnapshotReader() {
     }
     // A model that Orca does not report comes from the last message of the agent's session file
     // (the parse the cost already holds), then from the plan or `roles.chief`, labelled.
-    const sessionModels = usage.modelsOf(
-      run.directory,
-      run.windows,
-      Date.parse(run.events[0].time),
-      stageTimes(run.events),
-    );
+    const modelsKey = `${usage.version}|${run.state.events}`;
+    let modelsMemo = sessionModelsOf.get(run.directory);
+    if (modelsMemo?.key !== modelsKey) {
+      modelsMemo = {
+        key: modelsKey,
+        models: usage.modelsOf(
+          run.directory,
+          run.windows,
+          Date.parse(run.events[0].time),
+          stageTimes(run.events),
+        ),
+      };
+      sessionModelsOf.set(run.directory, modelsMemo);
+    }
+    const sessionModels = modelsMemo.models;
     return agents.map((agent) => {
       const owner =
         agent.step ??
@@ -1074,7 +1086,10 @@ export function createSnapshotReader() {
      * first read of a connected page. Null when no read has succeeded (no page connected, or Orca down), or for a run with no events.
      */
     async conversation(query: ConversationQuery): Promise<ConversationReply | null> {
-      if (!conversation) await conversationFirst;
+      // A cold first read takes an inbox call and up to two seconds for the handle directory: wait a short bound, then answer
+      // "no read yet" (503). The read keeps running.
+      if (!conversation && conversationFirst)
+        await Promise.race([conversationFirst, Bun.sleep(firstConversationWaitMilliseconds)]);
       const held = conversation;
       if (!held) return null;
       const wanted = (slots.ark.value?.runs ?? []).filter(

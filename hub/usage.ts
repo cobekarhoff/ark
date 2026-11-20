@@ -6,6 +6,7 @@ import { type Harness, sessionRoots } from "../cli/usage/index.ts";
 import type { StageTimes, StepWindow } from "../cli/events.ts";
 import { ownersOf, stageOf } from "../cli/usage/owners.ts";
 import type { SessionFile, TranscriptPage, TranscriptResult } from "./types.ts";
+import { yielder } from "./yield.ts";
 import type {
   ConversationInput,
   ConversationQuery,
@@ -181,18 +182,22 @@ export class UsageIndex {
     return this.#inside.get(directory) ?? [];
   }
 
-  /** One walk of each entry's cwd up its folders, looking for a folder that is a run's: no entry is compared with every run. */
-  #indexInside(): void {
+  /**
+   * One walk of each entry's cwd up its folders, looking for a folder that is a run's: no entry is compared with every run.
+   * A generator that yields every few hundred entries: `#indexInsideAsync` lets a request run between the steps (the walk held the loop for 130 ms, ARK-533).
+   */
+  *#walkInside(): Generator<void, Map<string, [string, Entry][]>> {
     const owners = new Map<string, Set<string>>();
-    this.#inside.clear();
+    const inside = new Map<string, [string, Entry][]>();
     for (const [directory, parents] of this.#parents) {
-      this.#inside.set(directory, []);
+      inside.set(directory, []);
       for (const parent of parents) {
         const known = owners.get(parent) ?? new Set<string>();
         known.add(directory);
         owners.set(parent, known);
       }
     }
+    let walked = 0;
     for (const pair of this.#entries) {
       const hit = new Set<string>();
       let at = pair[1].cwd ?? "";
@@ -201,9 +206,35 @@ export class UsageIndex {
         const cut = at.lastIndexOf(sep);
         at = cut < 0 ? "" : at.slice(0, cut);
       }
-      for (const directory of hit) this.#inside.get(directory)!.push(pair);
+      for (const directory of hit) inside.get(directory)!.push(pair);
+      if (++walked % 200 === 0) yield;
     }
-    this.#insideLayout = this.#layout;
+    return inside;
+  }
+
+  #indexInside(): void {
+    const layout = this.#layout;
+    const walk = this.#walkInside();
+    let step = walk.next();
+    while (!step.done) step = walk.next();
+    this.#inside = step.value;
+    this.#insideLayout = layout;
+  }
+
+  /** The same index, built with a yield between steps. Dropped when the layout moved meanwhile: the next `#insideOf` builds it again. */
+  async #indexInsideAsync(): Promise<void> {
+    const layout = this.#layout;
+    if (this.#insideLayout === layout) return;
+    const yieldIfLong = yielder();
+    const walk = this.#walkInside();
+    let step = walk.next();
+    while (!step.done) {
+      await yieldIfLong();
+      step = walk.next();
+    }
+    if (this.#layout !== layout) return;
+    this.#inside = step.value;
+    this.#insideLayout = layout;
   }
 
   /**
@@ -222,8 +253,11 @@ export class UsageIndex {
     for (const { harness, root, pattern } of sessionRoots()) {
       if (!existsSync(root)) continue;
       const files: string[] = [];
-      for await (const relative of new Bun.Glob(pattern).scan({ cwd: root, dot: true }))
+      const yieldIfLong = yielder();
+      for await (const relative of new Bun.Glob(pattern).scan({ cwd: root, dot: true })) {
         files.push(join(root, relative));
+        await yieldIfLong();
+      }
       // Async stats in batches: each await lets a request run (a `statSync` of each file held the loop, ARK-533).
       for (let from = 0; from < files.length; from += statBatch) {
         await Promise.all(
@@ -281,10 +315,13 @@ export class UsageIndex {
     );
     const parses: Promise<void>[] = [];
     await this.remember(directories); // all folders known before the one index pass
+    await this.#indexInsideAsync();
     const insideOpen = new Set<Entry>(
       directories.flatMap((directory) => this.#insideOf(directory).map(([, entry]) => entry)),
     );
+    const yieldIfLong = yielder();
     for (const [file, entry] of this.#entries) {
+      await yieldIfLong();
       if (entry.failed) continue;
       const wanted = companionFiles.has(file) || insideOpen.has(entry);
       if (!wanted) {
