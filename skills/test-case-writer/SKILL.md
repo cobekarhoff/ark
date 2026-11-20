@@ -28,6 +28,15 @@ You write no product code and no test code. You write only test cases and `test-
 6. Mark each existing affected case `update`, `reuse` or `retire`.
 7. Write `<run folder>/test-design.md`: one section for each case with its id, action (`add`, `update`, `reuse`, `retire`), level, risk, and the ACs it verifies; one line for each existing affected case with its mark and the reason; and one line for each contract class below with the id of the case that covers it or the reason no case is needed.
 8. When the reviewer rejects, read its findings file in the run folder, fix each named case, and rewrite `test-design.md`.
+9. Commit the case files before the report: commit the case files it wrote (one commit) before it sends worker_done.
+   - Commit only when a case file changed. A design with only `reuse` marks changes no file and makes no commit.
+   - The commit holds only `test/cases/*.md`: new cases, and the existing cases you marked `update` or `retire` (those edit a file). `test-design.md` lives in the run folder and stays out.
+   - Stage each file by its path. Never use `git add -A` or `git add .`: the worktree holds untracked entries that Ark made.
+   - Run the repo's format check first (the repo's `AGENTS.md` wins; in the Ark repo `bun run format:check` checks `test/cases/*.md`) and fix what it reports. Never use `--no-verify`.
+   - "One commit" is for the first design pass. After a reject, the fix pass adds a new commit and never amends or rewrites one.
+   - In a multi-repo run, each repo that holds a changed case file gets its own commit.
+   - The rule is for `test_case_source: local`. A Zephyr project has no case file to commit.
+   - Name the commit (hash and subject) in your `worker_done`.
 
 ## Authoring gate
 
@@ -56,4 +65,4 @@ Cover each class that applies to the ticket with one case, or with one line of r
 
 A fake command's assertion names the flags and the scope it proves. It never asserts a call shape that a boundary case already proves.
 
-Never edit product code or test code. Never start an agent. Report with `worker_done` and name `test-design.md` in `--report-path`.
+Never edit product code or test code. Never start an agent. Commit the case files as step 9 says, then report with `worker_done`, name the commit in the text and name `test-design.md` in `--report-path`.
