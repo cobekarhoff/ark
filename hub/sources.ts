@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { readChiefUnread } from "../cli/chief.ts";
 import { now } from "../cli/clock.ts";
@@ -143,6 +143,27 @@ export function readTicketDocument(entry: TicketFile): { document: TicketDocumen
 
 const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
+/** `signatureOf` through the thread pool: a slow stat on a loaded host never holds the event loop (ARK-533). */
+const signatureOfAsync = async (file: string): Promise<string | null> => {
+  try {
+    const stats = await stat(file);
+    return `${stats.size}:${stats.mtimeMs}`;
+  } catch {
+    return null;
+  }
+};
+
+/** Yields to the loop once `workBudgetMilliseconds` of work ran since the last yield, so no stretch of a pass holds the loop long (ARK-533). */
+const workBudgetMilliseconds = 20;
+const yielder = () => {
+  let since = performance.now();
+  return async () => {
+    if (performance.now() - since < workBudgetMilliseconds) return;
+    await yieldToLoop();
+    since = performance.now();
+  };
+};
+
 /**
  * Reads Ark's files again only where a file changed (size and mtime). A run whose log is being
  * written at this moment can end on a half line: that run keeps its last good value.
@@ -201,11 +222,11 @@ export function createArkReader() {
       : { error: result.errors.map((error) => `line ${error.line}: ${error.message}`).join(" ") };
   }
 
-  function readRun(directory: string): ArkRun | null {
+  async function readRun(directory: string): Promise<ArkRun | null> {
     const log = join(directory, "events.ndjson");
-    const logSignature = signatureOf(log);
+    const logSignature = await signatureOfAsync(log);
     if (logSignature === null) return null;
-    const signature = `${logSignature}|${signatureOf(join(directory, "plan.yml"))}`;
+    const signature = `${logSignature}|${await signatureOfAsync(join(directory, "plan.yml"))}`;
     const known = runCache.get(directory);
     if (known?.signature === signature) return known.run;
     try {
@@ -233,8 +254,8 @@ export function createArkReader() {
     }
   }
 
-  function readTicket(project: string, file: string, name: string) {
-    const signature = signatureOf(file);
+  async function readTicket(project: string, file: string, name: string) {
+    const signature = await signatureOfAsync(file);
     if (signature === null) return null;
     const known = ticketCache.get(file);
     if (known?.signature === signature) return known;
@@ -253,13 +274,14 @@ export function createArkReader() {
     const tickets: TicketView[] = [];
     const ticketFiles = new Map<TicketView, TicketFile>();
     const roadmap: Record<string, ProjectRoadmap> = {};
+    const yieldIfLong = yielder();
     for (const project of listProjects()) {
       const runsRoot = runsDirectory(project);
       if (existsSync(runsRoot)) {
         for (const name of readdirSync(runsRoot)) {
-          const run = readRun(join(runsRoot, name));
+          const run = await readRun(join(runsRoot, name));
           if (run) runs.push(run);
-          await yieldToLoop();
+          await yieldIfLong();
         }
       }
       const ticketsRoot = join(projectDirectory(project), "tickets");
@@ -268,8 +290,8 @@ export function createArkReader() {
         for (const name of readdirSync(ticketsRoot).sort()) {
           if (!ticketFile.test(name)) continue;
           const file = join(ticketsRoot, name);
-          const listed = readTicket(project, file, name);
-          await yieldToLoop();
+          const listed = await readTicket(project, file, name);
+          await yieldIfLong();
           if (!listed) continue;
           projectTickets.push(listed.ticket);
           ticketFiles.set(listed.ticket, { file, document: listed.document });
@@ -333,6 +355,8 @@ export async function readQueues(): Promise<Map<string, QueueRead>> {
   const reads = await Promise.all(
     projects.map(async (project): Promise<QueueRead> => {
       let concurrency: number | null = null;
+      // The first `hubConfig` of a project walks its workspace: one project's walk per loop turn.
+      await yieldToLoop();
       try {
         concurrency = hubConfig(project).concurrency;
       } catch {

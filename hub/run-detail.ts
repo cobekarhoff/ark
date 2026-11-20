@@ -115,7 +115,11 @@ const shownPattern = /^(findings|results)\/[^/]+$/;
  * first (no `..`, `.`, empty or backslash segment, no NUL), so it is rejected before any join. Then
  * the real path, with symlinks resolved, must lie inside the real run folder and name a regular file.
  */
-export function resolveRunFile(runDirectory: string, relative: string): string | null {
+export function resolveRunFile(
+  runDirectory: string,
+  relative: string,
+  realDirectory?: string,
+): string | null {
   if (relative.includes("\0") || relative.includes("\\")) return null;
   const segments = relative.split("/");
   if (segments.some((segment) => segment === "" || segment === "." || segment === ".."))
@@ -123,7 +127,8 @@ export function resolveRunFile(runDirectory: string, relative: string): string |
   if (!documents.includes(relative) && !shownPattern.test(relative)) return null;
   try {
     const real = realpathSync(join(runDirectory, relative));
-    if (!isInside(real, realpathSync(runDirectory)) || !statSync(real).isFile()) return null;
+    if (!isInside(real, realDirectory ?? realpathSync(runDirectory)) || !statSync(real).isFile())
+      return null;
     return real;
   } catch {
     return null;
@@ -203,10 +208,17 @@ export function resolveEvidenceImage(
   }
 }
 
-/** The run files that exist and resolve inside the run folder, in reading order. */
+/** The run files that exist and resolve inside the run folder, in reading order. The run folder is resolved once, not once for each file (ARK-533). */
 export function listRunFiles(runDirectory: string): string[] {
+  let realDirectory: string;
+  try {
+    realDirectory = realpathSync(runDirectory);
+  } catch {
+    return [];
+  }
   const found: string[] = [];
-  for (const name of documents) if (resolveRunFile(runDirectory, name)) found.push(name);
+  for (const name of documents)
+    if (resolveRunFile(runDirectory, name, realDirectory)) found.push(name);
   for (const folder of folders) {
     let entries: string[] = [];
     try {
@@ -215,7 +227,8 @@ export function listRunFiles(runDirectory: string): string[] {
       // no folder, no files
     }
     for (const entry of entries)
-      if (resolveRunFile(runDirectory, `${folder}/${entry}`)) found.push(`${folder}/${entry}`);
+      if (resolveRunFile(runDirectory, `${folder}/${entry}`, realDirectory))
+        found.push(`${folder}/${entry}`);
   }
   return found;
 }
