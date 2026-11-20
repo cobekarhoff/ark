@@ -7,7 +7,7 @@ description: Design the test cases of a run before the plan exists. Use when the
 
 Arguments: `<run>`, the run name.
 
-Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md).
+Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/engineering.md`](../shared/engineering.md), then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md). The repo's own `AGENTS.md` wins on the repo's conventions (commands, style, layout); `engineering.md` wins on evidence and process handling. Before you plan or write, read `$ARK_HOME/projects/<project>/learnings.md` (the project is the folder that holds your run folder) if it exists.
 
 You design test cases. A test case describes the product, not the ticket. ACs belong to the ticket: you link each case to its ACs in `verified_by`.
 

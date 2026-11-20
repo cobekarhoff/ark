@@ -62,8 +62,8 @@ The run lead writes `<run-folder>/retro.md` with these sections, in this order:
    A value that is `unknown` stays `unknown`.
 3. **What went wrong.** Each problem once: what happened, which step or event, what it cost (rounds, tokens, time). Cite the event sequence number from `events.ndjson` or the finding. Include escaped defects linked to this run.
 4. **Orchestration.** From the orchestration section of `metrics.json`: agent crashes and restarts, stalled workers, dead dispatches, tool errors, context overflows, idle gaps, and the cost of the run lead (copy it from `master_chief_and_run_lead_cost`). Read `orchestration.tool_error_list` (each entry has `tool`, `word`, `count` and `first_error`) and name the owner of the largest entry; do not write "cause not traced" for it. For each problem, name the owner of the fix: Ark, Orca, Plannotator or the harness.
-5. **Improvement proposals.** Zero or more. Each has the shape in "Proposal format" below. For each overridden choice (a strategy answer or a plan decision where the human did not take the recommended option), write one proposal of scope `project`. Its change is one `learnings.md` entry that says what the human chose over what, and why if the human said so. Name the strategy or decision ID and its event as the evidence. The deep interview raises it. It changes nothing until the human approves it.
-   For each rule line of `<run folder>/rules.md` (a list line; skip headings and prose; no file means none), write one proposal of scope `project` too. Its change is the `learnings.md` entry for the rule, in the form of "Apply an approved proposal" below; the run lead writes no entry itself and never edits `learnings.md`. Its evidence is the two finding titles and the time of the rule line. A rule that an entry of `learnings.md` already covers gets no new entry: the proposal changes that entry or says the learning did not work (see below), and does not add a duplicate.
+5. **Improvement proposals.** Zero or more. Each has the shape in "Proposal format" below. For each overridden choice (a strategy answer or a plan decision where the human did not take the recommended option), write one proposal. Its scope follows "Scope of a learning" below: `project`, unless the learning holds for any repo. Its change is one `learnings.md` entry that says what the human chose over what, and why if the human said so. Name the strategy or decision ID and its event as the evidence. The deep interview raises it. It changes nothing until the human approves it.
+   For each rule line of `<run folder>/rules.md` (a list line; skip headings and prose; no file means none), write one proposal too, with its scope set the same way. Its change is the `learnings.md` entry for the rule, in the form of "Apply an approved proposal" below; the run lead writes no entry itself and never edits `learnings.md`. Its evidence is the two finding titles and the time of the rule line. A rule that an entry of `learnings.md` already covers gets no new entry: the proposal changes that entry or says the learning did not work (see below), and does not add a duplicate.
 
 The run lead reads `learnings.md` as a source of what it already knew: a problem that a learning already covers is evidence that the learning did not work, and the proposal says so.
 
@@ -90,6 +90,15 @@ Scopes:
 
 The status changes to `approved`, `rejected` or `applied` as the proposal moves.
 
+### Scope of a learning
+
+Before you write a proposal for a lesson, decide where the lesson holds:
+
+- It holds for any repo when it names no tool, version, path or command of one repo: it states how to test, wait, handle processes or prove a claim, and it stays true in a repo with another toolchain. Make it a proposal of scope `skill` whose change is one line in `skills/shared/engineering.md`, and name the entry of `learnings.md` that the move deletes. [`skills/shared/engineering.md`](../shared/engineering.md) is the Ark-wide file that every worker reads.
+- It holds for one repo when it names a version, a path or a command of that repo (a runtime version, a test command, a helper file, a convention of its `AGENTS.md`). Make it a proposal of scope `project`: it stays in that project's `learnings.md`.
+
+Only the human approves a move, as for every proposal.
+
 ## Apply an approved proposal
 
 Apply a proposal only after the human answers "approve". Then change the status to `applied` and record where it landed.
@@ -115,9 +124,10 @@ Create a ticket on the Ark backlog in `~/.ark/projects/ark/tickets/`:
 
 A skill change is a diff to the skill wherever it lives.
 
-1. Find the skill's directory: `read skill://<name>` resolves it, and in a shell `realpath` of `skill://<name>` prints the physical path. An Ark skill lives in the Ark repo under `skills/ark-<role>/`; a skill proposal names that one folder. A project skill lives under the workspace, such as `<workspace>/.claude/skills/<name>/`. A user skill lives under `~/.omp/agent/skills/` or `~/.claude/skills/`.
+1. Find the skill's directory: `read skill://<name>` resolves it, and in a shell `realpath` of `skill://<name>` prints the physical path. An Ark skill lives in the Ark repo under `skills/ark-<role>/`; a skill proposal names that one folder, except that a proposal that moves a learning into the Ark-wide principles names `skills/shared/`. A project skill lives under the workspace, such as `<workspace>/.claude/skills/<name>/`. A user skill lives under `~/.omp/agent/skills/` or `~/.claude/skills/`.
 2. Make the edit in that place, with the `edit` tool.
 3. Show the human the diff (`git -C <directory> diff` when the directory is in a git repository) before you tell them it is applied. If the skill is in a repository, leave the change uncommitted for the human to commit.
+4. A proposal that moves a learning into `skills/shared/engineering.md`, once approved: add the principle as one line under the heading that fits it (Tests, Processes or Evidence), as a sentence with no command, version or path of one repo and with no abbreviation. Then delete the entry from `~/.ark/projects/<project>/learnings.md` and leave nothing behind in it. Write the change in the Ark repo only; never copy the file into another repo.
 
 ## Part 2: Deep interview
 
@@ -133,6 +143,7 @@ Read every `retro.md` and `metrics.json` of the closed runs counted by `ark chie
 For each repeated problem (a group or a pattern):
 
 - Read the matching learning in `learnings.md`.
+- When the learning holds for any repo (see "Scope of a learning"), propose its move into `skills/shared/engineering.md` instead of a new check or entry.
 - Name the check that stops the problem, or say that no check exists.
 - Try that check against one real past case.
 - When the check does not stop that case, propose the strongest fix, in this order: structure, types, a lint whose message names the fix, a test, and a prompt rule only when nothing stronger can work.

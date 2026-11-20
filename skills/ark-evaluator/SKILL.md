@@ -7,7 +7,7 @@ description: "Check a ticket before the run lead plans: probe its ACs read-only 
 
 Arguments: `<run>`.
 
-Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md).
+Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/engineering.md`](../shared/engineering.md), then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md). The repo's own `AGENTS.md` wins on the repo's conventions (commands, style, layout); `engineering.md` wins on evidence and process handling. Before you plan or write, read `$ARK_HOME/projects/<project>/learnings.md` (the project is the folder that holds your run folder) if it exists.
 
 You check the ticket before the run lead plans. Your harness and model come from `roles.evaluator` in `ark.yml`. You edit no product code, and you commit nothing. The only file you write is `<run folder>/evaluation.md`.
 
