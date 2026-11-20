@@ -17,6 +17,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -33,6 +34,11 @@ import {
   writeBacklogTicket,
   writeRun,
 } from "./hub-fixtures.ts";
+import {
+  windowMessage as lagWindowMessage,
+  type WindowLine,
+  type WindowProbe,
+} from "./hub-stall-window.ts";
 import { tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
 
 setDefaultTimeout(60_000);
@@ -102,9 +108,9 @@ type Stage = {
 };
 
 /**
- * A fresh ARK_HOME, session roots and fake tools on PATH. The fake `orca` holds only `terminal list`
- * (the one call the `orca` source makes): while `orca.hold` exists, and for `orca.sleep` seconds. It
- * appends a line to `orca.done` when a call that waited ends.
+ * A fresh ARK_HOME, session roots and fake tools on PATH. The fake `orca` holds `terminal list` while `orca.hold`
+ * exists and for `orca.sleep` seconds, and appends a line to `orca.done` when a call that waited ends. Its
+ * opt-in answers for ARK-T734 and ARK-T735 are described at the `case` below.
  */
 function stage(): Stage {
   const home = tempArkHome();
@@ -131,11 +137,32 @@ if [ "$1 $2" = "terminal list" ]; then
   cat "$S/orca.terminals"
   exit 0
 fi
+# Opt-in state files, written only by ARK-T734 and ARK-T735: worker-list answers orca.workers.<orca run id>, else orca.workers,
+# and task-list answers orca.tasks; with none of them the answer is the empty list. A line of orca.fail makes one call exit 1:
+# "<verb> <orca run id>" for worker-list and task-list, "run-list", or "inbox" (every inbox call without --terminal).
+orcaRunId=""
+previousArgument=""
+for argument in "$@"; do
+  [ "$previousArgument" = "--run" ] && orcaRunId="$argument"
+  previousArgument="$argument"
+done
+if [ -e "$S/orca.fail" ]; then
+  failKey="$2"
+  case "$2" in
+    worker-list|task-list) failKey="$2 $orcaRunId" ;;
+    inbox) case " $* " in *" --terminal "*) failKey="" ;; esac ;;
+  esac
+  [ -n "$failKey" ] && grep -qxF -- "$failKey" "$S/orca.fail" && exit 1
+fi
 case "$1 $2" in
   "terminal switch") echo '{"result":{}}' ;;
   "orchestration run-list") cat "$S/orca.runs" ;;
-  "orchestration worker-list") echo '{"result":{"workers":[]}}' ;;
-  "orchestration task-list") echo '{"result":{"tasks":[]}}' ;;
+  "orchestration worker-list")
+    if [ -e "$S/orca.workers.$orcaRunId" ]; then cat "$S/orca.workers.$orcaRunId"
+    elif [ -e "$S/orca.workers" ]; then cat "$S/orca.workers"
+    else echo '{"result":{"workers":[]}}'; fi ;;
+  "orchestration task-list")
+    if [ -e "$S/orca.tasks" ]; then cat "$S/orca.tasks"; else echo '{"result":{"tasks":[]}}'; fi ;;
   "orchestration inbox")
     case " $* " in
       *" --terminal "*) echo '{"result":{"messages":[]}}' ;;
@@ -255,11 +282,12 @@ async function startHub(
 
 /**
  * One page: `GET /events` held open and read until `close()`. `seen()` turns true at the first push that holds
- * the runs and stays true; it stays false if the stream fails.
+ * the runs and stays true; it stays false if the stream fails. `latest()` is the last push, parsed.
  */
-function openPage(hub: Hub): { close(): void; seen(): boolean } {
+function openPage(hub: Hub): { close(): void; seen(): boolean; latest(): Snapshot | undefined } {
   const controller = new AbortController();
   let seen = false;
+  let latest: Snapshot | undefined;
   void (async () => {
     try {
       const response = await fetch(`${hub.baseUrl()}/events`, { signal: controller.signal });
@@ -271,15 +299,16 @@ function openPage(hub: Hub): { close(): void; seen(): boolean } {
         buffered = messages.pop() ?? "";
         for (const message of messages)
           if (message.startsWith("data: ")) {
-            const snapshot = JSON.parse(message.slice("data: ".length)) as { runs?: unknown };
+            const snapshot = JSON.parse(message.slice("data: ".length)) as Snapshot;
             if (Array.isArray(snapshot.runs)) seen = true;
+            latest = snapshot;
           }
       }
     } catch {
       // The page was closed.
     }
   })();
-  const page = { close: () => controller.abort(), seen: () => seen };
+  const page = { close: () => controller.abort(), seen: () => seen, latest: () => latest };
   pages.push(page);
   return page;
 }
@@ -1257,3 +1286,416 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   hub.child.kill("SIGTERM");
   await hub.exited;
 }, 150_000);
+
+// ---------------------------------------------------------------- ARK-T734 and ARK-T735
+
+/** Open runs and workers for each run of ARK-T734: the unfixed `readOrca` pass must measure over 200 ms at this size. */
+const largeRunCount = 200;
+const largeWorkerCount = 100;
+/** The `--limit 200` of the inbox read of `readOrca`. */
+const largeInboxCount = 200;
+
+const stepRoles = ["implementer", "validator", "reviewer"];
+const chiefOrcaRun = {
+  id: "orca-chief-p",
+  objective: `Master Chief: ${project} tickets`,
+  coordinator_handle: "term-chief",
+};
+const emptyWorkers = JSON.stringify({ result: { workers: [] } });
+
+type ShownAgent = {
+  role: string;
+  step: string | null;
+  title: string;
+  terminal: string | null;
+  presence: string;
+};
+type Shown = {
+  agents: ShownAgent[];
+  waiting: { step: string | null; reason: string; since: string }[];
+};
+
+/**
+ * The answers of the fake `orca` for open runs `runs`, with the agents and waits that `readOrca` must make of them,
+ * written out here from the fixture alone. Each open run has an Orca run, a connected run lead and `workers` workers
+ * (every third one released, every other terminal connected). The inbox holds `messages` unread messages, each from
+ * a worker to the run lead of one run, in turn. With `edges`, the last run has no Orca run and the one before it has
+ * no worker. With `perRun`, each run has its own workers and tasks (else every run shares one list).
+ */
+function orcaHome(options: {
+  runs: string[];
+  workers: number;
+  messages: number;
+  perRun?: boolean;
+  edges?: boolean;
+}) {
+  const { runs, workers, messages, perRun = false, edges = false } = options;
+  const runsWithWorkers = edges ? runs.slice(0, -2) : runs;
+  const orcaRunOf = (run: string) => `orca-${run}`;
+  // The name of run `runIndex`'s workers: the same for every run unless `perRun`.
+  const ownerOf = (runIndex: number) => (perRun ? runIndex : 0);
+  const owners = perRun ? runsWithWorkers.map((_, runIndex) => runIndex) : [0];
+  const indexes = Array.from({ length: workers }, (_, index) => index);
+  const released = (worker: number) => worker % 3 === 2;
+  const titleOf = (owner: number, worker: number) =>
+    `s${owner}-${worker} (${stepRoles[worker % 3]}, .)`;
+  const workerRows = (owner: number) =>
+    indexes.map((worker) => ({
+      dispatchId: `d-${owner}-${worker}`,
+      terminal: `w-${owner}-${worker}`,
+      agentTerminalHandle: `w-${owner}-${worker}`,
+      taskId: `t-${owner}-${worker}`,
+      state: released(worker) ? "released" : "running",
+      projection: {
+        provider: { model: "claude-sonnet" },
+        liveness: { verdict: released(worker) ? "dead" : "live" },
+      },
+    }));
+  const terminals = [
+    { handle: "term-chief", connected: true, agentIdentity: "omp" },
+    ...runs.map((_, runIndex) => ({
+      handle: `lead-${runIndex}`,
+      connected: true,
+      agentIdentity: "omp",
+    })),
+    ...owners.flatMap((owner) =>
+      indexes
+        .filter((worker) => worker % 2 === 0)
+        .map((worker) => ({
+          handle: `w-${owner}-${worker}`,
+          connected: true,
+          agentIdentity: "omp",
+        })),
+    ),
+  ];
+  const tasks = owners.flatMap((owner) =>
+    indexes.map((worker) => ({ id: `t-${owner}-${worker}`, title: titleOf(owner, worker) })),
+  );
+  // Message `number` goes to the run lead of run `(number + 1) % runsWithWorkers.length`, from one of that run's workers.
+  const messageRows = Array.from({ length: messages }, (_, number) => {
+    const runIndex = (number + 1) % runsWithWorkers.length;
+    const worker = (number * 7) % workers;
+    const owner = ownerOf(runIndex);
+    return {
+      runIndex,
+      worker,
+      owner,
+      row: {
+        id: `m-${number}`,
+        type: number % 2 === 0 ? "question" : "escalation",
+        from_handle: number % 2 === 0 ? `dispatch:d-${owner}-${worker}` : `w-${owner}-${worker}`,
+        to_handle: `run:${orcaRunOf(runs[runIndex]!)}`,
+        subject: `subject ${number}`,
+        body: "",
+        read: 0,
+        created_at: new Date(Date.UTC(2026, 10, 20) + number * 1000).toISOString(),
+      },
+    };
+  });
+  const orcaRuns = (edges ? runs.slice(0, -1) : runs).map((run, runIndex) => ({
+    id: orcaRunOf(run),
+    objective: `Ark run ${run}`,
+    coordinator_handle: `lead-${runIndex}`,
+  }));
+  return {
+    chiefId: chiefOrcaRun.id,
+    orcaRunOf,
+    terminals: JSON.stringify({ result: { terminals } }),
+    inbox: JSON.stringify({ result: { messages: messageRows.map((message) => message.row) } }),
+    runList: JSON.stringify({ result: { runs: [...orcaRuns, chiefOrcaRun] } }),
+    chiefOnlyRunList: JSON.stringify({ result: { runs: [chiefOrcaRun] } }),
+    tasks,
+    /** The files that answer for Master Chief and for the run with no worker: empty lists. */
+    light: {
+      [`orca.workers.${chiefOrcaRun.id}`]: emptyWorkers,
+      ...(edges ? { [`orca.workers.${orcaRunOf(runs.at(-2)!)}`]: emptyWorkers } : {}),
+    } as Record<string, string>,
+    /** The files that carry the load: the workers of the runs, and the tasks. */
+    load: {
+      ...(perRun
+        ? Object.fromEntries(
+            runsWithWorkers.map((run, runIndex) => [
+              `orca.workers.${orcaRunOf(run)}`,
+              JSON.stringify({ result: { workers: workerRows(runIndex) } }),
+            ]),
+          )
+        : { "orca.workers": JSON.stringify({ result: { workers: workerRows(0) } }) }),
+      "orca.tasks": JSON.stringify({ result: { tasks } }),
+    } as Record<string, string>,
+    /** What the snapshot shows for run `runIndex`, by the rules of `agentsOf` and `readOrca`. */
+    expected(runIndex: number): Shown {
+      if (edges && runIndex === runs.length - 1) return { agents: [], waiting: [] };
+      const lead: ShownAgent[] = [
+        {
+          role: "Master Chief",
+          step: null,
+          title: chiefOrcaRun.objective,
+          terminal: "term-chief",
+          presence: "live",
+        },
+        {
+          role: "run lead",
+          step: null,
+          title: `Ark run ${runs[runIndex]}`,
+          terminal: `lead-${runIndex}`,
+          presence: "live",
+        },
+      ];
+      if (runIndex >= runsWithWorkers.length) return { agents: lead, waiting: [] };
+      const owner = ownerOf(runIndex);
+      return {
+        agents: [
+          ...lead,
+          ...indexes.map((worker) => ({
+            role: stepRoles[worker % 3]!,
+            step: `s${owner}-${worker}`,
+            title: titleOf(owner, worker),
+            terminal: `w-${owner}-${worker}`,
+            presence: released(worker) ? "ended" : worker % 2 === 0 ? "live" : "running",
+          })),
+        ],
+        waiting: messageRows
+          .filter((message) => message.runIndex === runIndex && !released(message.worker))
+          .map((message) => ({
+            step: `s${message.owner}-${message.worker}`,
+            reason: `${message.row.type === "question" ? "asked the run lead" : "blocked"}: ${message.row.subject}`,
+            since: message.row.created_at,
+          })),
+      };
+    },
+  };
+}
+
+/** A state file of the fake `orca`, written to a temporary name and renamed into place so that a read never sees half a file. */
+function place(fake: Stage, file: string, text: string): void {
+  fake.set(`${file}.next`, text);
+  renameSync(join(fake.state, `${file}.next`), join(fake.state, file));
+}
+
+/** The run as the page shows it: the fields ARK-T734 and ARK-T735 compare. */
+function shownOf(snapshot: Snapshot, run: string): Shown {
+  const view =
+    snapshot.runs === "unknown" ? undefined : snapshot.runs.find((entry) => entry.run === run);
+  if (!view || view.agents === "unknown") throw new Error(`the snapshot has no agents for ${run}`);
+  return {
+    agents: view.agents.map(({ role, step, title, terminal, presence }) => ({
+      role,
+      step,
+      title,
+      terminal,
+      presence,
+    })),
+    waiting: view.waiting,
+  };
+}
+
+/**
+ * Health probes of one hub, and the hub's new output lines stamped with the time of the probe that read them:
+ * the input of `windowMessage` (ARK-T730). `untilOrcaPasses` reads the route back to back until the `orca`
+ * source has ended `count` more passes; the requests are the wait.
+ */
+function healthProber(hub: Hub) {
+  const startEpoch = Date.now();
+  const start = performance.now();
+  const probes: WindowProbe[] = [];
+  const lines: WindowLine[] = [];
+  let outputRead = 0;
+  const probe = async (): Promise<Health> => {
+    const { health: answer } = await health(hub);
+    const at = Math.round(performance.now() - start);
+    probes.push({
+      at,
+      lag_ms: answer.lag_ms ?? null,
+      sources: answer.sources as WindowProbe["sources"],
+    });
+    const output = hub.output();
+    const wholeEnd = output.lastIndexOf("\n") + 1;
+    if (wholeEnd > outputRead) {
+      for (const text of output.slice(outputRead, wholeEnd).split("\n"))
+        if (text.length > 0) lines.push({ at, text });
+      outputRead = wholeEnd;
+    }
+    return answer;
+  };
+  return {
+    probe,
+    async untilOrcaPasses(count: number): Promise<void> {
+      let last = endedAt((await probe()).sources?.orca);
+      for (let passes = 0; passes < count;) {
+        const ended = endedAt((await probe()).sources?.orca);
+        if (ended !== null && ended !== last) {
+          last = ended;
+          passes += 1;
+        }
+      }
+    },
+    largestLag: () => Math.max(0, ...probes.map((entry) => entry.lag_ms ?? 0)),
+    message: () => lagWindowMessage(probes, lines, startEpoch),
+  };
+}
+
+test("ARK-T734 On a hub whose fake orca answers one pass with many open runs, many workers each and a full inbox, no probe of the health lag passes 200 ms for the whole pass and the compose and publish after it, and the snapshot holds every agent and wait the fixture names", async () => {
+  const fake = stage();
+  const runs = Array.from({ length: largeRunCount }, (_, number) => {
+    const run = `${today()}-ARK-${3000 + number}-1`;
+    writeRun({
+      project,
+      run,
+      ticket: { id: `ARK-${3000 + number}`, title: `Large ${number}` },
+      phase: "building",
+    });
+    return run;
+  });
+  const home = orcaHome({
+    runs,
+    workers: largeWorkerCount,
+    messages: largeInboxCount,
+    edges: true,
+  });
+
+  // Step 1: the control. Only Master Chief's Orca run, so the pass makes its four calls and parses one inbox.
+  fake.set("orca.terminals", home.terminals);
+  fake.set("orca.inbox", home.inbox);
+  for (const [file, text] of Object.entries(home.light)) fake.set(file, text);
+  fake.set("orca.runs", home.chiefOnlyRunList);
+  const hub = await startHub({ interval: 2000 });
+  const page = openPage(hub);
+  const prober = healthProber(hub);
+
+  // Steps 2 and 3: two passes; the home alone must not hold the loop.
+  await prober.untilOrcaPasses(2);
+  expect(
+    prober.largestLag() <= lagLimitMilliseconds,
+    `control (no load): ${prober.message()}`,
+  ).toBe(true);
+
+  // Step 4: the load enters; the full run list is renamed last, so a pass that reads it finds the workers in place.
+  for (const [file, text] of Object.entries(home.load)) place(fake, file, text);
+  place(fake, "orca.runs", home.runList);
+  let first: Snapshot | undefined;
+  while (!first) {
+    await prober.probe();
+    const latest = page.latest();
+    if (latest && Array.isArray(latest.runs)) {
+      const view = latest.runs.find((entry) => entry.run === runs[0]);
+      if (view && view.agents !== "unknown" && view.agents.length > 0) first = latest;
+    }
+  }
+  await prober.untilOrcaPasses(2);
+  await prober.probe(); // the sample of the publish that follows the last pass end
+
+  // Step 5: the first large push and the last snapshot hold what the fixture names, in order.
+  const last = await snapshotOf(hub);
+  for (const [label, snapshot] of [
+    ["first", first],
+    ["last", last],
+  ] as const)
+    for (const [runIndex, run] of runs.entries())
+      expect(shownOf(snapshot, run), `${label} snapshot, ${run}`).toEqual(home.expected(runIndex));
+  expect(last.sources.orca.ok, "sources.orca.ok in the last snapshot").toBe(true);
+
+  // Step 6: no probe passed the limit, since the switch or before.
+  expect(prober.largestLag() <= lagLimitMilliseconds, prober.message()).toBe(true);
+  hub.child.kill("SIGTERM");
+  await hub.exited;
+}, 90_000);
+
+test("ARK-T735 When the fake orca fails run-list, inbox, or worker-list or task-list of one open run, the orca pass returns no value, the source reads not ok, and the snapshot keeps the last agents and waits of every run; when only Master Chief's worker-list fails, the pass stays ok and loses only the run lead it alone listed", async () => {
+  const fake = stage();
+  const runs = threeRuns();
+  const home = orcaHome({ runs, workers: 2, messages: 1, perRun: true });
+  // Run 2: its lead terminal is not connected in `terminal list`; Master Chief's worker-list lists the lead as a live worker.
+  const lead = "lead-1";
+  const terminals = JSON.parse(home.terminals).result.terminals as { handle: string }[];
+  fake.set(
+    "orca.terminals",
+    JSON.stringify({
+      result: { terminals: terminals.filter((terminal) => terminal.handle !== lead) },
+    }),
+  );
+  fake.set("orca.inbox", home.inbox);
+  fake.set("orca.runs", home.runList);
+  for (const [file, text] of Object.entries({ ...home.light, ...home.load })) fake.set(file, text);
+  fake.set(
+    `orca.workers.${home.chiefId}`,
+    JSON.stringify({
+      result: {
+        workers: [
+          {
+            dispatchId: "d-lead",
+            terminal: lead,
+            state: "running",
+            projection: { liveness: { verdict: "live" } },
+          },
+        ],
+      },
+    }),
+  );
+  const hub = await startHub({ interval: 2000 });
+  openPage(hub);
+  const prober = healthProber(hub);
+  const read = async (): Promise<{ ok: boolean; shown: Shown[] }> => {
+    await prober.untilOrcaPasses(2);
+    const answer = await prober.probe();
+    expect(answer.sources.orca?.last_ms, "a failed pass is still a pass").not.toBeNull();
+    expect(answer.sources.orca?.ended_at).not.toBeNull();
+    const snapshot = await snapshotOf(hub);
+    return { ok: snapshot.sources.orca.ok, shown: runs.map((run) => shownOf(snapshot, run)) };
+  };
+
+  // Step 1: the good answer. Run 2 holds a run lead listed only by Master Chief, and its question.
+  const good = await read();
+  expect(good.ok).toBe(true);
+  expect(good.shown[1]!.agents.find((agent) => agent.role === "run lead")?.presence).toBe(
+    "running",
+  );
+  expect(good.shown[1]!.waiting.length).toBe(1);
+
+  // Steps 2 to 5: one failing call; the page keeps the last answer.
+  for (const line of [
+    `worker-list ${home.orcaRunOf(runs[1]!)}`,
+    `task-list ${home.orcaRunOf(runs[1]!)}`,
+    "run-list",
+    "inbox",
+  ]) {
+    fake.set("orca.fail", `${line}\n`);
+    const failed = await read();
+    expect(failed.ok, `${line}: sources.orca.ok`).toBe(false);
+    expect(failed.shown, `${line}: the last agents and waits`).toEqual(good.shown);
+  }
+
+  // Step 6: Master Chief's worker-list fails; the pass stays ok and run 2 loses only the lead nothing else lists.
+  fake.set("orca.fail", `worker-list ${home.chiefId}\n`);
+  const chiefDown = await read();
+  expect(chiefDown.ok).toBe(true);
+  expect(chiefDown.shown).toEqual(
+    good.shown.map((entry, index) =>
+      index === 1
+        ? { ...entry, agents: entry.agents.filter((agent) => agent.role !== "run lead") }
+        : entry,
+    ),
+  );
+
+  // Step 7: the call works again with changed data: the lead is back and one title shows its note.
+  fake.remove("orca.fail");
+  const changed = home.tasks.map((task) =>
+    task.id === "t-2-1" ? { ...task, title: "s2-1 retry (validator, .)" } : task,
+  );
+  fake.set("orca.tasks", JSON.stringify({ result: { tasks: changed } }));
+  const recovered = await read();
+  expect(recovered.ok).toBe(true);
+  expect(recovered.shown).toEqual(
+    good.shown.map((entry, index) =>
+      index === 2
+        ? {
+            ...entry,
+            agents: entry.agents.map((agent) =>
+              agent.step === "s2-1" ? { ...agent, title: "s2-1 retry (validator, .)" } : agent,
+            ),
+          }
+        : entry,
+    ),
+  );
+  hub.child.kill("SIGTERM");
+  await hub.exited;
+}, 60_000);
