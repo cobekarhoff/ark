@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -87,7 +87,11 @@ const scenario: EventRow[] = [
 
 const readMetrics = () => JSON.parse(readFileSync(join(runDirectory, "metrics.json"), "utf8"));
 
+// ARK-456: `retro()` prints its report; the tests that read it capture it themselves, so the log of `ark test` stays quiet.
+const originalLog = console.log;
+
 beforeEach(() => {
+  console.log = () => {};
   arkHome = tempArkHome();
   runDirectory = join(arkHome, "projects", "demo", "runs", runId);
   ompRoot = mkdtempSync(join(tmpdir(), "ark-omp-sessions-"));
@@ -97,6 +101,10 @@ beforeEach(() => {
   codexRoot = mkdtempSync(join(tmpdir(), "ark-codex-sessions-"));
   process.env.ARK_CODEX_SESSIONS = codexRoot;
   writeEvents(runDirectory, scenario);
+});
+
+afterEach(() => {
+  console.log = originalLog;
 });
 
 describe("usage parsers", () => {
