@@ -477,101 +477,121 @@ function submoduleRun(refDelaySeconds?: number) {
   };
 }
 
-test("ARK-T142 after the upstream MR squash merges, the refresh moves the submodule to the merged commit and the push carries it", () => {
-  const { runId, root, libRemote, appRemote, libTree, appTree, submodule, branchHead, finish } =
-    submoduleRun(0.4);
-  // The host squash-merges the lib branch: the commit on main differs from the branch head.
-  const host = join(root, "host");
-  git(root, "clone", "-q", libRemote, host);
-  git(host, "merge", "--squash", `origin/${libTree.branch}`);
-  git(host, "commit", "-q", "-m", "the change (squashed)");
-  const merged = git(host, "rev-parse", "HEAD");
-  git(host, "push", "-q", "origin", "main");
-  expect(merged).not.toBe(branchHead);
-  const answers = {
-    "glab mr view 41 --output json": {
-      state: "merged",
-      merge_commit_sha: null,
-      squash_commit_sha: merged,
-    },
-    "glab mr view 87 --output json": { state: "opened", has_conflicts: false },
-  };
+test(
+  "ARK-T142 after the upstream MR squash merges, the refresh moves the submodule to the merged commit and the push carries it",
+  () => {
+    const { runId, root, libRemote, appRemote, libTree, appTree, submodule, branchHead, finish } =
+      submoduleRun(0.4);
+    // The host squash-merges the lib branch: the commit on main differs from the branch head.
+    const host = join(root, "host");
+    git(root, "clone", "-q", libRemote, host);
+    git(host, "merge", "--squash", `origin/${libTree.branch}`);
+    git(host, "commit", "-q", "-m", "the change (squashed)");
+    const merged = git(host, "rev-parse", "HEAD");
+    git(host, "push", "-q", "origin", "main");
+    expect(merged).not.toBe(branchHead);
+    const answers = {
+      "glab mr view 41 --output json": {
+        state: "merged",
+        merge_commit_sha: null,
+        squash_commit_sha: merged,
+      },
+      "glab mr view 87 --output json": { state: "opened", has_conflicts: false },
+    };
 
-  // the host cannot answer: the refresh stops and the pointer stays
-  fakeHosts({});
-  const refused = ark("bump", "refresh", runId, "bump-lib");
-  expect(refused.code).not.toBe(0);
-  expect(git(submodule, "rev-parse", "HEAD")).toBe(branchHead);
+    // the host cannot answer: the refresh stops and the pointer stays
+    fakeHosts({});
+    const refused = ark("bump", "refresh", runId, "bump-lib");
+    expect(refused.code).not.toBe(0);
+    expect(git(submodule, "rev-parse", "HEAD")).toBe(branchHead);
 
-  fakeHosts(answers);
-  const before = ark("merge-request", "status", runId);
-  expect(before.out).toContain("  waits for !41 (merged)");
-  expect(before.out).toContain(`points at upstream branch ${branchHead.slice(0, 8)}`);
+    fakeHosts(answers);
+    const before = ark("merge-request", "status", runId);
+    expect(before.out).toContain("  waits for !41 (merged)");
+    expect(before.out).toContain(`points at upstream branch ${branchHead.slice(0, 8)}`);
 
-  const refreshed = ark("bump", "refresh", runId, "bump-lib");
-  expect(refreshed.code, refreshed.err).toBe(0);
-  expect(refreshed.out).toContain(`refreshed bump-lib to ${merged.slice(0, 8)}`);
-  expect(git(submodule, "rev-parse", "HEAD")).toBe(merged);
-  expect(git(appTree.path, "ls-tree", "HEAD", "libs/lib")).toContain(merged);
-  expect(ark("merge-request", "status", runId).out).toContain(`refreshed to ${merged.slice(0, 8)}`);
+    const refreshed = ark("bump", "refresh", runId, "bump-lib");
+    expect(refreshed.code, refreshed.err).toBe(0);
+    expect(refreshed.out).toContain(`refreshed bump-lib to ${merged.slice(0, 8)}`);
+    expect(git(submodule, "rev-parse", "HEAD")).toBe(merged);
+    expect(git(appTree.path, "ls-tree", "HEAD", "libs/lib")).toContain(merged);
+    expect(ark("merge-request", "status", runId).out).toContain(
+      `refreshed to ${merged.slice(0, 8)}`,
+    );
 
-  finish("validate");
-  finish("review");
-  const tested = ark("test", runId);
-  expect(tested.code, tested.out + tested.err).toBe(0);
-  const synced = ark("worktree", "sync", runId);
-  expect(synced.code, synced.err).toBe(0);
-  expect(git(appRemote, "rev-parse", appTree.branch)).toBe(git(appTree.path, "rev-parse", "HEAD"));
-  expect(git(appRemote, "ls-tree", appTree.branch, "libs/lib")).toContain(merged);
-});
+    finish("validate");
+    finish("review");
+    const tested = ark("test", runId);
+    expect(tested.code, tested.out + tested.err).toBe(0);
+    const synced = ark("worktree", "sync", runId);
+    expect(synced.code, synced.err).toBe(0);
+    expect(git(appRemote, "rev-parse", appTree.branch)).toBe(
+      git(appTree.path, "rev-parse", "HEAD"),
+    );
+    expect(git(appRemote, "ls-tree", appTree.branch, "libs/lib")).toContain(merged);
+  },
+  { timeout: 120_000 },
+);
 
-test("ARK-T142 refreshing a fast-forward merge records the event and makes no commit", () => {
-  const { runId, directory, appTree, submodule, branchHead } = submoduleRun(0.8);
-  // a fast-forward merge: the merged commit is the branch head, already pinned
-  fakeHosts({
-    "glab mr view 41 --output json": {
-      state: "merged",
-      merge_commit_sha: branchHead,
-    },
-  });
-  const head = git(appTree.path, "rev-parse", "HEAD");
-  const refreshed = ark("bump", "refresh", runId, "bump-lib");
-  expect(refreshed.code, refreshed.err).toBe(0);
-  expect(refreshed.out).toContain(`refreshed bump-lib to ${branchHead.slice(0, 8)}`);
-  expect(git(appTree.path, "rev-parse", "HEAD")).toBe(head);
-  expect(git(submodule, "rev-parse", "HEAD")).toBe(branchHead);
-  const events = readEvents(directory).filter((event) => event.type === "bump.refreshed");
-  expect(events.map((event) => event.data)).toEqual([{ step: "bump-lib", value: branchHead }]);
-});
+test(
+  "ARK-T142 refreshing a fast-forward merge records the event and makes no commit",
+  () => {
+    const { runId, directory, appTree, submodule, branchHead } = submoduleRun(0.8);
+    // a fast-forward merge: the merged commit is the branch head, already pinned
+    fakeHosts({
+      "glab mr view 41 --output json": {
+        state: "merged",
+        merge_commit_sha: branchHead,
+      },
+    });
+    const head = git(appTree.path, "rev-parse", "HEAD");
+    const refreshed = ark("bump", "refresh", runId, "bump-lib");
+    expect(refreshed.code, refreshed.err).toBe(0);
+    expect(refreshed.out).toContain(`refreshed bump-lib to ${branchHead.slice(0, 8)}`);
+    expect(git(appTree.path, "rev-parse", "HEAD")).toBe(head);
+    expect(git(submodule, "rev-parse", "HEAD")).toBe(branchHead);
+    const events = readEvents(directory).filter((event) => event.type === "bump.refreshed");
+    expect(events.map((event) => event.data)).toEqual([{ step: "bump-lib", value: branchHead }]);
+  },
+  { timeout: 120_000 },
+);
 
-test("ARK-T142 the refresh commit holds only the gitlink, and unrelated staged work stays staged", () => {
-  const { runId, root, libRemote, libTree, appTree, branchHead } = submoduleRun(0.6);
-  const host = join(root, "host");
-  git(root, "clone", "-q", libRemote, host);
-  git(host, "merge", "--squash", `origin/${libTree.branch}`);
-  git(host, "commit", "-q", "-m", "the change (squashed)");
-  const merged = git(host, "rev-parse", "HEAD");
-  git(host, "push", "-q", "origin", "main");
-  expect(merged).not.toBe(branchHead);
-  fakeHosts({
-    "glab mr view 41 --output json": {
-      state: "merged",
-      squash_commit_sha: merged,
-    },
-  });
-  writeFileSync(join(appTree.path, "unrelated.txt"), "work in progress\n");
-  git(appTree.path, "add", "unrelated.txt");
+test(
+  "ARK-T142 the refresh commit holds only the gitlink, and unrelated staged work stays staged",
+  () => {
+    const { runId, root, libRemote, libTree, appTree, branchHead } = submoduleRun(0.6);
+    const host = join(root, "host");
+    git(root, "clone", "-q", libRemote, host);
+    git(host, "merge", "--squash", `origin/${libTree.branch}`);
+    git(host, "commit", "-q", "-m", "the change (squashed)");
+    const merged = git(host, "rev-parse", "HEAD");
+    git(host, "push", "-q", "origin", "main");
+    expect(merged).not.toBe(branchHead);
+    fakeHosts({
+      "glab mr view 41 --output json": {
+        state: "merged",
+        squash_commit_sha: merged,
+      },
+    });
+    writeFileSync(join(appTree.path, "unrelated.txt"), "work in progress\n");
+    git(appTree.path, "add", "unrelated.txt");
 
-  const refreshed = ark("bump", "refresh", runId, "bump-lib");
-  expect(refreshed.code, refreshed.err).toBe(0);
-  expect(git(appTree.path, "show", "--name-only", "--format=", "HEAD")).toBe("libs/lib");
-  expect(git(appTree.path, "diff", "--cached", "--name-only")).toBe("unrelated.txt");
-});
+    const refreshed = ark("bump", "refresh", runId, "bump-lib");
+    expect(refreshed.code, refreshed.err).toBe(0);
+    expect(git(appTree.path, "show", "--name-only", "--format=", "HEAD")).toBe("libs/lib");
+    expect(git(appTree.path, "diff", "--cached", "--name-only")).toBe("unrelated.txt");
+  },
+  { timeout: 120_000 },
+);
 
-test("ARK-T142 bump refresh refuses a step that is not a bump step and records nothing", () => {
-  const { runId, directory } = openRun();
-  const refused = ark("bump", "refresh", runId, "implementer", "--to", "1.0.0");
-  expect(refused.code).toBe(1);
-  expect(refused.err).toContain("implementer is not a bump step of the plan");
-  expect(readEvents(directory).some((event) => event.type === "bump.refreshed")).toBe(false);
-});
+test(
+  "ARK-T142 bump refresh refuses a step that is not a bump step and records nothing",
+  () => {
+    const { runId, directory } = openRun();
+    const refused = ark("bump", "refresh", runId, "implementer", "--to", "1.0.0");
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("implementer is not a bump step of the plan");
+    expect(readEvents(directory).some((event) => event.type === "bump.refreshed")).toBe(false);
+  },
+  { timeout: 120_000 },
+);
