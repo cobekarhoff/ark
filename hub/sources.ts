@@ -448,8 +448,8 @@ const isLive = (worker: OrcaWorker): boolean => {
 /**
  * The agents of each open Ark run (`live` is false for one that Orca released or disconnected), and what each run waits for. Orca commands that feed it:
  * `terminal list`, `run-list --full` and `inbox --full`, and per open run `worker-list` and
- * `task-list`. Null when `run-list`, `terminal list` or `inbox` fails (a failure of `worker-list`
- * or `task-list` for one run drops that run, never invents agents): the page then keeps the last
+ * `task-list`. Null when `run-list`, `terminal list`, `inbox` or the `worker-list` or `task-list`
+ * of any one run fails (a partial answer would drop agents and waits): the page then keeps the last
  * answer and shows its age, never an empty list of waits.
  *
  * A pending question is a message of type `question` or `escalation` that the run lead has not
@@ -496,8 +496,7 @@ export async function readOrca(
   const agents = new Map<string, Agent[]>();
   const waits = new Map<string, Wait[]>();
   let failed = false;
-  await Promise.all(
-    openRuns.map(async ({ run, project }) => {
+  const readRun = async ({ run, project }: { run: string; project: string }): Promise<void> => {
       const orcaRun = leadOf.get(run);
       if (!orcaRun) return;
       const [workers, tasks] = await Promise.all([
@@ -620,8 +619,16 @@ export async function readOrca(
           since: message.created_at!,
         })),
       );
-    }),
-  );
+    };
+  // Each run spawns two Orca commands in one tick; a spawn blocks the loop, so launch them in
+  // slices with a yield between (ARK-606). The reads still run together once launched.
+  const yieldIfLong = yielder();
+  const reads: Promise<void>[] = [];
+  for (const openRun of openRuns) {
+    reads.push(readRun(openRun));
+    await yieldIfLong();
+  }
+  await Promise.all(reads);
   return failed ? null : { agents, waits };
 }
 
