@@ -2,7 +2,7 @@
 id: ARK-T385
 title: ARK-T385 when any path of the merge conflicts outside the generated list the sync exits 1 as today and worktree.synced lists every conflicted path
 level: integration
-technique: equivalence classes of the conflict set (unlisted only, listed and unlisted, several paths) with the event data as the observable, plus a load condition: a fixture delay in each sync pushes the 4 syncs past the 30 s default test limit
+technique: "equivalence classes of the conflict set (unlisted only, listed and unlisted, several paths) with the event data as the observable, plus a load condition: a fixture delay in each sync pushes the 4 syncs past the 30 s default test limit"
 priority: high
 risk: "the test dies on the 30 s default limit when the 4 syncs run on a loaded host, so a good sync reads as a failure and a real regression hides in the noise; a conflict in a listed file and in another file is regenerated and committed anyway, with the other file left in markers; the sync fails but the event still carries only conflict true, so nobody sees which files conflict; the event lists only the first path, only the unlisted paths or only the listed ones; the list is unordered or holds absolute paths, so it differs between machines"
 status: active
