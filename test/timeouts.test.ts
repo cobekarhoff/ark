@@ -8,19 +8,38 @@ setDefaultTimeout(30_000);
 
 const repositoryRoot = resolve(import.meta.dir, "..");
 const minimumTimeoutMilliseconds = 30_000;
+// The ARK-T31 guard reads these files; ARK-T30 replaces this line in a copy of the file.
+const timeoutGuardFiles = [
+  "test/sync.test.ts",
+  "test/merge-request.test.ts",
+  "test/post-mr.test.ts",
+];
 const gitHeavyFiles = ["test/sync.test.ts", "test/merge-request.test.ts"];
 
-// Splits a test file into the source of each top-level `test(` call. Tests that call neither
-// startRun( nor scenario( (the text-scan tests) are skipped.
+// Calls that start a run or build a scenario. Case-sensitive, no word boundary: generatedScenario(
+// and submoduleRun( count, a definition `function scenario(` is cut out of the chunk before this runs.
+const gitHeavyCall = /(?:startRun|scenario|generatedScenario|submoduleRun|openRun)\(/;
+
+// Splits a test file into the source of each `test(` call, including a test declared inside a `for`
+// loop. A chunk ends at the next `test(` or at the next top-level function, const, let or for, so a
+// helper definition or a loop between tests never leaks into the chunk before it. Tests that call no
+// helper (the text-scan tests) are skipped. The timeout is the last `timeout:` of the chunk, a number
+// or a `const NAME = <number>;` of the same file; any other value reads 0 and fails the guard.
 function gitHeavyTests(file: string): { name: string; timeout: number }[] {
   const source = readFileSync(join(repositoryRoot, file), "utf8");
-  const chunks = source.split(/^test(?:\.each\([^)]*\))?\(/m).slice(1);
+  const chunks = source.split(/(?<![\w.])test(?:\.each\([^)]*\))?\(/).slice(1);
   return chunks
-    .filter((chunk) => /\b(startRun|scenario)\(/.test(chunk))
-    .map((chunk) => ({
-      name: chunk.match(/"([^"]+)"|`([^`]+)`/)?.[0] ?? chunk.slice(0, 60),
-      timeout: Number((chunk.match(/timeout:\s*([\d_]+)/)?.[1] ?? "0").replaceAll("_", "")),
-    }));
+    .map((chunk) => chunk.split(/^(?:(?:async\s+)?function\b|const\b|let\b|for\s*\()/m)[0])
+    .filter((chunk) => gitHeavyCall.test(chunk))
+    .map((chunk) => {
+      const limit = [...chunk.matchAll(/timeout:\s*(\w+)/g)].at(-1)?.[1] ?? "";
+      const constant = source.match(new RegExp(`^const ${limit} = ([\\d_]+);`, "m"))?.[1];
+      const digits = /^\d[\d_]*$/.test(limit) ? limit : (constant ?? "0");
+      return {
+        name: chunk.match(/"([^"]+)"|`([^`]+)`/)?.[0] ?? chunk.slice(0, 60),
+        timeout: Number(digits.replaceAll("_", "")),
+      };
+    });
 }
 
 // The ARK-T31 check: git-heavy tests of the given files (paths relative to the repository root)
@@ -31,9 +50,11 @@ function tooShortTests(files: string[]) {
     .filter((testCase) => testCase.timeout < minimumTimeoutMilliseconds);
 }
 
-test("ARK-T31 every sync and merge-request test that starts a run or builds a scenario has a timeout of at least 30 seconds", () => {
-  expect(gitHeavyFiles.flatMap(gitHeavyTests).length).toBeGreaterThan(0);
-  expect(tooShortTests(gitHeavyFiles)).toEqual([]);
+test("ARK-T31 every sync, merge-request and post-mr test that starts a run or builds a scenario through a helper has a timeout of at least 30 seconds", () => {
+  for (const file of timeoutGuardFiles) {
+    expect(gitHeavyTests(file).length, file).toBeGreaterThan(0);
+  }
+  expect(tooShortTests(timeoutGuardFiles)).toEqual([]);
 });
 
 // Skipped unless ARK_LOAD_PROOF=1: five parallel runs take 5+ minutes on a busy host (ARK-326).
@@ -240,11 +261,12 @@ test(
   { timeout: 60_000 },
 );
 
-// Runs the given file in a child process, keeping only the ARK-T31 test (the owning check).
+// Runs the given file in a child process, keeping only the ARK-T31 test (the owning check). The
+// pattern is anchored because the title of ARK-T30 also contains "ARK-T31".
 async function runOwningCheck(cwd: string, file: string) {
   const env = { ...process.env };
   delete env.ARK_LOAD_PROOF;
-  const child = Bun.spawn([process.execPath, "test", file, "-t", "ARK-T31"], {
+  const child = Bun.spawn([process.execPath, "test", file, "-t", "^ARK-T31 "], {
     cwd,
     env,
     stdout: "pipe",
@@ -258,42 +280,95 @@ async function runOwningCheck(cwd: string, file: string) {
   return { code, output: out + err };
 }
 
+// Runs the ARK-T31 check of a copy of this file in a temporary repository whose guard file list is
+// test/fixture.test.ts, written from the given lines.
+async function runCheckOnFixture(fixtureLines: string[]) {
+  const directory = mkdtempSync(join(tmpdir(), "ark-t30-"));
+  try {
+    mkdirSync(join(directory, "test"));
+    writeFileSync(join(directory, "test", "fixture.test.ts"), [...fixtureLines, ""].join("\n"));
+    const source = readFileSync(join(repositoryRoot, "test/timeouts.test.ts"), "utf8");
+    const copy = source.replace(
+      /^const timeoutGuardFiles = \[[^\]]*\];$/m,
+      'const timeoutGuardFiles = ["test/fixture.test.ts"];',
+    );
+    expect(copy).not.toBe(source);
+    writeFileSync(join(directory, "test", "timeouts.test.ts"), copy);
+    return await runOwningCheck(directory, "test/timeouts.test.ts");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 test(
-  "ARK-T30 the every-file timeout check refuses a sync-style test with a 10 second timeout",
+  "ARK-T30 the every-file timeout check of ARK-T31 refuses a git-heavy test with a short, missing or unresolved timeout and passes one with a limit",
   async () => {
-    // Without ARK_LOAD_PROOF the owning check runs and passes on the real sync and merge-request files.
+    // Without ARK_LOAD_PROOF the owning check runs and passes on the real files.
     const normal = await runOwningCheck(repositoryRoot, "test/timeouts.test.ts");
     expect(normal.code).toBe(0);
     expect(normal.output).toMatch(/\b1 pass\b/);
     expect(normal.output).not.toMatch(/\b[1-9]\d* skip\b/);
 
-    // A copy of this file in a temp repository checks a fixture instead of the real files.
-    const directory = mkdtempSync(join(tmpdir(), "ark-t20-"));
-    try {
-      mkdirSync(join(directory, "test"));
-      writeFileSync(
-        join(directory, "test", "fixture.test.ts"),
-        [
-          'test("opens a merge request", () => { startRun(); }, { timeout: 10_000 });',
-          'test("syncs a scenario", () => { scenario(); }, { timeout: 30_000 });',
-          "",
-        ].join("\n"),
-      );
-      const source = readFileSync(join(repositoryRoot, "test/timeouts.test.ts"), "utf8");
-      const copy = source.replace(
-        /^const gitHeavyFiles = \[[^\]]*\];$/m,
-        'const gitHeavyFiles = ["test/fixture.test.ts"];',
-      );
-      expect(copy).not.toBe(source);
-      writeFileSync(join(directory, "test", "timeouts.test.ts"), copy);
-      const refused = await runOwningCheck(directory, "test/timeouts.test.ts");
-      expect(refused.code).not.toBe(0);
-      expect(refused.output).toContain("opens a merge request");
-      expect(refused.output).toContain('"timeout": 10000');
-      expect(refused.output).not.toContain("syncs a scenario");
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
+    // 1. A limit below the minimum is refused; the boundary of exactly 30 s is not.
+    const shortLimit = await runCheckOnFixture([
+      'test("opens a merge request", () => { startRun(); }, { timeout: 10_000 });',
+      'test("syncs a scenario", () => { scenario(); }, { timeout: 30_000 });',
+    ]);
+    expect(shortLimit.code).not.toBe(0);
+    expect(shortLimit.output).toContain("opens a merge request");
+    expect(shortLimit.output).toContain('"timeout": 10000');
+    expect(shortLimit.output).not.toContain("syncs a scenario");
+
+    // 2. Each helper call without a limit is refused, including the last test of the file.
+    const noLimit = await runCheckOnFixture([
+      'test("generated scenario without a limit", () => { generatedScenario(); });',
+      'test("submodule run without a limit", () => { submoduleRun(); });',
+      'test("open run without a limit", () => { openRun(); });',
+    ]);
+    expect(noLimit.code).not.toBe(0);
+    expect(noLimit.output).toContain("generated scenario without a limit");
+    expect(noLimit.output).toContain("submodule run without a limit");
+    expect(noLimit.output).toContain("open run without a limit");
+
+    // 3. A named constant below the minimum is resolved and refused.
+    const shortConstant = await runCheckOnFixture([
+      "const SHORT = 10_000;",
+      'test("generated scenario with a short constant", () => { generatedScenario(); }, { timeout: SHORT });',
+    ]);
+    expect(shortConstant.code).not.toBe(0);
+    expect(shortConstant.output).toContain("generated scenario with a short constant");
+    expect(shortConstant.output).toContain('"timeout": 10000');
+
+    // 4. A name that the file does not define fails the guard; it never passes it.
+    const unresolvedName = await runCheckOnFixture([
+      'test("submodule run with an unresolved name", () => { submoduleRun(); }, { timeout: MISSING });',
+    ]);
+    expect(unresolvedName.code).not.toBe(0);
+    expect(unresolvedName.output).toContain("submodule run with an unresolved name");
+
+    // 5. Every limit present passes, and a helper definition between tests flags no test.
+    const everyLimit = await runCheckOnFixture([
+      "const LONG = 120_000;",
+      'test("generated scenario with a long constant", () => { generatedScenario(); }, { timeout: LONG });',
+      'test("submodule run at the boundary", () => { submoduleRun(); }, { timeout: 30_000 });',
+      'test("open run with a long limit", () => { openRun(); }, { timeout: 120_000 });',
+      'test("pure text scan", () => { expect(1).toBe(1); });',
+      "function testedRun() { return scenario(); }",
+    ]);
+    expect(everyLimit.code).toBe(0);
+    expect(everyLimit.output).toMatch(/\b1 pass\b/);
+
+    // 6. A test without a limit never borrows the limit of a later loop-declared test, and a
+    // loop-declared test without a limit is split out.
+    const borrowedLimit = await runCheckOnFixture([
+      'test("alpha borrows a later limit", () => { generatedScenario(); });',
+      'for (const n of [1]) { test("gamma loop with a limit", () => { scenario(); }, { timeout: 30_000 }); }',
+      'for (const n of [1]) { test("beta loop without a limit", () => { openRun(); }); }',
+    ]);
+    expect(borrowedLimit.code).not.toBe(0);
+    expect(borrowedLimit.output).toContain("alpha borrows a later limit");
+    expect(borrowedLimit.output).toContain("beta loop without a limit");
+    expect(borrowedLimit.output).not.toContain("gamma loop with a limit");
   },
-  { timeout: 60_000 },
+  { timeout: 180_000 },
 );
