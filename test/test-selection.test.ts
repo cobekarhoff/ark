@@ -682,3 +682,203 @@ macOnly(
   () => proveFixtureSkipsMemoryWait(orphanFixture),
   120_000,
 );
+
+describe("ark test pristine base duration of a refactor run", () => {
+  type Completed = {
+    suites: { name: string; passed: boolean; head_s?: number; pristine_s?: number }[];
+  };
+
+  /** A passing one-test file titled `title`; `body` runs first (at module load or in the test). */
+  const passingFile = (title: string, prelude = "", work = "") =>
+    [
+      'import { appendFileSync } from "node:fs";',
+      'import { expect, test } from "bun:test";',
+      prelude,
+      `test(${JSON.stringify(title)}, () => { ${work} expect(1).toBe(1); }, 30_000);`,
+      "",
+    ].join("\n");
+
+  const wholeSuite = (name: string, file: string): SuiteConfig => ({
+    name,
+    level: "integration",
+    repo: ".",
+    command: `bun test ./test/${file} ${reportFlags}`,
+    parser: "bun",
+  });
+
+  /**
+   * Two suites. `slow` sleeps 3 s at the base commit and, once the run's own commit rewrites it, not at all (the refactor
+   * makes the file faster); the base version also writes one line to a marker file each time it runs, so the marker
+   * counts the pristine runs. `fast` never sleeps.
+   */
+  function pristineRun(kind: string) {
+    const directory = mkdtempSync(join(tmpdir(), "pristine-"));
+    const marker = join(directory, "marker.txt");
+    const slowAtBase = passingFile(
+      "FAKE-T1 slow",
+      `appendFileSync(${JSON.stringify(marker)}, "slow\\n");`,
+      'Bun.spawnSync(["sleep", "3"]);',
+    );
+    const workspace = tempGitRepo({
+      "test/slow.test.ts": slowAtBase,
+      "test/fast.test.ts": passingFile("FAKE-T2 fast"),
+    });
+    const run = startRun({
+      workspace,
+      suites: [wholeSuite("slow", "slow.test.ts"), wholeSuite("fast", "fast.test.ts")],
+      cases: ["FAKE-T1", "FAKE-T2"],
+      kind,
+    });
+    commit(run.mirror, "make slow faster", {
+      "test/slow.test.ts": passingFile("FAKE-T1 slow", "// no sleep"),
+    });
+    return {
+      ...run,
+      pristineRuns: () =>
+        existsSync(marker) ? readFileSync(marker, "utf8").split("\n").filter(Boolean).length : 0,
+    };
+  }
+
+  const resourcesOf = (runDirectory: string) => {
+    const path = join(runDirectory, "results", "resources.json");
+    return existsSync(path)
+      ? (JSON.parse(readFileSync(path, "utf8")) as {
+          suites?: Record<string, Record<string, Record<string, unknown>>>;
+        })
+      : {};
+  };
+
+  /** The head and pristine seconds that the suite line of `out` prints, or null when the line has none. */
+  const printed = (out: string, name: string) => {
+    const line = out.match(new RegExp(`^suite {6}${name} \\(integration\\) .*$`, "m"))![0];
+    const found = line.match(/ {2}head ([\d.]+)s {2}pristine base ([\d.]+)s/);
+    return found === null ? null : { head: Number(found[1]), pristine: Number(found[2]) };
+  };
+
+  const byName = (completed: Completed) =>
+    Object.fromEntries(completed.suites.map((s) => [s.name, s]));
+
+  test("ARK-T725 a full ark test of a refactor run records and prints the pristine base duration of each suite beside the head duration, and a rerun that replays the cached census still reports it", () => {
+    const run = pristineRun("refactor");
+
+    const first = ark("test", run.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    const [completed] = events(run.runDirectory, "test.completed") as Completed[];
+    const { slow, fast } = byName(completed);
+    for (const suite of [slow, fast]) {
+      expect(typeof suite.head_s, `${suite.name} head_s`).toBe("number");
+      expect(typeof suite.pristine_s, `${suite.name} pristine_s`).toBe("number");
+    }
+    // The refactor made slow faster by its 3 s sleep: its pristine time is above its head time by most of it. The other
+    // suite did not change, so one wall time written to every suite fails here.
+    expect(slow.pristine_s!).toBeGreaterThanOrEqual(slow.head_s! + 2);
+    expect(fast.pristine_s!).toBeLessThan(fast.head_s! + 2);
+    // The pristine file ran once, in the census; the base run holds the head's copy, which has no sleep and no marker.
+    expect(run.pristineRuns()).toBe(1);
+
+    const resources = resourcesOf(run.runDirectory).suites!;
+    for (const suite of [slow, fast]) {
+      const pristine = resources[suite.name]!.pristine!;
+      expect(Math.abs((pristine.wall_s as number) - suite.pristine_s!)).toBeLessThanOrEqual(1);
+      expect("peak_mb" in pristine || "cpu_s" in pristine).toBe(false);
+      expect("peak_mb" in resources[suite.name]!.head!).toBe(true);
+    }
+    for (const suite of [slow, fast])
+      expect(printed(first.out, suite.name), `${suite.name} line`).toEqual({
+        head: suite.head_s!,
+        pristine: suite.pristine_s!,
+      });
+
+    // Step 2: the census replays from the cache; the figure is the one the cache entry stored.
+    const again = ark("test", run.runId);
+    expect(again.code, again.err + again.out).toBe(0);
+    expect(run.pristineRuns()).toBe(1);
+    const rerun = byName((events(run.runDirectory, "test.completed") as Completed[])[1]!);
+    for (const name of ["slow", "fast"]) {
+      expect(rerun[name]!.pristine_s, `${name} replayed`).toBe(
+        byName(completed)[name]!.pristine_s!,
+      );
+      expect(printed(again.out, name)!.pristine).toBe(byName(completed)[name]!.pristine_s!);
+      expect(resourcesOf(run.runDirectory).suites![name]!.pristine).toEqual({
+        wall_s: byName(completed)[name]!.pristine_s!,
+      });
+    }
+
+    // Step 4: ark retro counts the CPU of the head and base sides only.
+    expect(ark("retro", run.runId).code).toBe(0);
+    const metrics = JSON.parse(readFileSync(join(run.runDirectory, "metrics.json"), "utf8"));
+    expect(metrics.resources.top.map((entry: { name: string }) => entry.name).join()).not.toContain(
+      "pristine",
+    );
+  });
+
+  for (const [title, kind, args] of [
+    ["a quick run of a refactor run", "refactor", ["--quick"]],
+    ["a full run of a feature run", "feature", []],
+  ] as const)
+    test(`ARK-T725 ${title} records and prints no pristine base duration`, () => {
+      const run = pristineRun(kind);
+      const result = ark("test", run.runId, ...args);
+      expect(result.code, result.err + result.out).toBe(0);
+      const [completed] = events(run.runDirectory, "test.completed") as Completed[];
+      expect(completed.suites.length).toBe(2);
+      for (const suite of completed.suites) {
+        expect("head_s" in suite, `${suite.name} head_s`).toBe(false);
+        expect("pristine_s" in suite, `${suite.name} pristine_s`).toBe(false);
+        expect("pristine" in (resourcesOf(run.runDirectory).suites?.[suite.name] ?? {})).toBe(
+          false,
+        );
+      }
+      expect(result.out).not.toContain("pristine base");
+    });
+
+  test("ARK-T726 a pristine suite that fails records no figure and never changes base_passed or the exit code of a refactor run, and the base run still holds the head's copy of an added test file", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pristine-red-"));
+    const marker = join(directory, "marker.txt");
+    const workspace = tempGitRepo({
+      // red in the pristine checkout (no added file there), green once the base run copies the head's added file
+      "test/old.test.ts": [
+        'import { existsSync } from "node:fs";',
+        'import { expect, test } from "bun:test";',
+        'test("FAKE-T1 old", () => { expect(existsSync(import.meta.dir + "/added.test.ts")).toBe(true); });',
+        "",
+      ].join("\n"),
+    });
+    const run = startRun({
+      workspace,
+      suites: [{ ...wholeSuite("cli", ""), command: `bun test ./test ${reportFlags}` }],
+      cases: ["FAKE-T1", "FAKE-T2"],
+      kind: "refactor",
+    });
+    commit(run.mirror, "add a test", {
+      "test/added.test.ts": passingFile(
+        "FAKE-T2 added",
+        `appendFileSync(${JSON.stringify(marker)}, "added " + process.cwd() + "\\n");`,
+      ),
+    });
+
+    for (const round of [0, 1]) {
+      const result = ark("test", run.runId);
+      expect(result.code, result.err + result.out).toBe(0);
+      const completed = (
+        events(run.runDirectory, "test.completed") as (Completed & {
+          base_passed?: boolean;
+        })[]
+      )[round]!;
+      expect(completed.base_passed, `round ${round}`).toBe(true);
+      expect(result.out).toContain("base      passed");
+      expect("pristine_s" in completed.suites[0]!).toBe(false);
+      expect("pristine" in (resourcesOf(run.runDirectory).suites?.cli ?? {})).toBe(false);
+      expect(result.out).not.toContain("pristine base");
+      if (round === 0) {
+        // the head ran the added file in the run's worktree; the base run ran the head's copy once, in another checkout
+        const folders = readFileSync(marker, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => line.slice("added ".length));
+        expect(folders.filter((folder) => folder === realpathSync(run.mirror)).length).toBe(1);
+        expect(folders.filter((folder) => folder !== realpathSync(run.mirror)).length).toBe(1);
+      }
+    }
+  });
+});
