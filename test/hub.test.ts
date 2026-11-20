@@ -3901,8 +3901,13 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
   const { run, messages, orca } = conversationFixture();
   const state = installFakeTools({ orca, orcaInboxDelaySeconds: 0.5 });
   process.env.ARK_HUB_INTERVAL_MS = "100";
+  // Slow Orca calls: the handle directory read outlasts the 2 s wait, so the first reply is the loading reply (every handle unmapped).
+  writeFileSync(join(state, "orca.sleep"), "3");
   const { baseUrl } = await start();
   delete process.env.ARK_HUB_INTERVAL_MS;
+  // Keep the delay until the loading reply is read, then speed Orca up so the directory read finishes.
+  await conversationWhen<ProjectReply>(baseUrl, () => true);
+  writeFileSync(join(state, "orca.sleep"), "0");
   // The liveness read is `--limit 200 --full`; the conversation read names a larger limit.
   const fullReads = () =>
     readFileSync(join(state, "orca.log"), "utf8")
