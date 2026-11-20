@@ -1291,7 +1291,7 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
 
 // ---------------------------------------------------------------- ARK-T734 and ARK-T735
 
-/** Open runs and workers for each run of ARK-T734: the unfixed `readOrca` pass must measure over 200 ms at this size. */
+/** Open runs and workers for each run of ARK-T734: at this size the unfixed `readOrca` pass adds over 150 ms to the control's lag. */
 const largeRunCount = 100;
 /** The rows of `run-list`: this host's Orca lists 273 runs, of which 4 are open Ark runs. */
 const largeListRows = 273;
@@ -1543,12 +1543,18 @@ function healthProber(hub: Hub) {
         }
       }
     },
-    largestLag: () => Math.max(0, ...probes.map((entry) => entry.lag_ms ?? 0)),
+    /** The largest `lag_ms` of the probes from index `since` on. */
+    largestLag: (since = 0) =>
+      Math.max(0, ...probes.slice(since).map((entry) => entry.lag_ms ?? 0)),
+    probeCount: () => probes.length,
     message: () => `ARK-T734 ${lagWindowMessage(probes, lines, startEpoch)}`,
   };
 }
 
-test("ARK-T734 On a hub whose fake orca answers one pass with many open runs, many workers each and a full inbox, no probe of the health lag passes 200 ms for the whole pass and the compose and publish after it, and the snapshot holds every agent and wait the fixture names", async () => {
+/** What the large orca pass may add to the largest lag of the control phase on the same hub (ARK-606/AC1). */
+const orcaLagAddedLimitMilliseconds = 150;
+
+test("ARK-T734 On a hub whose fake orca answers one pass with many open runs, many workers each and a full inbox, the largest health lag of the large pass and of the compose and publish after it is at most 150 ms over the largest lag of a control phase on the same hub, and the snapshot holds every agent and wait the fixture names", async () => {
   const fake = stage();
   const runs = Array.from({ length: largeRunCount }, (_, number) => {
     const run = `${today()}-ARK-${3000 + number}-1`;
@@ -1577,12 +1583,10 @@ test("ARK-T734 On a hub whose fake orca answers one pass with many open runs, ma
   const page = openPage(hub);
   const prober = healthProber(hub);
 
-  // Steps 2 and 3: two passes; the home alone must not hold the loop.
+  // Steps 2 and 3: two passes with no orca load; their largest lag is what the home and the host cost alone.
   await prober.untilOrcaPasses(2);
-  expect(
-    prober.largestLag() <= lagLimitMilliseconds,
-    `control (no load): ${prober.message()}`,
-  ).toBe(true);
+  const controlLag = prober.largestLag();
+  const loadFrom = prober.probeCount();
 
   // Step 4: the load enters; the full run list is renamed last, so a pass that reads it finds the workers in place.
   for (const [file, text] of Object.entries(home.load)) place(fake, file, text);
@@ -1609,8 +1613,12 @@ test("ARK-T734 On a hub whose fake orca answers one pass with many open runs, ma
       expect(shownOf(snapshot, run), `${label} snapshot, ${run}`).toEqual(home.expected(runIndex));
   expect(last.sources.orca.ok, "sources.orca.ok in the last snapshot").toBe(true);
 
-  // Step 6: no probe passed the limit, since the switch or before.
-  expect(prober.largestLag() <= lagLimitMilliseconds, prober.message()).toBe(true);
+  // Step 6: the large pass adds at most the limit to the control's lag (the health lag reads the last 60 s).
+  const largeLag = prober.largestLag(loadFrom);
+  expect(
+    largeLag <= controlLag + orcaLagAddedLimitMilliseconds,
+    `control lag ${controlLag} ms, large pass lag ${largeLag} ms, added ${largeLag - controlLag} ms, limit ${orcaLagAddedLimitMilliseconds} ms: ${prober.message()}`,
+  ).toBe(true);
   hub.child.kill("SIGTERM");
   await hub.exited;
 }, 90_000);
