@@ -9,7 +9,7 @@ import { budgetHeldVariable, openTestBudget, runHoldsCores } from "./test-lock.t
 const ticketLabel = "bun test";
 
 /** `pid` to command line, from one `ps` call. A failing or missing `ps` gives an empty map. */
-function commandLines(pids: number[]): Map<number, string> {
+export function commandLines(pids: number[]): Map<number, string> {
   const lines = new Map<number, string>();
   try {
     const output = Bun.spawnSync(["ps", "-o", "pid=,command=", "-p", pids.join(",")], {

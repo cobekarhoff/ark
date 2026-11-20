@@ -49,6 +49,7 @@ Cover each class that applies to the ticket with one case, or with one line of r
 - The failure of each command, host or process that the change calls.
 - Each way into the same view or command: each link type, each repeated section, Esc after each way in.
 - Each race that `evaluation.md` names, with two real processes.
+  - A case for a race or flaky test names its repeat: `bun test --rerun-each=N <one file>` is the quick repeat, in place of N separate processes (one file in one process; a one-file run takes no cores from the test budget, a whole-suite `--rerun-each` waits like any bare `bun test`). The proof of a race or load fix is 20 separate `bun test` processes beside the loaded suite, because one process keeps module state and process-level timing between repeats.
 - Multi-repo, base-only and cross-suite runs.
 - A front matter key that the reader does not know.
 - The evidence and ownership files that a command writes.
