@@ -1060,7 +1060,10 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
   let asset: string | undefined;
   let messageId: string | undefined;
   let largestLag = 0;
-  let largestLagAt = 0;
+  type HealthProbe = { at: number; lag_ms: number | null; sources: Record<string, PassHealth> };
+  const healthProbes: HealthProbe[] = [];
+  const hubLines: { at: number; text: string }[] = [];
+  let outputRead = 0;
   const firstEnds = new Map<string, number>();
   const lastEnds = new Map<string, number>();
   const run = encodeURIComponent(openRun);
@@ -1086,7 +1089,9 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
     "GET /api/ticket/<project>/<ticket>/cases",
     "POST /api/open-in-orca",
   ];
-  const deadline = performance.now() + soakMilliseconds;
+  const soakStartEpoch = Date.now();
+  const soakStart = performance.now();
+  const deadline = soakStart + soakMilliseconds;
   while (performance.now() < deadline) {
     const index = await probe("GET /", "/");
     asset ??= /\/assets\/[^"'\s)]+/.exec(index)?.[0];
@@ -1095,20 +1100,32 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
     await probe("GET /api/resources/history", "/api/resources/history");
     await probe("GET /api/companions", "/api/companions");
     const healthText = await probe("GET /api/health", "/api/health");
+    const probeAt = Math.round(performance.now() - soakStart);
+    let answer: Health | undefined;
     try {
-      const answer = JSON.parse(healthText) as Health;
-      if ((answer.lag_ms ?? 0) > largestLag) {
-        largestLag = answer.lag_ms ?? 0;
-        largestLagAt = Math.round(deadline - performance.now());
-      }
-      for (const [name, pass] of Object.entries(answer.sources ?? {})) {
-        const ended = endedAt(pass);
-        if (ended === null) continue;
-        if (!firstEnds.has(name)) firstEnds.set(name, ended);
-        lastEnds.set(name, ended);
-      }
+      answer = JSON.parse(healthText) as Health;
     } catch {
       // The probe already recorded the status.
+    }
+    healthProbes.push({
+      at: probeAt,
+      lag_ms: answer?.lag_ms ?? null,
+      sources: answer?.sources ?? {},
+    });
+    largestLag = Math.max(largestLag, answer?.lag_ms ?? 0);
+    // The hub output since the previous probe, whole lines only, each stamped with this probe's time.
+    const output = hub.output();
+    const wholeEnd = output.lastIndexOf("\n") + 1;
+    if (wholeEnd > outputRead) {
+      for (const text of output.slice(outputRead, wholeEnd).split("\n"))
+        if (text.length > 0) hubLines.push({ at: probeAt, text });
+      outputRead = wholeEnd;
+    }
+    for (const [name, sourcePass] of Object.entries(answer?.sources ?? {})) {
+      const ended = endedAt(sourcePass);
+      if (ended === null) continue;
+      if (!firstEnds.has(name)) firstEnds.set(name, ended);
+      lastEnds.set(name, ended);
     }
     const since = encodeURIComponent(new Date(Date.now() - 86_400_000).toISOString());
     const until = encodeURIComponent(new Date(Date.now() + 60_000).toISOString());
@@ -1190,11 +1207,35 @@ test("ARK-T699 With a page connected, default reader intervals and 250 runs plus
       ),
     "routes slower than 1 s",
   ).toEqual([]);
-  // No pass held the loop for more than 200 ms, as the hub reports it.
+  // The window of the largest lag, built on every run from every probe the soak kept: the message is the
+  // failure text of the lag assert, so a failing run names the work that ran in the window (ARK-602/AC1).
+  // Loaded here because the helper is test support of this file and ARK-T730 only. The specifier is a variable
+  // so that the typecheck does not need the module to exist when the tests are written first.
+  const helperPath = "./hub-stall-window";
+  const { windowMessage } = (await import(helperPath)) as {
+    windowMessage: (
+      probes: HealthProbe[],
+      lines: { at: number; text: string }[],
+      startEpoch: number,
+    ) => string;
+  };
+  const lagMessage = windowMessage(healthProbes, hubLines, soakStartEpoch);
+  const soakElapsed = performance.now() - soakStart;
+  expect(healthProbes.length, "health probes kept").toBe(probes.get("GET /api/health")!.count);
   expect(
-    largestLag <= lagLimitMilliseconds,
-    `the largest loop lag was ${largestLag} ms, ${soakMilliseconds - largestLagAt} ms into the soak`,
+    healthProbes.every((entry, index) => index === 0 || entry.at >= healthProbes[index - 1]!.at),
+    "probe times never decrease",
   ).toBe(true);
+  const largestLagProbe = healthProbes.find((entry) => (entry.lag_ms ?? 0) === largestLag);
+  expect(largestLagProbe, "a probe holds the largest lag").toBeDefined();
+  expect(
+    largestLagProbe!.at >= 0 && largestLagProbe!.at <= soakElapsed,
+    "largest lag probe time",
+  ).toBe(true);
+  if (largestLag > 0) expect(lagMessage).toContain(String(largestLag));
+  else expect(lagMessage).toMatch(/no lag/i);
+  // No pass held the loop for more than 200 ms, as the hub reports it.
+  expect(largestLag <= lagLimitMilliseconds, lagMessage).toBe(true);
   // Speed was not bought by stopping the readers: every reader ended a pass and then another one.
   for (const sourceName of Object.keys(sourceAffects)) {
     expect(lastEnds.has(sourceName), `${sourceName} ended no pass`).toBe(true);
