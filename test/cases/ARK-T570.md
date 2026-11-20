@@ -1,12 +1,12 @@
 ---
 id: ARK-T570
-title: ARK-T570 both CI jobs of .github/workflows/ci.yml install the same exact Bun version, and it is 1.4.4 or later
+title: ARK-T570 every job of .github/workflows/ci.yml that runs bun installs the same exact Bun version, and it is 1.4.4 or later
 level: integration
 technique: equivalence classes (both jobs pinned and equal, one job differs, version below the floor, floating or missing version, a job that runs bun with no setup-bun step) and boundary values at 1.4.3, 1.4.4 and 1.4.10 through the stdlib semver comparison
 priority: high
 risk: "the CI runner stays on Bun 1.4.0, which loses the exit of a `spawnSync` child (oven-sh/bun PR #44581, fixed in 1.4.4) and stalls every `bun test --parallel` worker that has run earlier tests (main push CI run 43604566696, 3 of the last 6 merges red); or only the `test` job is bumped and `playwright` stays on 1.4.0; or a pin is a floating value (`latest`, `1.x`, none) that resolves to a different Bun for each job or on each run; or a job added later runs `bun` with no pinned setup-bun step; or the pins are compared as strings so `1.4.10` reads as below `1.4.4`"
 status: active
-changed_by: 2026-11-14-ARK-479-1
+changed_by: 2026-11-19-ARK-571-1
 ---
 
 ## Objective
@@ -35,7 +35,7 @@ Out of scope: that Bun 1.4.4 exists or removes the stall (the validator's Linux 
 
 ## Expected results
 
-- Step 1: the jobs `test` and `playwright` shall each have a setup-bun step with a `bun-version`.
+- Step 1: the static-checks job, the shard job and the `playwright` job shall each have a setup-bun step with a `bun-version` (ARK-571 splits the old `test` job; the aggregate job `test` runs no bun command and needs no pin).
 - Step 2: every job that runs `bun` or `bunx` shall have a setup-bun step, so a job added later with no pin fails the case by naming itself.
 - Step 3: the versions shall be identical across all jobs (`1.4.4` in one job and `1.4.5` in the other fails), each shall be an exact version (`latest`, `1.x`, `>=1.4.4` and a missing `with` fail), and each shall satisfy the floor, compared numerically by `Bun.semver` (`1.4.10` is above `1.4.4`; a string comparison is the defect the risk names). At the base commit (`1.4.0` in both jobs) the case shall fail on the floor.
 - The failure message shall name the job and the version it found.
