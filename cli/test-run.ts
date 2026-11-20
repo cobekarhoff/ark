@@ -376,6 +376,8 @@ type SuiteRecord = {
   reused?: boolean;
   flaky?: string[];
   failed_files?: string[];
+  /** A quick run of a suite with `changed_command` only: the test files that ran, as the report names them. */
+  files?: string[];
   /** A full refactor run only: wall seconds of the head's and of the pristine base's whole suite. Absent when unknown. */
   head_s?: number;
   pristine_s?: number;
@@ -1393,11 +1395,18 @@ async function executeTest(
           console.log(`suite      ${suite.name} head  skipped  (${skip})`);
           continue;
         }
-        // A quick run runs the own-commit files of a suite with base_files, and the whole suite of one without.
+        // A quick run runs the changed command of a suite that has one, else the own-commit files of a suite with base_files, else the whole suite. A worktree with no base runs the whole suite.
+        const base = state.worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
         let template: string | undefined;
         let files: string[] | undefined;
-        if (quick && suite.base_files !== undefined) {
-          const base = state.worktrees.find((worktree) => worktree.repo === suite.repo)?.base;
+        let changed = false;
+        if (quick && suite.changed_command !== undefined) {
+          if (base !== undefined) {
+            changed = true;
+            fileSelection = true;
+            template = suite.changed_command.replaceAll("{base}", base);
+          }
+        } else if (quick && suite.base_files !== undefined) {
           files = base === undefined ? [] : await ownTestFiles(suite, base, mirror);
           if (files.length === 0) {
             headRun.skipped.set(suite.name, "no changed test file");
@@ -1433,6 +1442,14 @@ async function executeTest(
           dirty ? undefined : { project, key },
           mainCheck,
         );
+        // A changed command that selects no test file passes with no test: a skip, never `passed`.
+        if (changed && passed && results.length === 0) {
+          // runSuite recorded a cached empty set as reused; a skipped suite is not reused.
+          if (reused) headRun.reused.splice(headRun.reused.indexOf(suite.name), 1);
+          headRun.skipped.set(suite.name, "no test files are affected");
+          console.log(`suite      ${suite.name} head  skipped  (no test files are affected)`);
+          continue;
+        }
         exitCodes.set(suite.name, code);
         allResults.push(...results);
         headResults.set(suite.name, results);
@@ -1447,6 +1464,9 @@ async function executeTest(
           ...(reused ? { reused } : {}),
           ...(flaky.length > 0 ? { flaky } : {}),
           ...(failedFiles.length > 0 ? { failed_files: failedFiles } : {}),
+          ...(changed
+            ? { files: [...new Set(results.flatMap((result) => result.file ?? []))].sort() }
+            : {}),
           ...(timed && wall_s !== undefined ? { head_s: wall_s } : {}),
         });
       }
@@ -1569,7 +1589,7 @@ async function executeTest(
     if (!quick) console.log(`base      ${basePassed ? "passed" : "failed"}`);
     for (const suite of suites) {
       console.log(
-        `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}${suite.head_s !== undefined ? `  head ${suite.head_s}s` : ""}${suite.pristine_s !== undefined ? `  pristine base ${suite.pristine_s}s` : ""}${suite.reused ? `  reused  head key ${headKeys.get(suite.name)}` : ""}${suite.flaky ? `  flaky: ${suite.flaky.join(", ")} (failed once, passed on retry)` : ""}`,
+        `suite      ${suite.name} (${suite.level})  ${suite.passed ? "passed" : "failed"}${suite.head_s !== undefined ? `  head ${suite.head_s}s` : ""}${suite.pristine_s !== undefined ? `  pristine base ${suite.pristine_s}s` : ""}${suite.reused ? `  reused  head key ${headKeys.get(suite.name)}` : ""}${suite.flaky ? `  flaky: ${suite.flaky.join(", ")} (failed once, passed on retry)` : ""}${suite.files ? `  files: ${suite.files.join(", ") || "none named in the report"}` : ""}`,
       );
       if (suite.passed) continue;
       // ARK-333: why the suite failed, as a failed check prints it: the exit code, the log, its last 20 lines.

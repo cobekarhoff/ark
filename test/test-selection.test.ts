@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import {
   ark,
   recordEvaluation,
@@ -46,6 +47,7 @@ type SuiteConfig = {
   parser: "bun";
   base_files?: string;
   base_command?: string;
+  changed_command?: string;
   paths?: string[];
 };
 
@@ -135,6 +137,7 @@ function startRun(options: {
   cases: string[];
   kind?: string;
   forge?: boolean;
+  checks?: { name: string; repo: string; command: string }[];
   setup?: string;
 }): { runId: string; runDirectory: string; mirror: string } {
   const arkHome = tempArkHome();
@@ -152,6 +155,7 @@ function startRun(options: {
     test_min_free_memory_percent: 0,
     test_max_swap_gb: 1000,
     ...(options.setup === undefined ? {} : { setup: options.setup }),
+    ...(options.checks === undefined ? {} : { checks: options.checks }),
     suites: options.suites,
     roles,
   });
@@ -888,5 +892,325 @@ describe("ark test pristine base duration of a refactor run", () => {
         expect(folders.filter((folder) => folder !== realpathSync(run.mirror)).length).toBe(1);
       }
     }
+  });
+});
+
+// ARK-580: a suite's `changed_command` runs in a quick `ark test` only.
+describe("ark test changed_command", () => {
+  const fakeForge = join(import.meta.dir, "fixtures/merge-request");
+
+  /** A shell command that writes a JUnit report naming `files`, one passing `FAKE-T1` test each. */
+  const reportFor = (...files: string[]) =>
+    `printf '%s' '<testsuites>${files
+      .map((file) => `<testcase name="FAKE-T1 ${file}" classname="${file}" file="${file}"/>`)
+      .join("")}</testsuites>' > {report}`;
+
+  /**
+   * A suite whose commands leave markers in `markers` and report test files: `command` names a.test.ts and b.test.ts,
+   * `changed_command` (when `changedFiles` is set) names `changedFiles` and keeps the `{base}` it got.
+   */
+  const stubSuite = (
+    markers: string,
+    name: string,
+    changedFiles?: string[],
+    extra: Partial<SuiteConfig> = {},
+  ): SuiteConfig => ({
+    name,
+    level: "integration",
+    repo: ".",
+    parser: "bun",
+    command: `touch ${markers}/${name}-full-ran; ${reportFor("a.test.ts", "b.test.ts")}`,
+    ...(changedFiles === undefined
+      ? {}
+      : {
+          changed_command: `touch ${markers}/${name}-changed-ran; echo {base} > ${markers}/${name}-base-seen; ${reportFor(...changedFiles)}`,
+        }),
+    ...extra,
+  });
+
+  const markerDirectory = () => mkdtempSync(join(tmpdir(), "changed-command-"));
+  const marked = (markers: string, name: string) => existsSync(join(markers, name));
+  const clearMarkers = (markers: string) => {
+    rmSync(markers, { recursive: true, force: true });
+    mkdirSync(markers);
+  };
+  const suiteLine = (output: string, name: string) =>
+    output.split("\n").find((line) => line.startsWith(`suite      ${name} `));
+  const baseOf = (runDirectory: string): string => events(runDirectory, "worktree.created")[0].base;
+
+  test("ARK-T737 a quick run runs changed_command with the worktree base and not command or base_files, records and prints the files that ran, skips an empty set, and runs a suite without one whole", () => {
+    const markers = markerDirectory();
+    const workspace = tempGitRepo({ "a.test.ts": "export {};\n", "b.test.ts": "export {};\n" });
+    const run = startRun({
+      workspace,
+      cases: ["FAKE-T1"],
+      suites: [
+        stubSuite(markers, "unit", ["a.test.ts"]),
+        stubSuite(markers, "both", ["a.test.ts"], {
+          base_files: "a.test.ts",
+          base_command: `touch ${markers}/both-base-command-ran; ${reportFor("a.test.ts")} # {files}`,
+        }),
+        stubSuite(markers, "plain"),
+        stubSuite(markers, "none", []),
+      ],
+    });
+    // The own commit changes a.test.ts: the own-commit selection of base_files would run base_command.
+    commit(run.mirror, "own test", { "a.test.ts": "export const a = 1;\n" });
+    const base = baseOf(run.runDirectory);
+    expect(base).toMatch(/^[0-9a-f]{40}$/);
+    expect(git(run.mirror, "rev-parse", "HEAD")).not.toBe(base);
+
+    const quick = ark("test", run.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(marked(markers, "unit-changed-ran")).toBe(true);
+    expect(marked(markers, "unit-full-ran")).toBe(false);
+    expect(readFileSync(join(markers, "unit-base-seen"), "utf8").trim()).toBe(base);
+    expect(marked(markers, "both-changed-ran")).toBe(true);
+    expect(marked(markers, "both-base-command-ran")).toBe(false);
+    expect(readFileSync(join(markers, "both-base-seen"), "utf8").trim()).toBe(base);
+    expect(marked(markers, "plain-full-ran")).toBe(true);
+    expect(quick.out).toContain("none head  skipped  (no test files are affected)");
+    expect(suiteLine(quick.out, "none")).not.toContain("passed");
+    for (const name of ["unit", "both"]) {
+      expect(suiteLine(quick.out, name)).toContain("files: a.test.ts");
+      expect(suiteLine(quick.out, name)).not.toContain("b.test.ts");
+    }
+    expect(suiteLine(quick.out, "plain")).not.toContain("files:");
+    const [completed] = events(run.runDirectory, "test.completed");
+    expect(completed.mode).toBe("quick");
+    const row = (name: string) =>
+      completed.suites.find((suite: { name: string }) => suite.name === name);
+    expect(row("unit").files).toEqual(["a.test.ts"]);
+    expect(row("both").files).toEqual(["a.test.ts"]);
+    expect("files" in row("plain")).toBe(false);
+
+    // The same heads again: the suites are reused and still name their files.
+    clearMarkers(markers);
+    const again = ark("test", run.runId, "--quick");
+    expect(again.code, again.err + again.out).toBe(0);
+    for (const name of ["unit", "both"]) {
+      expect(suiteLine(again.out, name)).toContain("reused");
+      expect(suiteLine(again.out, name)).toContain("files: a.test.ts");
+      expect(marked(markers, `${name}-changed-ran`)).toBe(false);
+    }
+    // A cached empty affected set is skipped, not reused: the record never lists it.
+    expect(again.out).toContain("none head  skipped  (no test files are affected)");
+    const secondCompleted = events(run.runDirectory, "test.completed").at(-1);
+    expect(secondCompleted.reused).toContain("head:unit");
+    expect(secondCompleted.reused).not.toContain("head:none");
+  });
+
+  test("ARK-T737 a quick run on the real bun runner selects the tests the base diff reaches, by import graph", () => {
+    const workspace = tempGitRepo({
+      "lib.ts": "export const value = 1;\n",
+      "lib.test.ts": `import { expect, test } from "bun:test";\nimport { value } from "./lib.ts";\ntest("FAKE-T1 lib", () => { expect(value).toBeGreaterThan(0); });\n`,
+      "other.test.ts": `import { expect, test } from "bun:test";\ntest("FAKE-T2 other", () => { expect(1).toBe(1); });\n`,
+    });
+    const run = startRun({
+      workspace,
+      cases: ["FAKE-T1", "FAKE-T2"],
+      suites: [
+        {
+          name: "cli",
+          level: "integration",
+          repo: ".",
+          parser: "bun",
+          command: `bun test ${reportFlags}`,
+          changed_command: `bun test --changed={base} ${reportFlags}`,
+        },
+      ],
+    });
+    commit(run.mirror, "change the library", { "lib.ts": "export const value = 2;\n" });
+
+    const quick = ark("test", run.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(suiteLine(quick.out, "cli")).toContain("files: lib.test.ts");
+    expect(suiteLine(quick.out, "cli")).not.toContain("other.test.ts");
+    expect(events(run.runDirectory, "test.completed")[0].suites[0].files).toEqual(["lib.test.ts"]);
+  });
+
+  test("ARK-T737 a changed_command that exits non-zero with no report fails the suite and is no empty affected set", () => {
+    const markers = markerDirectory();
+    const workspace = tempGitRepo({ "a.test.ts": "export {};\n" });
+    const run = startRun({
+      workspace,
+      cases: ["FAKE-T1"],
+      suites: [
+        stubSuite(markers, "crash", ["a.test.ts"], {
+          changed_command: `touch ${markers}/crash-ran; echo boom >&2; exit 1 # {base} {report}`,
+        }),
+      ],
+    });
+    const quick = ark("test", run.runId, "--quick");
+    expect(marked(markers, "crash-ran")).toBe(true);
+    expect(quick.code).not.toBe(0);
+    expect(quick.out).not.toContain("no test files are affected");
+    expect(events(run.runDirectory, "test.completed")[0].suites[0]).toMatchObject({
+      name: "crash",
+      passed: false,
+    });
+  });
+
+  test("ARK-T737 a worktree that records no base runs the whole command and never sends {base}", () => {
+    const markers = markerDirectory();
+    const workspace = tempGitRepo({ "a.test.ts": "export {};\n" });
+    const run = startRun({
+      workspace,
+      cases: ["FAKE-T1"],
+      suites: [stubSuite(markers, "unit", ["a.test.ts"])],
+    });
+    const created = deriveState(readEvents(run.runDirectory)).worktrees[0]!;
+    // An old log: the later worktree.created event of the repo has no base.
+    appendEvent(run.runDirectory, "worktree.created", {
+      repo: ".",
+      path: created.path,
+      branch: created.branch,
+    });
+
+    const quick = ark("test", run.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(marked(markers, "unit-full-ran")).toBe(true);
+    expect(marked(markers, "unit-changed-ran")).toBe(false);
+    expect(marked(markers, "unit-base-seen")).toBe(false);
+    expect(quick.out).not.toContain("unit head  skipped");
+  });
+
+  /** A run on a fake forge, with suites `unit` (changed_command only) and `e2e` (changed_command and base_files). */
+  function gatedRun(checks?: { name: string; repo: string; command: string }[]) {
+    process.env.PATH = `${fakeForge}:${(process.env.PATH ?? "")
+      .split(":")
+      .filter((entry) => entry !== fakeForge)
+      .join(":")}`;
+    process.env.FAKE_LOG = join(mkdtempSync(join(tmpdir(), "ark-fake-log-")), "calls.ndjson");
+    const markers = markerDirectory();
+    const workspace = tempGitRepo({ "a.test.ts": "export {};\n", "e2e.test.ts": "export {};\n" });
+    const run = startRun({
+      workspace,
+      cases: ["FAKE-T1"],
+      forge: true,
+      checks,
+      suites: [
+        stubSuite(markers, "unit", ["a.test.ts"]),
+        stubSuite(markers, "e2e", ["e2e.test.ts"], {
+          base_files: "e2e.test.ts",
+          base_command: `touch ${markers}/e2e-base-command-ran; ${reportFor("e2e.test.ts")} # {files}`,
+        }),
+      ],
+    });
+    commit(run.mirror, "own test", { "e2e.test.ts": "export const own = 1;\n" });
+    // A new head and no marker: the cache reuses a suite of the same heads and mode, so every run starts from here.
+    let revision = 0;
+    const freshHead = () => {
+      revision += 1;
+      commit(run.mirror, `change ${revision}`, { "a.test.ts": `export const n = ${revision};\n` });
+      clearMarkers(markers);
+    };
+    return { ...run, markers, freshHead };
+  }
+
+  test("ARK-T738 a full run runs command of every suite and never changed_command, with or without --keep-going, and a last quick run is refused at merge-request open while a last full run opens", () => {
+    const { runId, runDirectory, markers, freshHead } = gatedRun();
+    const ranFull = () => {
+      for (const name of ["unit", "e2e"]) {
+        expect(marked(markers, `${name}-full-ran`), `${name} command`).toBe(true);
+        expect(marked(markers, `${name}-changed-ran`), `${name} changed_command`).toBe(false);
+      }
+    };
+
+    freshHead();
+    expect(ark("test", runId).code).toBe(0);
+    ranFull();
+    expect(events(runDirectory, "test.completed").at(-1).mode).toBe("full");
+
+    freshHead();
+    expect(ark("test", runId, "--keep-going").code).toBe(0);
+    ranFull();
+
+    freshHead();
+    expect(ark("test", runId, "--quick").code).toBe(0);
+    expect(marked(markers, "unit-changed-ran")).toBe(true);
+    expect(marked(markers, "unit-full-ran")).toBe(false);
+    expect(events(runDirectory, "test.completed").at(-1).mode).toBe("quick");
+    const refused = ark("merge-request", "open", runId);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("quick");
+    expect(refused.err).toContain(`ark test ${runId}`);
+    expect(events(runDirectory, "merge_request.opened")).toHaveLength(0);
+
+    freshHead();
+    expect(ark("test", runId).code).toBe(0);
+    ranFull();
+    const opened = ark("merge-request", "open", runId);
+    expect(opened.code, opened.err + opened.out).toBe(0);
+    expect(events(runDirectory, "merge_request.opened")).toHaveLength(1);
+
+    // A failed check with --keep-going: the suites still run in full. A new run, so it comes last: it replaces ARK_HOME.
+    const failing = gatedRun([{ name: "lint", repo: ".", command: "false" }]);
+    failing.freshHead();
+    expect(ark("test", failing.runId, "--keep-going").code).toBe(1);
+    for (const name of ["unit", "e2e"]) {
+      expect(marked(failing.markers, `${name}-full-ran`)).toBe(true);
+      expect(marked(failing.markers, `${name}-changed-ran`)).toBe(false);
+    }
+  });
+
+  test("ARK-T739 ark.yml refuses a changed_command with no {base}, no {report}, no text or an empty value, hints a misspelled key, and loads a valid one", () => {
+    const markers = markerDirectory();
+    const workspace = tempGitRepo({ "a.test.ts": "export {};\n" });
+    const run = startRun({
+      workspace,
+      cases: ["FAKE-T1"],
+      suites: [stubSuite(markers, "unit", ["a.test.ts"])],
+    });
+    const valid = stubSuite(markers, "unit", ["a.test.ts"]);
+    const withSuite = (suite: Record<string, unknown>) =>
+      writeProject("demo", {
+        workspace,
+        ticket_source: "local",
+        test_min_free_memory_percent: 0,
+        test_max_swap_gb: 1000,
+        suites: [suite],
+        roles,
+      });
+    const refusals: [string, Record<string, unknown>, string][] = [
+      [
+        "no {base}",
+        { ...valid, changed_command: `bun test --changed ${reportFlags}` },
+        "suites[0].changed_command must contain {base}",
+      ],
+      [
+        "no {report}",
+        { ...valid, changed_command: "bun test --changed={base}" },
+        "suites[0].changed_command must contain {report}",
+      ],
+      [
+        "empty",
+        { ...valid, changed_command: "" },
+        "suites[0].changed_command is required and must be a non-empty string",
+      ],
+      [
+        "not text",
+        { ...valid, changed_command: ["bun"] },
+        "suites[0].changed_command is required and must be a non-empty string",
+      ],
+      [
+        "misspelled",
+        { ...valid, changed_command: undefined, changed_comand: valid.changed_command },
+        "suites[0].changed_comand is not a key; did you mean changed_command?",
+      ],
+    ];
+    for (const [label, suite, message] of refusals) {
+      withSuite(suite);
+      const refused = ark("test", run.runId, "--quick");
+      expect(refused.code, label).toBe(1);
+      expect(refused.err, label).toContain(message);
+      expect(marked(markers, "unit-full-ran"), `${label}: no suite runs`).toBe(false);
+      expect(marked(markers, "unit-changed-ran"), `${label}: no suite runs`).toBe(false);
+    }
+
+    withSuite(valid);
+    const loaded = ark("test", run.runId, "--quick");
+    expect(loaded.code, loaded.err + loaded.out).toBe(0);
+    expect(marked(markers, "unit-changed-ran")).toBe(true);
   });
 });
