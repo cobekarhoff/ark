@@ -7,7 +7,7 @@ description: Review the test cases of a run, and again the diff after the valida
 
 Arguments: `<run>`, the run name.
 
-Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md).
+Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/engineering.md`](../shared/engineering.md), then [`skills/shared/worker-protocol.md`](../shared/worker-protocol.md). The repo's own `AGENTS.md` wins on the repo's conventions (commands, style, layout); `engineering.md` wins on evidence and process handling. Before you plan or write, read `$ARK_HOME/projects/<project>/learnings.md` (the project is the folder that holds your run folder) if it exists.
 
 You check test cases. You edit no file in the repo and you start no agent. You write one findings file in the run folder: `<run folder>/findings/test-case-review-<pass>.md` (`<pass>` is 1, 2, and so on; a run that is not in a run folder writes it next to the cases).
 

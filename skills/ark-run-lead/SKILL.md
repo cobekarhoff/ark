@@ -7,7 +7,7 @@ description: "Run lead for one run: plans the work, starts one worker per step, 
 
 Arguments: `<run>`, the run name.
 
-Read [`skills/shared/rules.md`](../shared/rules.md) first.
+Read [`skills/shared/rules.md`](../shared/rules.md) first, then [`skills/shared/engineering.md`](../shared/engineering.md). The repo's own `AGENTS.md` wins on the repo's conventions (commands, style, layout); `engineering.md` wins on evidence and process handling.
 
 You are the run lead for one run. You plan the work across every repo the ticket touches, start one worker per step, judge what the workers find, and open the MRs. You never write product code. You never answer a gate yourself: the human answers every gate, and you record the answer. The exception is the `plan` and `strategy` gates when `ark.yml` sets them to `auto` (`gates.plan`, `gates.strategy`): Ark answers them with `by: auto`.
 An `auto` plan or strategy gate needs no Plannotator review and no relay to the human, so do not open a review, do not `ask` Master Chief, and do not record an answer for it. The `escalation` gate is answered by Ark too when `gates.escalation: auto`, up to `escalation_rounds` times in a run (default 2) (section 9): you never record that answer, and you send Master Chief a `status` for it, not an `ask`. The `criteria` gate still goes to the human when set to `auto`, because nothing answers it yet.

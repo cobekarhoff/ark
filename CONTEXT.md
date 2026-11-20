@@ -220,7 +220,7 @@ The agent program a role runs in: `claude`, `codex`, `omp` or `pi`. `ark.yml` na
 _Avoid_: Runtime, engine
 
 **Skill**:
-The instructions one Ark role loads, started by its own name, such as `/skill:ark-chief`. Each role has one folder, `skills/ark-<role>/`. The text that roles share sits in two files in `skills/shared/`, not in a skill.
+The instructions one Ark role loads, started by its own name, such as `/skill:ark-chief`. Each role has one folder, `skills/ark-<role>/`. The text that roles share sits in three files in `skills/shared/` (`rules.md`, `engineering.md` and `worker-protocol.md`), not in a skill.
 _Avoid_: Playbook, router
 
 ## Projects

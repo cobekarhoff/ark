@@ -1,6 +1,6 @@
 # Worker protocol
 
-Every worker skill and the two test case skills read this file first, after `rules.md`.
+Every worker skill and the two test case skills read this file after `rules.md` and `engineering.md`.
 
 You are a worker. You do one step of one run, in the run's worktree, and then you report. Your skill names your role: implementer, validator, reviewer, evaluator, designer, test case writer or test case reviewer.
 
@@ -18,7 +18,7 @@ Throughout your skill and this file:
 1. Your working folder is the step's repo worktree, `<run folder>/workspace/<repo>`, on the branch `ark/<ticket id>-<slug>`. Check with `pwd` and `git branch --show-current`. If you are not there, stop and report `--outcome failed`.
 2. Read `<run folder>/plan.yml`. Find the step named `<step>`. Note its `role`, `repo`, `needs` and `criteria`. Read the test cases for those criteria.
 3. Read `<run folder>/ticket.md` for the text of each AC the step serves.
-4. Read the context of the repo and the workspace: `AGENTS.md`, `CLAUDE.md` and the files that the step touches. Work from the repo's own conventions.
+4. Read the context of the repo and the workspace: `AGENTS.md`, `CLAUDE.md` and the files that the step touches. Work from the repo's own conventions (commands, style, layout); [`engineering.md`](engineering.md) wins on evidence and process handling.
    - If the step has a `skills` list in `plan.yml`, read each skill with `skill://<name>` before you work, and apply it. Name the skills you applied in your `worker_done` report. This covers the implementer and the validator. The reviewer uses the list as in its skill.
 5. Read what the earlier steps left, if you are not the first: `git log --oneline`, and any file in `<run folder>/findings/` that names your step.
 
