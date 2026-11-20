@@ -241,8 +241,8 @@ describe("ark test", () => {
       passed: true,
       heads: { ".": head(mirror) },
       suites: [
-        { name: "unit", level: "unit", passed: true },
-        { name: "e2e", level: "e2e", passed: true },
+        { name: "unit", level: "unit", passed: true, loadAtStart: 0, loadPeak: 0 },
+        { name: "e2e", level: "e2e", passed: true, loadAtStart: 0, loadPeak: 0 },
       ],
       checks: [
         { name: "old-id unit", passed: true },
@@ -275,8 +275,22 @@ describe("ark test", () => {
     expect({ ...second, reused: undefined, duration: undefined }).toEqual({
       ...event,
       suites: [
-        { name: "unit", level: "unit", passed: true, reused: true },
-        { name: "e2e", level: "e2e", passed: true, reused: true },
+        {
+          name: "unit",
+          level: "unit",
+          passed: true,
+          loadAtStart: null,
+          loadPeak: null,
+          reused: true,
+        },
+        {
+          name: "e2e",
+          level: "e2e",
+          passed: true,
+          loadAtStart: null,
+          loadPeak: null,
+          reused: true,
+        },
       ],
       reused: undefined,
       duration: undefined,
