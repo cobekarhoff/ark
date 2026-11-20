@@ -492,7 +492,26 @@ At its end `ark test` runs stage `head` of `ark merge-request check` and, only w
 problem (an AC string in no tracked file, an MR title problem, a malformed evidence file), prints
 the heading `merge-request check` and one line for each problem, also for a `--quick` or failing
 run, after the lines above and before the failure is thrown. It is information only: it changes
-neither the exit code nor `passed`.
+neither the exit code nor `passed`. A suite in `ark.yml` can give `time_budget_s` (seconds for the
+whole suite, read as the `time` of its report root), `slow_test_s` (seconds for one test, read from
+the `time` of each test case in the report; the behave parser sums the steps) and `on_over` (`warn`,
+the default, or `fail`); with none of them set the output and the result do not change. When one is
+set, a full run prints `time suite <name> <seconds> s` for each suite with its own time, then the
+verdict, made once from the head results after the cache replay and the retry of failed files, from
+the current `ark.yml` (never stored in the cache, never from the base or census runs): `warning
+suite <name> <seconds> s over time_budget_s <n>` for a suite over its budget, and one line for each
+test over `slow_test_s` (longer first, with its file, name and time): `warning slow test <suite> ...
+(no slow_reason)`. A test with no time in the report is never slow, and a reused suite whose stored
+result has no times prints `no suite time or test times in the reused result: not judged`. With
+`on_over: fail` the first word of those lines is `failure` and the run fails with `suite <name> is
+over its time limit (on_over: fail)`, `passed: false` and exit code 1; the suite row of
+`test.completed` stays `passed` and has no `failed_files`, so the next run re-runs no file for it. A
+slow test whose test case entry (`test/cases/<id>.md` of the suite's repo in the run's worktree)
+gives `slow_reason` is listed as `slow <suite> ... reason: <text>` and never fails the run; a test
+needs a `slow_reason` in the entry of every case id in its title, a test with no case id is never
+excused, and a retired entry or an empty `slow_reason` gives no reason. A quick run runs part of a
+suite: it lists slow tests as warnings, prints no suite time or budget line, and never fails for
+time.
 ```
 
 ### test-case new
@@ -512,9 +531,11 @@ directory while it reads the highest number, writes the counter and then the fil
 and worktrees of one repo get different IDs. It prints the ID alone on stdout and the path of the
 file on stderr. An entry is one Markdown file with the frontmatter `id`, `title` (starts with the
 id), `level` (unit, integration or e2e), `technique`, `priority`, `risk` (the defect the case
-catches), `status` (active or retired; a retired entry also has `retired_reason`) and `changed_by`,
-and the sections Objective, Preconditions, Steps, Expected results and Screenshot checkpoints.
-`test_case_source` in ark.yml accepts `local` only. Outside a git repo it exits 1.
+catches), `status` (active or retired; a retired entry also has `retired_reason`), and optionally
+`slow_reason` (why a test with this id may be slower than `slow_test_s`; `ark test` lists that test
+with the reason and does not fail it) and `changed_by`, and the sections Objective, Preconditions,
+Steps, Expected results and Screenshot checkpoints. `test_case_source` in ark.yml accepts `local`
+only. Outside a git repo it exits 1.
 ```
 
 ### test-audit inventory

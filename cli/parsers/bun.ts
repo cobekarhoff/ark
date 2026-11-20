@@ -27,7 +27,8 @@ export const parseBun: Parser = ({ report }) => {
   for (const [, attributeText, , body = ""] of report.matchAll(
     /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g,
   )) {
-    const { name = "", classname = "", file } = attributesOf(attributeText);
+    const { name = "", classname = "", file, time } = attributesOf(attributeText);
+    const duration_s = time === undefined || time === "" ? NaN : Number(time);
     const criteria = [...new Set(`${classname} ${name}`.match(criterionPattern) ?? [])].sort();
     const status = /<(failure|error)\b/.test(body)
       ? "failed"
@@ -40,6 +41,7 @@ export const parseBun: Parser = ({ report }) => {
       cases: caseIdsIn(`${classname} ${name}`).sort(),
       status,
       ...(file ? { file } : {}),
+      ...(Number.isFinite(duration_s) ? { duration_s } : {}),
     });
   }
   return results;

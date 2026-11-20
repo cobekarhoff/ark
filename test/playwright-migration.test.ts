@@ -106,14 +106,22 @@ describe("playwright migration", () => {
         criteria: ["ARK-901-AC1"],
         cases: [],
         status: "passed",
+        duration_s: 0.5,
       },
       {
         name: "ARK-901-AC2 fails with a message",
         criteria: ["ARK-901-AC2"],
         cases: [],
         status: "failed",
+        duration_s: 0.4,
       },
-      { name: "ARK-901-AC3 is skipped", criteria: ["ARK-901-AC3"], cases: [], status: "skipped" },
+      {
+        name: "ARK-901-AC3 is skipped",
+        criteria: ["ARK-901-AC3"],
+        cases: [],
+        status: "skipped",
+        duration_s: 0,
+      },
     ]);
   });
 
