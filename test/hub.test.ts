@@ -3919,8 +3919,11 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
           !line.includes("--terminal "),
       );
 
-  // A good read: below the limit, nothing stale, every field kept.
-  const first = await conversationWhen<ProjectReply>(baseUrl, (reply) => !reply.stale);
+  // A good read: below the limit, nothing stale, every field kept. Take it from a reply built after the directory read landed: msg_1 maps to Master Chief (the loading reply has every handle unmapped).
+  const first = await conversationWhen<ProjectReply>(
+    baseUrl,
+    (candidate) => agentOfMessage(candidate, "msg_1", "to").kind === "chief",
+  );
   const limit = Number(
     fullReads()
       .at(-1)!
