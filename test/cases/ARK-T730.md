@@ -4,7 +4,8 @@ title: ARK-T730 From handmade health probes the window picker names the sources 
 level: unit
 technique: equivalence classes (a pass in the window, a pass outside it, a pass that ran in it and ended after it, no pass, a repeated lag, two spikes) and boundary values (a pass ending exactly at the window start, the first probe holding the lag, an end time before the soak start)
 priority: high
-risk: the failing message of ARK-T699 names the wrong window or none: it brackets a lag with the probe that first reported it and the one after, so the source that ran is missing; it prints a source whose pass ended in another second; it drops a pass that ran in the window and ended after it; it compares the wall-clock `ended_at` with soak time without subtracting the soak start, so it names the wrong sources; it moves the window when the same 60 s lag is reported again or when a second spike has the same value; or it prints nothing for a lag no source or hub line explains, so a reader cannot tell "host load" from "not recorded"
+risk: >-
+  the failing message of ARK-T699 names the wrong window or none: it brackets a lag with the probe that first reported it and the one after, so the source that ran is missing; it prints a source whose pass ended in another second; it drops a pass that ran in the window and ended after it; it compares the wall-clock `ended_at` with soak time without subtracting the soak start, so it names the wrong sources; it moves the window when the same 60 s lag is reported again or when a second spike has the same value; or it prints nothing for a lag no source or hub line explains, so a reader cannot tell "host load" from "not recorded"
 status: active
 changed_by: 2026-11-20-ARK-602-1
 ---
