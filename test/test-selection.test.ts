@@ -707,17 +707,17 @@ describe("ark test pristine base duration of a refactor run", () => {
   });
 
   /**
-   * Two suites. `slow` sleeps 3 s at the base commit and, once the run's own commit rewrites it, not at all (the refactor
+   * Two suites. `slow` sleeps `sleepSeconds` (3 s) at the base commit and, once the run's own commit rewrites it, not at all (the refactor
    * makes the file faster); the base version also writes one line to a marker file each time it runs, so the marker
    * counts the pristine runs. `fast` never sleeps.
    */
-  function pristineRun(kind: string) {
+  function pristineRun(kind: string, sleepSeconds = 3) {
     const directory = mkdtempSync(join(tmpdir(), "pristine-"));
     const marker = join(directory, "marker.txt");
     const slowAtBase = passingFile(
       "FAKE-T1 slow",
       `appendFileSync(${JSON.stringify(marker)}, "slow\\n");`,
-      'Bun.spawnSync(["sleep", "3"]);',
+      sleepSeconds > 0 ? `Bun.spawnSync(["sleep", "${sleepSeconds}"]);` : "",
     );
     const workspace = tempGitRepo({
       "test/slow.test.ts": slowAtBase,
@@ -807,6 +807,14 @@ describe("ark test pristine base duration of a refactor run", () => {
     // Step 4: ark retro counts the CPU of the head and base sides only.
     expect(ark("retro", run.runId).code).toBe(0);
     const metrics = JSON.parse(readFileSync(join(run.runDirectory, "metrics.json"), "utf8"));
+    const counted = Object.values(resourcesOf(run.runDirectory).suites!).flatMap((sides) =>
+      ["head", "base"].map((side) => sides[side]!.cpu_s as number),
+    );
+    expect(counted.length).toBe(4);
+    expect(metrics.resources.cpu_s).toBeCloseTo(
+      counted.reduce((sum, cpu) => sum + cpu, 0),
+      1,
+    );
     expect(metrics.resources.top.map((entry: { name: string }) => entry.name).join()).not.toContain(
       "pristine",
     );
@@ -817,7 +825,7 @@ describe("ark test pristine base duration of a refactor run", () => {
     ["a full run of a feature run", "feature", []],
   ] as const)
     test(`ARK-T725 ${title} records and prints no pristine base duration`, () => {
-      const run = pristineRun(kind);
+      const run = pristineRun(kind, 0);
       const result = ark("test", run.runId, ...args);
       expect(result.code, result.err + result.out).toBe(0);
       const [completed] = events(run.runDirectory, "test.completed") as Completed[];
