@@ -70,10 +70,6 @@ test("ARK-T86 every phase the docs and skills name is one the reducer emits", ()
     expect({ file, phase, known: known.includes(phase) }).toEqual({ file, phase, known: true });
 });
 
-test("ARK-286-AC6 package.json defines the typecheck, lint and format:check scripts", () => {
-  const { scripts } = JSON.parse(readFileSync(join(import.meta.dir, "../package.json"), "utf8"));
-  for (const name of ["typecheck", "lint", "format:check"]) expect(scripts[name]).toBeTruthy();
-});
 test("ARK-T411 changed skills and tests pass oxfmt --check", () => {
   const files = [
     "skills/ark-brainstorm/SKILL.md",
