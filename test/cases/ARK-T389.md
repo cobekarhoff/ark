@@ -6,7 +6,7 @@ technique: "equivalence classes (one class for each level of ark.yml), boundary 
 priority: high
 risk: "a typo in ark.yml passes the config check with no word, so `merge_request: none` leaves the default `open` and the first run pushes branches and opens MRs of a project that must stay local; or the check covers the top level only and a typo in a role, a suite, a repo entry, a check or pr_writing still passes; or the error gives a wrong guess for a key with no near match"
 status: active
-changed_by: 2026-11-18-ARK-515-1
+changed_by: 2026-11-20-ARK-586-1
 ---
 
 ## Objective
@@ -30,13 +30,13 @@ changed_by: 2026-11-18-ARK-515-1
    - check: `checks[0].comand` (beside `checks[0].command`)
    - pr_writing: `pr_writing.reviwers` (beside `pr_writing.reviewers`)
 2. Load a copy with a top-level key that is near to no valid key (`zzzzzz: 1`).
-3. Load a copy with a valid key and no typo at each level (all known keys of the reference: top-level, including `test_max_load` with a fraction such as `7.5`, which loads as `7.5`, each role, each suite key, each check key `name`, `repo`, `command`, `cores`, `repos.<path>.base` and each `pr_writing` key `reviewers`, `tier_floor`, `sensitive_paths`, `one_way_paths`, `agent_authored`, `title_prefix`).
+3. Load a copy with a valid key and no typo at each level (all known keys of the reference: top-level, each role, each suite key, each check key `name`, `repo`, `command`, `cores`, `repos.<path>.base` and each `pr_writing` key `reviewers`, `tier_floor`, `sensitive_paths`, `one_way_paths`, `agent_authored`, `title_prefix`). `test_max_load` is no longer a key: a copy that holds it is refused with an error that names it (an unknown key).
 
 ## Expected results
 
 - Step 1: every load throws an `ArkError` whose message starts with the full path of the project's `ark.yml` (as the other config errors do) and holds the typo key and the nearest valid key: `merge_request` ... `merge_requests`, `concurency` ... `concurrency`, `reviewr` ... `reviewer`, `test_writr` ... `test_writer`, `modle` ... `model`, `comand` ... `command`, `bse` ... `base`, `comand` ... `command` (check), `reviwers` ... `reviewers`. The message for a suite or a repo entry names which one (`suites[0]`, `repos.repos/a`, `checks[0]`, `pr_writing`).
 - Step 2: the load throws and names the key; it makes no wrong suggestion (no `did you mean`, or a list of the valid keys).
-- Step 3: the load succeeds with each field as written (no valid key is refused).
+- Step 3: the load succeeds with each field as written (no valid key is refused); the copy that holds `test_max_load` throws an `ArkError` that names `test_max_load`.
 
 ## Screenshot checkpoints
 

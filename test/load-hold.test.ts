@@ -26,9 +26,10 @@ import {
 } from "./helpers.ts";
 import { macOnly, recordStartedRun, stopStartedRuns } from "./orphan-runners.ts";
 
-// ARK-515: `ark test` and `openTestBudget` hold a suite while the 1-minute load is above test_max_load, and
-// `test.completed` records the load of each suite. The load is faked through ARK_FAKE_LOAD_ONE, the seam that the
-// default load reader of cli/host.ts reads on every reading; the real `ark test` runner reads it as well.
+// ARK-586: `ark test` and `openTestBudget` hold a suite on CPU use over 90 percent from a fresh sample, only while
+// another suite runs, and `test.completed` records the 1-minute load of each suite for display. The CPU is faked
+// through ARK_FAKE_CPU_PERCENT and the load through ARK_FAKE_LOAD_ONE: seams that the default readers of cli/host.ts
+// read on every reading, so the real `ark test` runner reads them as well.
 setDefaultTimeout(90_000);
 
 const arkEntry = resolve(import.meta.dir, "..", "cli", "ark.ts");
@@ -44,7 +45,6 @@ const failingFile = `import { expect, test } from "bun:test";\ntest("a failing t
 afterEach(() => {
   stopStartedRuns();
   setFakeHost(healthyHost);
-  delete process.env.ARK_FAKE_CPU_PERCENT;
 });
 
 /** The text a child printed, with a promise for the point where a line shows. */
@@ -104,6 +104,7 @@ function makeRun(
     ticket_source: "local",
     test_min_free_memory_percent: 0,
     test_max_swap_gb: 1000,
+    test_budget_cores: 4,
     checks: checksOf(markers),
     suites: suitesOf(markers).map((suite) => ({
       ...suite,
@@ -185,7 +186,7 @@ function makeRun(
   };
 }
 
-/** The fixture of ARK-T692: one project check and one passing suite, each writing a marker file. */
+/** The fixture of ARK-T709 and ARK-T710: one project check and one passing suite, each asking for 1 of 4 cores and writing a marker file. */
 const markedRun = () =>
   makeRun(
     { "e2e.test.ts": passingFile },
@@ -193,10 +194,11 @@ const markedRun = () =>
       {
         name: "e2e",
         level: "e2e",
+        cores: 1,
         command: `touch ${markers}/suite && ${junit("e2e.test.ts")}`,
       },
     ],
-    (markers) => [{ name: "mark", repo: ".", command: `touch ${markers}/check` }],
+    (markers) => [{ name: "mark", repo: ".", cores: 1, command: `touch ${markers}/check` }],
   );
 
 type StartedTest = {
@@ -204,30 +206,65 @@ type StartedTest = {
   output: Output;
 };
 
-/** Starts `ark test` as a child process with the 1-minute load of the fake host as given. */
-function startTest(runId: string, load: string, ...flags: string[]): StartedTest {
+/** The host that the runner reads: `cpu` is ARK_FAKE_CPU_PERCENT (null leaves the real sampler), `load` ARK_FAKE_LOAD_ONE. */
+type Readings = { cpu: string | null; load: string };
+
+/** Starts `ark test` as a child process on the host readings as given. */
+function startTest(runId: string, readings: Readings, ...flags: string[]): StartedTest {
+  const environment: Record<string, string | undefined> = {
+    ...process.env,
+    ARK_FAKE_LOAD_ONE: readings.load,
+  };
+  if (readings.cpu === null) delete environment.ARK_FAKE_CPU_PERCENT; // the real sampler
+  else environment.ARK_FAKE_CPU_PERCENT = readings.cpu;
   const child = Bun.spawn(
     [process.execPath, arkEntry, "test", runId, "--project", "demo", ...flags],
-    {
-      env: { ...process.env, ARK_FAKE_LOAD_ONE: load },
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    },
+    { env: environment, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
   );
   return { child, output: new Output(child.stdout, child.stderr) };
 }
 
-async function runToEnd(fixture: Fixture, load: string) {
-  fixture.reset();
-  const run = startTest(fixture.runId, load);
-  const code = await run.child.exited;
+/** Rejects with the name of the wait when `promise` does not settle in `milliseconds`: a guard on a real process, not a pause. */
+function within<Value>(
+  promise: Promise<Value>,
+  name: string,
+  milliseconds = 30_000,
+): Promise<Value> {
+  const { promise: expired, reject } = Promise.withResolvers<never>();
+  const deadline = AbortSignal.timeout(milliseconds); // a deadline that never keeps the process alive
+  deadline.addEventListener("abort", () =>
+    reject(new Error(`no ${name} within ${milliseconds} ms`)),
+  );
+  return Promise.race([promise, expired]);
+}
+
+/** Resolves when the run prints `line`; rejects when the run ends first, which is a run that was never held. */
+function waitForLine(run: StartedTest, line: string): Promise<void> {
+  const ended = run.child.exited.then(() => {
+    throw new Error(`the run ended before "${line}":\n${run.output.text}`);
+  });
+  return within(Promise.race([run.output.until(line), ended]), `"${line}" line`);
+}
+
+/** Stops a run that still waits through `ark test --stop` and waits for its exit and its output. */
+async function stopRun(fixture: Fixture, run: StartedTest): Promise<void> {
+  if (run.child.exitCode === null) ark("test", fixture.runId, "--stop", "--project", "demo");
+  await run.child.exited;
   await run.output.done;
-  return {
-    code,
-    out: run.output.text,
-    lines: run.output.lines("waiting for load"),
-  };
+}
+
+/** Runs `ark test` to its end. A waiting line first means the run is held: the rows that use this expect a start. */
+async function runToEnd(fixture: Fixture, readings: Readings) {
+  fixture.reset();
+  const run = startTest(fixture.runId, readings);
+  const first = await Promise.race([
+    run.child.exited.then(() => "ended" as const),
+    run.output.until("waiting for").then(() => "held" as const),
+  ]);
+  if (first === "held") await stopRun(fixture, run);
+  expect(first, run.output.text).toBe("ended");
+  await run.output.done;
+  return { code: run.child.exitCode, out: run.output.text };
 }
 
 const markersOf = (fixture: Fixture) => readdirSync(fixture.markers).sort();
@@ -240,129 +277,185 @@ const ticketsOf = (): Record<string, unknown>[] => {
     : [];
 };
 
-/** Starts `ark test`, waits for its load line and a fresh reading, and hands the held run to `inspect`; then stops it. */
-async function whileHeld(
-  fixture: Fixture,
-  load: string,
-  inspect: (run: StartedTest) => void | Promise<void>,
-): Promise<void> {
-  fixture.reset();
-  const run = startTest(fixture.runId, load);
-  try {
-    await run.output.until("waiting for load");
-    await afterHostReads(2); // two fresh readings while held: a start or a second line would show by now
-    await inspect(run);
-  } finally {
-    ark("test", fixture.runId, "--stop", "--project", "demo");
-    await run.child.exited;
-    await run.output.done;
-  }
+/** The tickets of one run label: `holder` for the suite that runs, a run id for the `ark test` under test. */
+const ticketsOfRun = (run: string) => ticketsOf().filter((ticket) => ticket.run === run);
+
+const lockModule = resolve(import.meta.dir, "..", "cli", "test-lock.ts");
+
+// Processes this file starts, stopped by their own pids when a case ends.
+const spawned: { kill: (signal: "SIGKILL") => void }[] = [];
+afterEach(() => {
+  for (const child of spawned.splice(0)) child.kill("SIGKILL");
+});
+
+/**
+ * A suite that runs: a real child process that takes 1 core of the 4-core budget of the temp ARK_HOME from the real
+ * `openTestBudget`, so its ticket is `started` with a live pid, and keeps it until it is released.
+ */
+async function startHolder() {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      "-e",
+      `import { openTestBudget } from ${JSON.stringify(lockModule)};
+const budget = openTestBudget("holder", 4, { minimumFreeMemoryPercent: 0, maximumSwapGigabytes: 1000, print: () => {} });
+await budget.take(1);
+console.log("held");
+await new Promise((done) => process.stdin.once("data", done));
+budget.close();
+process.exit(0);`,
+    ],
+    {
+      env: { ...process.env, ARK_FAKE_CPU_PERCENT: "0", ARK_FAKE_LOAD_ONE: "0" },
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "inherit",
+    },
+  );
+  spawned.push(child);
+  await within(new Output(child.stdout).until("held"), "ticket of the holder");
+  return {
+    child,
+    release: async () => {
+      void child.stdin.write("x");
+      void child.stdin.flush();
+      await within(child.exited, "exit of the holder");
+    },
+  };
 }
 
-const loadLine = (load: string, limit: number) =>
-  `ark test: waiting for load: 1-minute load ${load} is above the limit ${limit}`;
+const cpuLine = (figure: string) =>
+  new RegExp(String.raw`^ark test: waiting for CPU: .*\b${figure}\b.* 90\b(?!\.)`);
 
-describe("ARK-T692", () => {
-  test("ARK-T692 holds the check and the suite while the load is above the limit, prints one line naming both numbers, and keeps the ticket unstarted", async () => {
+describe("ARK-T709", () => {
+  const hot: Readings = { cpu: "99", load: "500" };
+
+  test("ARK-T709 starts the check and the suite at once when no suite runs, at CPU 99 percent and a load of 500", async () => {
     const fixture = markedRun();
-    fixture.configure({ test_max_load: 10 });
-    await whileHeld(fixture, "12.5", (run) => {
-      expect(markersOf(fixture), "a check or suite started into a load above the limit").toEqual(
-        [],
-      );
-      expect(run.output.lines("waiting for load")).toEqual([loadLine("12.5", 10)]);
-      expect(run.output.text).not.toContain("waiting for memory");
-      const [ticket] = ticketsOf();
-      expect(ticketsOf()).toHaveLength(1);
-      expect(ticket).toMatchObject({ run: fixture.runId });
-      expect(ticket).not.toHaveProperty("started");
-      expect(ark("chief", "state", "--project", "demo").out).toContain(
-        `- waiting: ${fixture.runId} (pid`,
-      );
-    });
+    const { code, out } = await runToEnd(fixture, hot);
+    expect(code, out).toBe(0);
+    expect(out).not.toContain("waiting for");
+    expect(markersOf(fixture)).toEqual(["check", "suite"]);
   });
 
+  test("ARK-T709 holds on CPU while another suite runs, and starts when that suite ends with the readings unchanged", async () => {
+    const fixture = markedRun();
+    const holder = await startHolder();
+    const run = startTest(fixture.runId, hot);
+    try {
+      await waitForLine(run, "waiting for CPU");
+      await afterHostReads(2); // two fresh readings while held: a start or a second line would show by now
+      expect(markersOf(fixture), "a check or suite started while another suite ran").toEqual([]);
+      expect(run.output.lines("waiting for")).toHaveLength(1);
+      expect(run.output.lines("waiting for CPU")[0]).toMatch(cpuLine(String.raw`99(\.0)?`));
+      expect(ticketsOfRun(fixture.runId)).toHaveLength(1);
+      expect(ticketsOfRun(fixture.runId)[0]).not.toHaveProperty("started");
+      expect(ticketsOfRun("holder")).toMatchObject([{ started: expect.any(String) }]);
+
+      // The suite that ran ends: nothing runs, so the unchanged CPU 99 and load 500 no longer hold.
+      await holder.release();
+      expect(await within(run.child.exited, "exit of ark test", 60_000)).toBe(0);
+      await run.output.done;
+      expect(markersOf(fixture)).toEqual(["check", "suite"]);
+      expect(run.output.lines("waiting for")).toHaveLength(1);
+    } finally {
+      await stopRun(fixture, run);
+    }
+  });
+
+  test("ARK-T709 does not count the stale ticket of an ended process as a suite that runs", async () => {
+    const fixture = markedRun();
+    const holder = await startHolder();
+    holder.child.kill("SIGKILL"); // by its own pid, without letting it release its ticket
+    await holder.child.exited;
+    expect(ticketsOfRun("holder"), "the stale ticket is the scenario").toHaveLength(1);
+    const { code, out } = await runToEnd(fixture, hot);
+    expect(code, out).toBe(0);
+    expect(out).not.toContain("waiting for");
+    expect(markersOf(fixture)).toEqual(["check", "suite"]);
+  });
+
+  macOnly("ARK-T709 still holds on memory when no suite runs, at CPU 99 percent", async () => {
+    const fixture = markedRun();
+    fixture.configure({ test_min_free_memory_percent: 20, test_max_swap_gb: 8 });
+    setFakeHost({ freePercent: 15, swapGigabytes: 2 }); // under the 20 percent floor
+    const run = startTest(fixture.runId, hot);
+    try {
+      await waitForLine(run, "waiting for memory");
+      await afterHostReads(2);
+      expect(markersOf(fixture), "a suite started into a host short of memory").toEqual([]);
+      expect(run.output.lines("waiting for memory")).toHaveLength(1);
+      expect(run.output.text).not.toContain("waiting for CPU");
+      expect(run.output.text).not.toContain("1-minute load");
+
+      setFakeHost(healthyHost);
+      expect(await within(run.child.exited, "exit of ark test", 60_000)).toBe(0);
+      await run.output.done;
+      expect(markersOf(fixture)).toEqual(["check", "suite"]);
+    } finally {
+      await stopRun(fixture, run);
+    }
+  });
+});
+
+describe("ARK-T710", () => {
   test.each([
-    { name: "a load at the limit", load: "10", limit: 10 },
-    { name: "a load under the limit", load: "3", limit: 10 },
-    { name: "a load at a fractional limit", load: "7.5", limit: 7.5 },
-  ])("ARK-T692 starts the check and the suite at once on $name", async ({ load, limit }) => {
-    const fixture = markedRun();
-    fixture.configure({ test_max_load: limit });
-    const { code, out, lines } = await runToEnd(fixture, load);
-    expect(code, out).toBe(0);
-    expect(lines).toEqual([]);
-    expect(markersOf(fixture)).toContain("check");
-    expect(markersOf(fixture)).toContain("suite");
-  });
-
-  test("ARK-T692 keeps the fraction of the limit when the load is just above it", async () => {
-    const fixture = markedRun();
-    fixture.configure({ test_max_load: 7.5 });
-    await whileHeld(fixture, "7.6", (run) => {
-      expect(run.output.lines("waiting for load")).toEqual([loadLine("7.6", 7.5)]);
-      expect(markersOf(fixture)).toEqual([]);
-    });
-  });
-
-  test("ARK-T692 takes the core count as the default limit: a load equal to it starts, a load 0.1 above it holds", async () => {
-    const cores = availableParallelism();
-    const fixture = markedRun();
-    fixture.configure({ test_max_load: undefined });
-    const { code, out } = await runToEnd(fixture, String(cores));
-    expect(code, out).toBe(0);
-    expect(out).not.toContain("waiting for load");
-    const above = (cores + 0.1).toFixed(1);
-    await whileHeld(fixture, above, (run) => {
-      expect(run.output.lines("waiting for load")).toEqual([loadLine(above, cores)]);
-      expect(markersOf(fixture)).toEqual([]);
-    });
-  });
-
-  test("ARK-T692 starts when the load reading is missing, and does not stall", async () => {
-    const fixture = markedRun();
-    fixture.configure({ test_max_load: 10 });
-    const { code, out, lines } = await runToEnd(fixture, "unreadable");
-    expect(code, out).toBe(0);
-    expect(lines).toEqual([]);
-    expect(markersOf(fixture)).toContain("suite");
-  });
-
-  test.each(['"fast"', "-1", "0"])(
-    "ARK-T692 refuses test_max_load %s, names the key, and runs nothing",
-    (value) => {
+    { title: "CPU 5 percent and a load of 30", cpu: "5", load: "30" },
+    { title: "CPU exactly at the limit of 90 percent", cpu: "90", load: "0" },
+    { title: "a CPU reading that cannot be read and a load of 30", cpu: "unreadable", load: "30" },
+  ])(
+    "ARK-T710 starts the check and the suite at once on $title while another suite runs",
+    async ({ cpu, load }) => {
       const fixture = markedRun();
-      fixture.configure({ test_max_load: JSON.parse(value) });
-      const result = ark("test", fixture.runId, "--project", "demo");
-      expect(result.code).toBe(1);
-      expect(result.out + result.err).toContain("test_max_load");
-      expect(markersOf(fixture)).toEqual([]);
-      const completed = readEvents(fixture.runDirectory).filter(
-        (event) => event.type === "test.completed",
-      );
-      expect(completed).toEqual([]);
+      await startHolder();
+      const { code, out } = await runToEnd(fixture, { cpu, load });
+      expect(code, out).toBe(0);
+      expect(out).not.toContain("waiting for");
+      expect(markersOf(fixture)).toEqual(["check", "suite"]);
     },
   );
 
-  // The chief reads the host through the same default reader, so the 1-minute slot of the seam reaches it.
-  macOnly("ARK-T692 ark chief state does not hold new runs for a 1-minute load of 500", () => {
+  /** Starts `ark test` with a suite running, waits for its CPU line and fresh readings, and checks the run is held on it. */
+  async function expectHeldOnCpu(readings: Readings, figure: string): Promise<void> {
     const fixture = markedRun();
-    fixture.configure({ test_max_load: 10 });
-    setFakeHost(healthyHost);
-    process.env.ARK_FAKE_CPU_PERCENT = "10";
-    const previous = {
-      load: process.env.ARK_FAKE_LOAD,
-      one: process.env.ARK_FAKE_LOAD_ONE,
-    };
-    delete process.env.ARK_FAKE_LOAD; // the chief's own override would replace the reading the seam feeds
-    process.env.ARK_FAKE_LOAD_ONE = "500";
+    await startHolder();
+    const run = startTest(fixture.runId, readings);
     try {
-      const state = ark("chief", "state", "--project", "demo").out;
-      expect(state).toContain("hold new runs: no");
-      expect(state).not.toContain("waiting for load");
+      await waitForLine(run, "waiting for CPU");
+      await afterHostReads(2); // two fresh readings while held: a start or a second line would show by now
+      expect(markersOf(fixture), "a check or suite started while the line says it waits").toEqual(
+        [],
+      );
+      expect(run.output.lines("waiting for")).toHaveLength(1);
+      expect(run.output.lines("waiting for CPU")[0]).toMatch(cpuLine(figure));
+      expect(run.output.text).not.toContain("1-minute load");
+      expect(run.output.text).not.toContain("waiting for memory");
+      expect(ticketsOfRun(fixture.runId)).toHaveLength(1);
+      expect(ticketsOfRun(fixture.runId)[0]).not.toHaveProperty("started");
     } finally {
-      if (previous.load !== undefined) process.env.ARK_FAKE_LOAD = previous.load;
-      process.env.ARK_FAKE_LOAD_ONE = previous.one;
+      await stopRun(fixture, run);
+    }
+  }
+
+  test.each([
+    { cpu: "99", figure: String.raw`99(\.0)?` },
+    { cpu: "90.1", figure: String.raw`90\.1` },
+  ])(
+    "ARK-T710 holds the check and the suite on CPU $cpu percent while another suite runs, and prints one CPU line",
+    async ({ cpu, figure }) => {
+      await expectHeldOnCpu({ cpu, load: "0" }, figure);
+    },
+  );
+
+  test("ARK-T710 holds on the CPU that a fresh runner process samples itself when no CPU seam is set", async () => {
+    const loops = Array.from({ length: availableParallelism() }, () =>
+      Bun.spawn([process.execPath, "-e", "for (;;);"], { stdout: "ignore", stderr: "ignore" }),
+    );
+    spawned.push(...loops);
+    try {
+      await expectHeldOnCpu({ cpu: null, load: "0" }, String.raw`\d+(\.\d)?`);
+    } finally {
+      for (const loop of loops) loop.kill("SIGKILL"); // by their own pids
     }
   });
 });
@@ -382,7 +475,6 @@ describe("ARK-T693", () => {
   function movingRun() {
     const loadFile = join(mkdtempSync(join(tmpdir(), "ark-load-file-")), "load");
     const fixture = makeRun(files, movingSuites(loadFile), () => []);
-    fixture.configure({ test_max_load: 100 });
     return { fixture, loadFile };
   }
 
@@ -395,7 +487,7 @@ describe("ARK-T693", () => {
 
   async function runWithLoad(fixture: Fixture, loadFile: string, ...flags: string[]) {
     writeFileSync(loadFile, "2");
-    const run = startTest(fixture.runId, `file:${loadFile}`, ...flags);
+    const run = startTest(fixture.runId, { cpu: "0", load: `file:${loadFile}` }, ...flags);
     const code = await run.child.exited;
     await run.output.done;
     return { code, out: run.output.text };
@@ -437,13 +529,12 @@ describe("ARK-T693", () => {
     const fixture = makeRun(files, movingSuites(loadFile), () => [
       { name: "broken", repo: ".", command: "exit 1" },
     ]);
-    fixture.configure({ test_max_load: 100 });
     const stopped = await runWithLoad(fixture, loadFile);
     expect(stopped.code).toBe(1);
     expect(stopped.out).toContain("check broken failed");
     expect(suitesOf(fixture.runDirectory)).toEqual([[]]);
 
-    fixture.configure({ test_max_load: 100, checks: [] });
+    fixture.configure({ checks: [] });
     fixture.reset();
     const quick = await runWithLoad(fixture, loadFile, "--quick");
     expect(quick.code, quick.out).toBe(1);
@@ -456,7 +547,6 @@ describe("ARK-T693", () => {
 
   test("ARK-T693 ark retro and the hub timeline read a suite entry without the load fields, and print no undefined, NaN or null for it", async () => {
     const fixture = markedRun();
-    fixture.configure({ test_max_load: 100 });
     const heads = { ".": "0000000" };
     const oldEvent = {
       type: "test.completed",
@@ -484,14 +574,20 @@ describe("ARK-T693", () => {
 });
 
 describe("ARK-T694", () => {
-  /** Writes to the budget of a temp ARK_HOME and prints into `lines`; the memory limits are off unless the case says so. */
-  function openBudget(options: { memory: boolean } = { memory: false }) {
+  /**
+   * Opens the budget under test in a temp ARK_HOME, and a second budget of this process under another label whose
+   * `started` ticket is the suite that runs (the CPU hold applies only while one does, ARK-T709). `lines` holds what
+   * the budget prints; the memory limits are off unless the case says so.
+   */
+  async function startScenario(options: { memory: boolean } = { memory: false }) {
     tempArkHome();
+    const limits = { minimumFreeMemoryPercent: 0, maximumSwapGigabytes: 1000 };
+    const running = openTestBudget("running", 6, { ...limits, print: () => {} });
+    const suite = await within(running.take(1), "ticket of the running suite");
     const lines: string[] = [];
     const waiters: (() => void)[] = [];
-    const budget = openTestBudget("run-load", 6, {
-      maximumLoad: 10,
-      ...(options.memory ? {} : { minimumFreeMemoryPercent: 0, maximumSwapGigabytes: 1000 }),
+    const budget = openTestBudget("run-cpu", 6, {
+      ...(options.memory ? {} : limits),
       print: (line) => {
         lines.push(line);
         for (const waiter of waiters.splice(0)) waiter();
@@ -500,94 +596,105 @@ describe("ARK-T694", () => {
     return {
       budget,
       lines,
+      close: () => {
+        budget.close();
+        suite.release();
+        running.close();
+      },
       /** Resolves once `lines` holds a line with `text`. */
       line: (text: string) => {
         const { promise, resolve: done } = Promise.withResolvers<void>();
         const check = () =>
           lines.some((line) => line.includes(text)) ? done() : waiters.push(check);
         check();
-        return promise;
+        return within(promise, `"${text}" line`);
       },
     };
   }
-  const withLoad = (load: string | undefined) => {
-    if (load === undefined) delete process.env.ARK_FAKE_LOAD_ONE;
-    else process.env.ARK_FAKE_LOAD_ONE = load;
+  const withCpu = (cpu: string) => {
+    process.env.ARK_FAKE_CPU_PERCENT = cpu;
   };
-  const loadsBefore = process.env.ARK_FAKE_LOAD_ONE;
-  afterEach(() => withLoad(loadsBefore));
+  // The preload pins a CPU of 0 for every test of the worker: put it back, never leave a value of a case.
+  const cpuBefore = process.env.ARK_FAKE_CPU_PERCENT;
+  afterEach(() => {
+    if (cpuBefore === undefined) delete process.env.ARK_FAKE_CPU_PERCENT;
+    else process.env.ARK_FAKE_CPU_PERCENT = cpuBefore;
+  });
+  const ticketOfBudget = () => ticketsOfRun("run-cpu");
+  const linesWith = (lines: string[], text: string) =>
+    lines.filter((entry) => entry.includes(text));
 
-  test("ARK-T694 holds on a load above the limit with one line and an unstarted ticket, then starts on the next fresh reading at the limit", async () => {
-    withLoad("12.5");
-    const { budget, lines, line } = openBudget();
+  test("ARK-T694 holds on CPU above the limit while a suite runs with one line and an unstarted ticket, then starts on the next fresh sample at the limit", async () => {
+    withCpu("95");
+    const { budget, lines, line, close } = await startScenario();
     try {
       let resolved = false;
       const taking = budget.take(1).then((taken) => ((resolved = true), taken));
-      await line("waiting for load");
-      await afterHostReads(2); // two fresh readings while the load is above the limit
+      void taking.catch(() => {}); // a failed wait below closes the budget, which rejects this call
+      await line("waiting for CPU");
+      await afterHostReads(2); // two fresh samples while the CPU is above the limit
       expect(resolved).toBe(false);
-      expect(lines.filter((entry) => entry.includes("waiting for load"))).toEqual([
-        loadLine("12.5", 10),
-      ]);
-      expect(ticketsOf()).toHaveLength(1);
-      expect(ticketsOf()[0]).not.toHaveProperty("started");
+      expect(linesWith(lines, "waiting for CPU")).toHaveLength(1);
+      expect(lines.find((entry) => entry.includes("waiting for CPU"))).toMatch(
+        /^ark test: waiting for CPU: .*\b95(\.0)?\b.* 90\b(?!\.)/,
+      );
+      expect(ticketOfBudget()).toHaveLength(1);
+      expect(ticketOfBudget()[0]).not.toHaveProperty("started");
 
-      withLoad("10"); // at the limit
-      const taken = await taking;
+      withCpu("90"); // at the limit
+      const taken = await within(taking, "start of the held ticket");
       expect(taken.cores).toBe(1);
-      expect(ticketsOf()[0]).toMatchObject({
-        cores: 1,
-        started: expect.any(String),
-      });
-      expect(lines.filter((entry) => entry.includes("waiting for load"))).toHaveLength(1);
+      expect(ticketOfBudget()[0]).toMatchObject({ cores: 1, started: expect.any(String) });
+      expect(linesWith(lines, "waiting for CPU")).toHaveLength(1);
       taken.release();
     } finally {
-      budget.close();
+      close();
     }
   });
 
   macOnly(
-    "ARK-T694 prints a load line and a memory line once each, and a recovered load does not release a memory hold",
+    "ARK-T694 prints a CPU line and a memory line once each, and a recovered CPU does not release a memory hold",
     async () => {
       setFakeHost({ freePercent: 15, swapGigabytes: 2 }); // under the 20 percent floor
-      withLoad("12.5");
-      const { budget, lines, line } = openBudget({ memory: true });
+      withCpu("95");
+      const { budget, lines, line, close } = await startScenario({ memory: true });
       try {
         let resolved = false;
         const taking = budget.take(1).then((taken) => ((resolved = true), taken));
-        await line("waiting for load");
+        void taking.catch(() => {});
+        await line("waiting for CPU");
         await line("waiting for memory");
-        expect(lines.filter((entry) => entry.includes("waiting for load"))).toHaveLength(1);
-        expect(lines.filter((entry) => entry.includes("waiting for memory"))).toHaveLength(1);
+        expect(linesWith(lines, "waiting for CPU")).toHaveLength(1);
+        expect(linesWith(lines, "waiting for memory")).toHaveLength(1);
 
-        withLoad("3"); // only memory holds now
-        await afterHostReads(2); // two fresh readings with the load recovered and memory short
-        expect(resolved, "a recovered load released a memory hold").toBe(false);
-        expect(lines.filter((entry) => entry.includes("waiting for load"))).toHaveLength(1);
-        expect(lines.filter((entry) => entry.includes("waiting for memory"))).toHaveLength(1);
+        withCpu("5"); // only memory holds now
+        await afterHostReads(2); // two fresh readings with the CPU recovered and memory short
+        expect(resolved, "a recovered CPU released a memory hold").toBe(false);
+        expect(linesWith(lines, "waiting for CPU")).toHaveLength(1);
+        expect(linesWith(lines, "waiting for memory")).toHaveLength(1);
 
         setFakeHost(healthyHost);
-        (await taking).release();
+        (await within(taking, "start of the held ticket")).release();
         expect(lines.filter((entry) => entry.startsWith("ark test: waiting"))).toHaveLength(2);
       } finally {
-        budget.close();
+        close();
       }
     },
   );
 
-  test("ARK-T694 starts a held ticket when the load reading becomes unreadable, with no further hold line", async () => {
-    withLoad("12.5");
-    const { budget, lines, line } = openBudget();
+  test("ARK-T694 starts a held ticket when the CPU reading becomes unreadable, with no further hold line", async () => {
+    withCpu("95");
+    const { budget, lines, line, close } = await startScenario();
     try {
       const taking = budget.take(1);
-      await line("waiting for load");
-      withLoad("unreadable");
-      (await taking).release();
-      expect(lines.filter((entry) => entry.startsWith("ark test: waiting"))).toEqual([
-        loadLine("12.5", 10),
-      ]);
+      void taking.catch(() => {});
+      await line("waiting for CPU");
+      withCpu("unreadable");
+      (await within(taking, "start of the held ticket")).release();
+      expect(lines.filter((entry) => entry.startsWith("ark test: waiting"))).toHaveLength(1);
+      expect(linesWith(lines, "waiting for CPU")).toHaveLength(1);
     } finally {
-      budget.close();
+      close();
     }
   });
 });

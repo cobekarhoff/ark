@@ -2301,7 +2301,6 @@ function strictConfig(): Record<string, unknown> {
     test_budget_cores: 4,
     test_min_free_memory_percent: 10,
     test_max_swap_gb: 3,
-    test_max_load: 7.5,
     concurrency: 1,
     round_budget: 3,
     escalation_rounds: 1,
@@ -2323,7 +2322,6 @@ test("ARK-T389 loadConfig accepts every key that ark.yml knows, at every level, 
     test_budget_cores: 4,
     test_min_free_memory_percent: 10,
     test_max_swap_gb: 3,
-    test_max_load: 7.5,
     concurrency: 1,
     round_budget: 3,
     escalation_rounds: 1,
@@ -2430,6 +2428,15 @@ test("ARK-T389 loadConfig refuses a key that is near no valid key and does not g
   expect(message.startsWith(`${configFile("typo")}: `)).toBe(true);
   expect(message).toContain("zzzzzz");
   expect(message).not.toContain("did you mean");
+});
+
+test("ARK-T389 loadConfig refuses the retired key test_max_load and names the file and the key", () => {
+  const config = strictConfig();
+  config.test_max_load = 7.5;
+  writeProject("retired", config);
+  const message = loadError("retired");
+  expect(message.startsWith(`${configFile("retired")}: `)).toBe(true);
+  expect(message).toContain("test_max_load");
 });
 
 test("ARK-T390 ark status exits 1 and prints the unknown-key error of a typo, then exits 0 once it is fixed", () => {
