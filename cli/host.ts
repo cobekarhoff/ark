@@ -114,8 +114,14 @@ function cpuTicks(): { busy: number; total: number } {
 
 let previousTicks: { busy: number; total: number } | null = null;
 
-/** Percent of CPU busy since the previous call of this process; null on the first call (there is no span yet). */
+/**
+ * Percent of CPU busy since the previous call of this process; null on the first call (there is no span yet).
+ * `ARK_FAKE_CPU_PERCENT` replaces it on every reading: a number; any other text is a reading that failed.
+ */
 function readCpuPercent(): number | null {
+  const fake = process.env.ARK_FAKE_CPU_PERCENT;
+  if (fake !== undefined)
+    return fake.trim() !== "" && Number.isFinite(Number(fake)) ? Number(fake) : null;
   const ticks = cpuTicks();
   const before = previousTicks;
   previousTicks = ticks;
@@ -123,8 +129,12 @@ function readCpuPercent(): number | null {
   return Math.round(((ticks.busy - before.busy) / (ticks.total - before.total)) * 1000) / 10;
 }
 
-/** CPU percent over a fresh span of `milliseconds`. One-shot commands use it: `readCpuPercent` has no span on its first call. */
+/**
+ * CPU percent over a fresh span of `milliseconds`. One-shot commands and the `ark test` admission use it:
+ * `readCpuPercent` has no span on its first call. `ARK_FAKE_CPU_PERCENT` replaces it with no wait.
+ */
 export async function sampleCpuPercent(milliseconds = 1000): Promise<number | null> {
+  if (process.env.ARK_FAKE_CPU_PERCENT !== undefined) return readCpuPercent();
   const before = cpuTicks();
   await Bun.sleep(milliseconds);
   const after = cpuTicks();
@@ -285,21 +295,17 @@ export function memoryReasons(
   return { reasons, unchecked: freeMemoryPercent === null || swapUsedGigabytes === null };
 }
 
-/**
- * The reason the 1-minute load holds a suite, or null. Inclusive: only a load above the limit holds, and a load
- * that could not be read never does. Not part of `holdReasons`: `ark chief state` does not hold runs for it.
- */
-export function loadReason(reading: HostReading, maximumLoad: number): string | null {
-  const { loadOne } = reading;
-  if (loadOne === null || loadOne <= maximumLoad) return null;
-  return `1-minute load ${Number(loadOne.toFixed(2))} is above the limit ${maximumLoad}`;
+/** Master Chief starts no run, and a running suite holds the next one, while CPU use is over this percent. */
+export const maximumCpuPercent = 90;
+
+/** The reason a CPU use over `maximumCpuPercent` holds, or null. Strict: 90 admits. A missing reading never holds. */
+export function cpuReason(cpuPercent: number | null): string | null {
+  if (cpuPercent === null || cpuPercent <= maximumCpuPercent) return null;
+  return `CPU ${cpuPercent.toFixed(1)}% is above the ${maximumCpuPercent}% busy limit`;
 }
 
 /** Master Chief starts no run while free disk is under this many GB. */
 export const minimumFreeDiskGigabytes = 10;
-
-/** Master Chief starts no run while CPU use is over this percent. */
-export const maximumCpuPercent = 90;
 
 /**
  * Every reason `ark chief state` holds new runs, in the order free memory, swap, CPU, disk. CPU is over
@@ -315,8 +321,8 @@ export function holdReasons(
     limits.maximumSwapGigabytes,
   ).reasons;
   const { cpuPercent, freeDiskGigabytes } = reading;
-  if (cpuPercent !== null && cpuPercent > maximumCpuPercent)
-    reasons.push(`CPU ${cpuPercent.toFixed(1)}% is above the ${maximumCpuPercent}% busy limit`);
+  const cpu = cpuReason(cpuPercent);
+  if (cpu !== null) reasons.push(cpu);
   if (freeDiskGigabytes !== null && freeDiskGigabytes < minimumFreeDiskGigabytes)
     reasons.push(
       `free disk ${freeDiskGigabytes} GB is below the ${minimumFreeDiskGigabytes} GB floor`,
