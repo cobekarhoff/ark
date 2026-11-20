@@ -104,7 +104,10 @@ afterAll(() => {
 // so the memory admission inside the wait reads the healthy host a test of this repo expects.
 await holdTestBudget();
 
-// ARK-586: `ark test` holds a suite on CPU use over 90 percent while another suite runs, so a suite a test starts would
-// wait on the real CPU of the host. After the hold above, so a bare run reads the real CPU; the tests see a CPU of 0
-// and a test that needs another value sets ARK_FAKE_CPU_PERCENT itself.
+// ARK-586: after the hold above, so a bare run reads the real host; the tests see both readings pinned.
+// ARK_FAKE_CPU_PERCENT: `ark test` holds a suite on CPU use over 90 percent while another suite runs, so a suite a test
+// starts would wait on the real CPU; a test that needs another value sets it itself.
+// ARK_FAKE_LOAD_ONE: no hold reads the load, but `test.completed` records loadAtStart and loadPeak for display, and a test
+// that asserts them (ARK-T135) needs a load that does not move with the host.
 process.env.ARK_FAKE_CPU_PERCENT ??= "0";
+process.env.ARK_FAKE_LOAD_ONE ??= "0";
