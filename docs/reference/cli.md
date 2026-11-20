@@ -93,6 +93,22 @@ run names it `<ticket id>/AC<k>`. An AC has `method` (`test`, `demonstration`, `
 `analysis`; default `test`; `manual: true` reads as `demonstration`) and `verified_by`, a list of
 test case ids. The start refuses an unknown method, a duplicate AC id and a `verified_by` that is
 not a list of strings.
+
+After it records `run.started`, it sends the `run.started` wake to each live companion whose `on`
+lists `run.started`, at once and before it exits, with no `ark companions sync` or `ark chief state`
+in between. The wake is the one that `ark companions sync` sends: the subject `Companion wake:
+run.started <run>`, the same body, one `wake.log` line, and the `cursor.json` of the companion moved
+past the event. A companion whose `on` does not list `run.started` gets no message, and a companion
+with no `cursor.json` (never synced) gets none either: its first sync starts it at the present. The
+command starts, stops and releases no companion worker, never waits for a lock and never retries,
+and each Orca call of the wake gives up after 3 seconds. A wake it cannot send (Orca does not
+answer, the send fails, the companion has no live worker, or another sync holds the companion's
+lock) never fails the command: it prints on stderr one line for each companion, `companion <name>:
+wake <trigger> for <run> not sent: <reason>`, keeps the run, prints the run ID on stdout as before
+and exits 0. `ark companions sync` is the catch-up path: it sends the wake that the command could
+not send. A sync that runs at that moment holds the lock, so the line can appear for a wake that the
+sync then sends; the cursor keeps it from being sent twice. With no `companions` key in ark.yml the
+command makes no Orca call and its output does not change.
 ```
 
 ### run step
@@ -213,6 +229,23 @@ Reads evaluation.md in the run folder and records its blockers, risks and surfac
 cli_output, document or none). It refuses a missing file, a file with no Blockers, Risks or Surfaces
 list, an unknown surface, and a project whose ark.yml has no roles.evaluator. Blockers open the
 criteria gate; no blockers send the run to planning.
+
+After it records the evaluation with at least one blocker (the `criteria.opened` trigger), it sends
+the `criteria.opened` wake to each live companion whose `on` lists `criteria.opened`, at once and
+before it exits, with no `ark companions sync` or `ark chief state` in between. The wake is the one
+that `ark companions sync` sends: the same subject and body, one `wake.log` line, and the
+`cursor.json` of the companion moved past the event. An evaluation with no blockers sends no wake,
+and a companion whose `on` does not list `criteria.opened`, or that has no `cursor.json` (never
+synced), gets no message. The command starts, stops and releases no companion worker, never waits
+for a lock and never retries, and each Orca call of the wake gives up after 3 seconds. A wake it
+cannot send (Orca does not answer, the send fails, the companion has no live worker, or another sync
+holds the companion's lock) never fails the command: it prints on stderr one line for each
+companion, `companion <name>: wake <trigger> for <run> not sent: <reason>`, keeps the event, prints
+its `recorded evaluation:` line as before and exits 0. `ark companions sync` is the catch-up path:
+it sends the wake that the command could not send. A sync that runs at that moment holds the lock,
+so the line can appear for a wake that the sync then sends; the cursor keeps it from being sent
+twice. With no `companions` key in ark.yml the command makes no Orca call and its output does not
+change.
 ```
 
 ### criteria amend
@@ -886,6 +919,10 @@ event with outcome `merged`, `run.started` is `run.started`, `criteria.opened` i
 `evaluation.recorded` event with at least one blocker, `escalation` is `escalation.requested`, and
 `ci.failed` is a failed check on an MR of a run in `merge_requests_open`, read live from `gh` or
 `glab` and keyed by run, MR number and check name. The message names the trigger and the run id.
+`ark run start` sends the `run.started` wake and `ark evaluation record` the `criteria.opened` wake
+to each live companion at once, as the event is recorded; `companions sync` is the catch-up path for
+a wake that those two commands could not send, and the path of the other triggers (`run.merged`,
+`escalation`, `ci.failed`). The cursor keeps a wake that a command sent from going out again.
 `companions/<name>/cursor.json` holds the last event of each run and the failures already sent; it
 is written after the send worked, so a failed send is sent again, and a companion's first sync only
 writes it and sends nothing for older events. A run whose events cannot be read is named on a
