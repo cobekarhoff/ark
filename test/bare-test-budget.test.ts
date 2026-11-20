@@ -207,6 +207,7 @@ process.exit(0);`,
     name: "ticket of the holder",
   });
   return {
+    pid: holder.pid,
     release: async () => {
       void holder.stdin.write("x");
       void holder.stdin.flush();
@@ -241,7 +242,7 @@ const aliveNames = (variant?: Variant): string[] =>
  */
 function suiteFiles(
   markers: string,
-  options: { failing?: boolean; variant?: Variant; preload?: boolean } = {},
+  options: { failing?: boolean; variant?: Variant; preload?: boolean; probe?: boolean } = {},
 ): Record<string, string> {
   const files: Record<string, string> = {};
   if (options.preload !== false)
@@ -280,6 +281,11 @@ function suiteFiles(
   if (existsSync(hang) && statSync(hang).isFIFO()) readFileSync(openSync(hang, "r"));
 });
 `;
+  if (options.probe)
+    files["test/probe.test.ts"] = `${header(markers)}test("FAKE-1-AC1 probe", () => {
+  appendFileSync(join(markers, "marker-value"), (process.env.${budgetHeldVariable} ?? "unset") + "\\n");
+});
+`;
   if (options.failing)
     files["test/failing.test.ts"] = `import { expect, test } from "bun:test";
 test("FAKE-1-AC1 failing", () => { expect(1).toBe(2); });
@@ -314,6 +320,8 @@ function makeFixture(
     maxLoad?: number;
     variant?: Variant;
     preload?: boolean;
+    /** Adds a file `probe` that records the marker value its worker sees. */
+    probe?: boolean;
     /** Named pipes in the scratch folder (`stuck`, `hang`) that the case holds open and never writes. */
     blockers?: string[];
   } = {},
@@ -721,17 +729,20 @@ test("ARK-T695 a file run and an ark test child start at once on a load above te
   expect(fileRun.output.text).not.toContain("waiting for load");
   expect(fixture.markerLines("ran-a")).toHaveLength(1);
 
+  // The marker an `ark test` child carries: the pid of a live run that holds a started ticket (here a 1-core holder).
+  const holder = await startHolder(fixture.home, 1);
   const child = bunTest(
     fixture.directory,
     ["test", "--parallel=3"],
     environment(fixture.home, {
       ARK_FAKE_LOAD_ONE: load,
-      [budgetHeldVariable]: "held",
+      [budgetHeldVariable]: String(holder.pid),
     }),
   );
   expect(await finish(child), child.output.text).toBe(0);
   expect(child.output.text).not.toContain("waiting for load");
   expect(ownerTicketFiles(fixture)).toEqual([]);
+  await holder.release();
 });
 
 test.each([
@@ -752,19 +763,11 @@ test.each([
   },
 );
 
-test("ARK-T684 a whole-suite bun test with the ark test marker starts at once, and the same command without it waits", async () => {
+test("ARK-T684 a whole-suite bun test with no ark test marker waits behind the holder, the control of the runs that start at once", async () => {
   const fixture = makeFixture();
   const holder = await startHolder(fixture.home, 3);
-  const marked = bunTest(
-    fixture.directory,
-    ["test", "--parallel=3"],
-    environment(fixture.home, { [budgetHeldVariable]: "held" }),
-  );
-  expect(await finish(marked)).toBe(0);
-  expect(marked.output.text).not.toContain(waitingLine);
-  expect(ownerTicketFiles(fixture)).toEqual([]);
 
-  // Control: the same command line with no marker waits behind the holder.
+  // The same command line as the runs of this case that start at once, with no marker, waits behind the holder.
   const linesBefore = fixture.markerLines("runs.log").length;
   const control = bunTest(fixture.directory, ["test", "--parallel=3"], environment(fixture.home));
   await bareTicketWritten(fixture);
@@ -1095,4 +1098,189 @@ test("ARK-T685 a failing test file fails the run with exit 1 and the failure tex
   expect(run.output.text).not.toContain(waitingLine);
   for (const name of ["a", "b", "c", "gate"])
     expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
+});
+
+// ARK-T707. The marker an `ark test` run or a held bare run writes names that run; a whole-suite `bun test` skips the
+// wait only while the named run is alive and holds a started ticket. The value is learned from a real held run, never
+// copied from the source.
+
+/** A scratch repo with the repo preload and one file `x` that records its pid in `ran-x` and, when `hold` is set, blocks on a pipe the case holds open. */
+function makeProbeRepo(options: { hold?: boolean } = {}) {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "bare-probe-")));
+  const markers = realpathSync(mkdtempSync(join(tmpdir(), "bare-probe-markers-")));
+  writeFileSync(join(directory, "bunfig.toml"), `[test]\npreload = [${JSON.stringify(preload)}]\n`);
+  mkdirSync(join(directory, "test"));
+  writeFileSync(
+    join(directory, "test", "x.test.ts"),
+    `${header(markers)}test("FAKE-1-AC1 x", () => {
+  appendFileSync(join(markers, "ran-x"), process.pid + "\\n");
+  const hold = join(import.meta.dir, "..", "hold");
+  if (existsSync(hold) && statSync(hold).isFIFO()) readFileSync(openSync(hold, "r"));
+});
+`,
+  );
+  let holdDescriptor = -1;
+  if (options.hold) {
+    Bun.spawnSync(["mkfifo", join(directory, "hold")]);
+    holdDescriptor = openSync(join(directory, "hold"), constants.O_RDWR);
+    heldDescriptors.push(holdDescriptor);
+  }
+  return {
+    directory,
+    ranX: () => existsSync(join(markers, "ran-x")),
+    started: (limit: WaitLimit) =>
+      waitFor(markers, () => existsSync(join(markers, "ran-x")), limit),
+    release: () => closeSync(holdDescriptor),
+  };
+}
+
+/**
+ * Resolves when a waiting ticket that `matches` is in the store; rejects when the run exits first, which means it
+ * started at once instead of waiting.
+ */
+function waitsForBudget(
+  fixture: Fixture,
+  child: { exited: Promise<number> },
+  matches: (ticket: { run: string; pid: number }) => boolean,
+): Promise<void> {
+  return Promise.race([
+    waitFor(fixture.storeDirectory(), () => readTestLock().waiting.some(matches), {
+      within: passLimit,
+      name: "waiting ticket of the run",
+    }),
+    child.exited.then((code) => {
+      throw new Error(`the run exited with ${code} instead of waiting for the budget`);
+    }),
+  ]);
+}
+
+test("ARK-T707 a whole-suite bun test starts at once under the marker of a live holder with a started ticket, and waits under any other marker value", async () => {
+  const fixture = makeFixture({ pipes: true, probe: true });
+  const holder = bunTest(fixture.directory, ["--parallel=3"], environment(fixture.home));
+  await waitForMarkers(fixture, ["started-gate", "marker-value"]);
+  const marker = fixture.markerLines("marker-value")[0]!;
+  expect(readTestLock().running).toMatchObject([
+    { run: "bun test", pid: holder.child.pid, cores: 3 },
+  ]);
+  expect(marker).toContain(String(holder.child.pid));
+
+  const projectEnvironment = (value: string | undefined) =>
+    environment(fixture.home, { ARK_PROJECT: "demo", [budgetHeldVariable]: value });
+
+  // The marker of the live holder: the run starts at once, takes no ticket and prints no waiting line.
+  const named = makeProbeRepo();
+  const atOnce = bunTest(named.directory, ["test", "--parallel=3"], projectEnvironment(marker));
+  expect(await finish(atOnce), atOnce.output.text).toBe(0);
+  expect(atOnce.output.text).not.toContain(waitingLine);
+  expect(named.ranX()).toBe(true);
+  expect(ownerTicketFiles(fixture)).toHaveLength(1);
+
+  // Every other value waits like a bare run: a waiting ticket, no file run.
+  const reaped = Bun.spawn(["true"]);
+  await reaped.exited;
+  const noTicket = Bun.spawn(["sleep", "300"]);
+  started.push({ pid: noTicket.pid, group: false });
+  const holderPid = String(holder.child.pid);
+  const rows: [string, string | undefined][] = [
+    ["hand-set `held`", "held"],
+    ["hand-set `1`", "1"],
+    ["no marker", undefined],
+    ["a dead pid", marker.replace(holderPid, String(reaped.pid))],
+    ["a live pid with no ticket", marker.replace(holderPid, String(noTicket.pid))],
+  ];
+  for (const [name, value] of rows) {
+    const repo = makeProbeRepo();
+    const waiting = bunTest(repo.directory, ["test", "--parallel=3"], projectEnvironment(value));
+    await waitsForBudget(
+      fixture,
+      waiting.child,
+      (ticket) => ticket.pid === waiting.child.pid,
+    ).catch((error: Error) => {
+      throw new Error(`${name}: ${error.message}`);
+    });
+    expect(repo.ranX(), name).toBe(false);
+    expect(waiting.output.count(waitingLine), name).toBeLessThanOrEqual(1);
+    stopRun(waiting.child);
+    await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
+  }
+
+  fixture.openGate();
+  expect(await finish(holder), holder.output.text).toBe(0);
+});
+
+test("ARK-T707 a whole-suite bun test takes its own ticket under the marker of a run that has ended, and waits under it while a new holder holds the cores", async () => {
+  const fixture = makeFixture({ pipes: true, probe: true });
+  const first = bunTest(fixture.directory, ["--parallel=3"], environment(fixture.home));
+  await waitForMarkers(fixture, ["started-gate", "marker-value"]);
+  const marker = fixture.markerLines("marker-value")[0]!;
+  fixture.openGate();
+  expect(await finish(first), first.output.text).toBe(0);
+
+  const projectEnvironment = environment(fixture.home, {
+    ARK_PROJECT: "demo",
+    [budgetHeldVariable]: marker,
+  });
+  // No holder now: the run takes the free cores through a ticket of its own, so the marker of the ended run is not what lets it start.
+  const free = makeProbeRepo({ hold: true });
+  const taking = bunTest(free.directory, ["test", "--parallel=3"], projectEnvironment);
+  await free.started({
+    within: passLimit,
+    name: "start of the run under the marker of an ended run",
+  });
+  expect(readTestLock().running).toMatchObject([
+    { run: "bun test", pid: taking.child.pid, cores: 3 },
+  ]);
+  free.release();
+  expect(await finish(taking), taking.output.text).toBe(0);
+
+  // A new holder holds all 3 cores; the marker still names the run that ended.
+  const holder = await startHolder(fixture.home, 3);
+  const blocked = makeProbeRepo();
+  const waiting = bunTest(blocked.directory, ["test", "--parallel=3"], projectEnvironment);
+  await waitsForBudget(fixture, waiting.child, (ticket) => ticket.pid === waiting.child.pid);
+  expect(blocked.ranX()).toBe(false);
+  stopRun(waiting.child);
+  await bounded(waiting.child.exited, { within: passLimit, name: "exit of the child" });
+  await holder.release();
+});
+
+test("ARK-T707 a whole-suite bun test that a test of a single-file run starts waits for the budget and starts once the holder releases", async () => {
+  const fixture = makeFixture();
+  const markers = realpathSync(mkdtempSync(join(tmpdir(), "bare-nested-markers-")));
+  const nested = realpathSync(mkdtempSync(join(tmpdir(), "bare-nested-")));
+  writeFileSync(join(nested, "bunfig.toml"), `[test]\npreload = [${JSON.stringify(preload)}]\n`);
+  mkdirSync(join(nested, "test"));
+  writeFileSync(
+    join(nested, "test", "nested.test.ts"),
+    `${header(markers)}test("FAKE-1-AC1 nested", () => { appendFileSync(join(markers, "nested-ran"), "x"); });\n`,
+  );
+  writeFileSync(
+    join(fixture.directory, "test", "spawn.test.ts"),
+    `${header(markers)}test("FAKE-1-AC1 spawn", async () => {
+  const child = Bun.spawn([process.execPath, "test", "--parallel=2"], { cwd: ${JSON.stringify(nested)}, stdout: "pipe", stderr: "pipe" });
+  await new Response(child.stdout).text();
+  appendFileSync(join(markers, "nested-code"), String(await child.exited));
+});
+`,
+  );
+  const holder = await startHolder(fixture.home, 3);
+  const outer = bunTest(
+    fixture.directory,
+    ["test/spawn.test.ts"],
+    environment(fixture.home, { ARK_PROJECT: "demo" }),
+  );
+
+  // The file run holds no cores, so the whole suite its test starts has to wait like a bare run.
+  await waitsForBudget(
+    fixture,
+    outer.child,
+    (ticket) => ticket.run === "bun test" && ticket.pid !== outer.child.pid,
+  );
+  expect(existsSync(join(markers, "nested-ran"))).toBe(false);
+  expect(outer.child.exitCode).toBeNull();
+
+  await holder.release();
+  expect(await finish(outer), outer.output.text).toBe(0);
+  expect(readFileSync(join(markers, "nested-ran"), "utf8")).toBe("x");
+  expect(readFileSync(join(markers, "nested-code"), "utf8")).toBe("0");
 });

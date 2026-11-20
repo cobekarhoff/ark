@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { type FakeProcess, fakeProcesses } from "./fake-ps.ts";
 import {
   afterHostReads,
   ark,
@@ -990,11 +991,80 @@ describe("ark chief state host", () => {
       expect(text).toMatch(/^cpu: \d/m);
       expect(text).toMatch(/free disk: \d+ GB/);
       expect(text).toContain("tests: running 0, waiting 0");
+      // The count is the real host's here (ARK-T706 owns its value): `0` when none, else count and memory, or `unavailable`.
+      const lines = text.trimEnd().split("\n");
+      expect(lines.at(-2)).toMatch(/^orphaned bun test workers: (0|\d+ \(\d+ MB\)|unavailable)$/);
+      expect(lines.at(-1)).toMatch(/^hold new runs: /);
       expect(holdLines(text)).toHaveLength(1);
       // Load and disk are the real host's: the line is `no` only when they are clear.
       expect(holdLines(text)[0]).not.toMatch(/free \d+%|swap/);
     },
   );
+
+  /** The Host section with a fake `ps`: the real host has live orphaned bun test workers, so no case reads its `ps`. */
+  const hostWithPs = (rows: FakeProcess[] | "fails") => {
+    const fake = fakeProcesses();
+    const outerPath = process.env.PATH;
+    process.env.PATH = `${fake.bin}:${outerPath}`;
+    Object.assign(process.env, fake.environment);
+    try {
+      if (rows === "fails") fake.psFails();
+      else fake.set(rows);
+      return host();
+    } finally {
+      process.env.PATH = outerPath;
+      delete process.env.ARK_FAKE_PS_DIR;
+    }
+  };
+  const workerRow = (pid: number, rssKilobytes: number, parentPid = 1): FakeProcess => ({
+    pid,
+    parentPid,
+    rssKilobytes,
+    command:
+      "/Users/dev/.bun/bin/bun test --test-worker --isolate --timeout=5000 --preload /repo/test/tmpdir-preload.ts",
+  });
+  const orphanLines = (text: string) =>
+    text.split("\n").filter((line) => line.startsWith("orphaned bun test workers:"));
+
+  test("ARK-T706 prints the number and the memory of the orphaned bun test workers before the hold line and counts no other process", () => {
+    const text = hostWithPs([
+      workerRow(5001, 102_400),
+      workerRow(5002, 51_200),
+      workerRow(5003, 153_600),
+      // A worker whose parent is alive, a bun run that is not a worker and a process that is not bun: not counted.
+      workerRow(5004, 999_999, 4242),
+      {
+        pid: 5005,
+        parentPid: 1,
+        rssKilobytes: 999_999,
+        command: "/usr/bin/bun test test/a.test.ts",
+      },
+      { pid: 5006, parentPid: 1, rssKilobytes: 999_999, command: "/usr/bin/node server.js" },
+    ]);
+    expect(orphanLines(text)).toEqual(["orphaned bun test workers: 3 (300 MB)"]);
+    const lines = text.trimEnd().split("\n");
+    expect(lines.findIndex((line) => line.startsWith("tests:"))).toBe(lines.length - 3);
+    expect(lines.at(-2)).toBe("orphaned bun test workers: 3 (300 MB)");
+    expect(lines.at(-1)).toMatch(/^hold new runs: /);
+  });
+
+  test("ARK-T706 prints a single small orphaned worker as 1 (2 MB), not 0 and not unavailable", () => {
+    expect(orphanLines(hostWithPs([workerRow(5001, 2048)]))).toEqual([
+      "orphaned bun test workers: 1 (2 MB)",
+    ]);
+  });
+
+  test("ARK-T706 prints 0 when ps lists no orphaned worker and unavailable when ps fails", () => {
+    const none = hostWithPs([workerRow(5004, 999_999, 4242)]);
+    expect(orphanLines(none)).toEqual(["orphaned bun test workers: 0"]);
+
+    const failing = hostWithPs("fails");
+    expect(orphanLines(failing)).toEqual(["orphaned bun test workers: unavailable"]);
+    // Every other Host line still prints.
+    expect(failing).toMatch(/^free memory: /m);
+    expect(failing).toMatch(/^tests: running /m);
+    expect(failing.trimEnd().split("\n").at(-1)).toMatch(/^hold new runs: /);
+  });
 
   test.skipIf(!onMac)(
     "ARK-T188 counts a running and a waiting test beside the budget section",
