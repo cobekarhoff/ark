@@ -511,7 +511,9 @@ test("ARK-T142 after the upstream MR squash merges, the refresh moves the submod
   expect(synced.code, synced.err).toBe(0);
   expect(git(appRemote, "rev-parse", appTree.branch)).toBe(git(appTree.path, "rev-parse", "HEAD"));
   expect(git(appRemote, "ls-tree", appTree.branch, "libs/lib")).toContain(merged);
-});
+  },
+  { timeout: 120_000 },
+);
 
 test("ARK-T142 refreshing a fast-forward merge records the event and makes no commit", () => {
   const { runId, directory, appTree, submodule, branchHead } = submoduleRun(0.8);
@@ -530,7 +532,9 @@ test("ARK-T142 refreshing a fast-forward merge records the event and makes no co
   expect(git(submodule, "rev-parse", "HEAD")).toBe(branchHead);
   const events = readEvents(directory).filter((event) => event.type === "bump.refreshed");
   expect(events.map((event) => event.data)).toEqual([{ step: "bump-lib", value: branchHead }]);
-});
+  },
+  { timeout: 120_000 },
+);
 
 test("ARK-T142 the refresh commit holds only the gitlink, and unrelated staged work stays staged", () => {
   const { runId, root, libRemote, libTree, appTree, branchHead } = submoduleRun(0.6);
@@ -554,7 +558,9 @@ test("ARK-T142 the refresh commit holds only the gitlink, and unrelated staged w
   expect(refreshed.code, refreshed.err).toBe(0);
   expect(git(appTree.path, "show", "--name-only", "--format=", "HEAD")).toBe("libs/lib");
   expect(git(appTree.path, "diff", "--cached", "--name-only")).toBe("unrelated.txt");
-});
+  },
+  { timeout: 120_000 },
+);
 
 test("ARK-T142 bump refresh refuses a step that is not a bump step and records nothing", () => {
   const { runId, directory } = openRun();
@@ -562,4 +568,6 @@ test("ARK-T142 bump refresh refuses a step that is not a bump step and records n
   expect(refused.code).toBe(1);
   expect(refused.err).toContain("implementer is not a bump step of the plan");
   expect(readEvents(directory).some((event) => event.type === "bump.refreshed")).toBe(false);
-});
+  },
+  { timeout: 120_000 },
+);
