@@ -502,16 +502,16 @@ the current `ark.yml` (never stored in the cache, never from the base or census 
 suite <name> <seconds> s over time_budget_s <n>` for a suite over its budget, and one line for each
 test over `slow_test_s` (longer first, with its file, name and time): `warning slow test <suite> ...
 (no slow_reason)`. A test with no time in the report is never slow, and a reused suite whose stored
-result has no times prints `no suite time or test times in the reused result: not judged`. With
-`on_over: fail` the first word of those lines is `failure` and the run fails with `suite <name> is
-over its time limit (on_over: fail)`, `passed: false` and exit code 1; the suite row of
-`test.completed` stays `passed` and has no `failed_files`, so the next run re-runs no file for it. A
-slow test whose test case entry (`test/cases/<id>.md` of the suite's repo in the run's worktree)
-gives `slow_reason` is listed as `slow <suite> ... reason: <text>` and never fails the run; a test
-needs a `slow_reason` in the entry of every case id in its title, a test with no case id is never
-excused, and a retired entry or an empty `slow_reason` gives no reason. A quick run runs part of a
-suite: it lists slow tests as warnings, prints no suite time or budget line, and never fails for
-time.
+result has no times prints `no suite time and test times in the reused result: not judged` (it names
+only what is missing and is set). With `on_over: fail` the first word of those lines is `failure`
+and the run fails with `suite <name> is over its time limit (on_over: fail)`, `passed: false` and
+exit code 1; the suite row of `test.completed` stays `passed` and has no `failed_files`, so the next
+run re-runs no file for it. A slow test whose test case entry (`test/cases/<id>.md` of the suite's
+repo in the run's worktree) gives `slow_reason` is listed as `slow <suite> ... reason: <text>` and
+never fails the run; a test needs a `slow_reason` in the entry of every case id in its title, a test
+with no case id is never excused, and a retired entry or an empty `slow_reason` gives no reason. A
+quick run runs part of a suite: it lists slow tests as warnings, prints no suite time or budget
+line, and never fails for time.
 ```
 
 ### test-case new
