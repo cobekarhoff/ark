@@ -26,14 +26,14 @@ Prove that tests which spawn a child Playwright run pass when `bun test` runs th
 1. Run the selected files serially: `bun test <files>`. Record the exit code.
 2. Run the same files in parallel: `bun test --parallel <files>`. Record the exit code and the output.
 3. Search the parallel output for `needs to be invoked via 'npx playwright test'` and `excluded from Jest test runs`.
-4. Confirm the `test` script in `package.json`, `.githooks/pre-commit` and the `bun test` step of `.github/workflows/ci.yml` each carry `--parallel` (inspection; AC3 text).
+4. Confirm the `test` script in `package.json` and `.githooks/pre-commit` carry `--parallel`, and the `bun test` step of the shard job in `.github/workflows/ci.yml` carries `--parallel` (inspection; AC3 text).
 
 ## Expected results
 
 - When the Playwright-spawning files run serially, the system shall exit 0.
 - When the same files run with `--parallel`, the system shall exit 0, with the same pass count and 0 fail.
 - The parallel output shall not contain the Jest-exclusion message.
-- The script, hook and CI step shall each run `bun test --parallel`.
+- The script and the hook shall run `bun test --parallel`; the CI shard step shall run `bun test --parallel` with its `--shard` and `--timings` flags (ARK-571).
 
 ## Screenshot checkpoints
 
