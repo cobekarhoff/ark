@@ -85,7 +85,7 @@ test("FAKE-1-AC1 ${name}", () => {
  */
 const longFile = (name: string) => (markers: string) =>
   `${imports}test("FAKE-1-AC1 ${name}", async () => {
-  writeFileSync(join(${JSON.stringify(markers)}, "pid-${name}"), process.pid + "\\n");
+  writeFileSync(join(${JSON.stringify(markers)}, "pid-${name}"), process.pid + " " + process.ppid + "\\n");
   const { promise, resolve } = Promise.withResolvers();
   let tick = 0;
   const timer = setInterval(() => {
@@ -209,7 +209,7 @@ test("ARK-T708 a bun test --parallel run with a live coordinator keeps its worke
 
 test("ARK-T708 a serial bun test run that the host started with parent pid 1 keeps running to the end of its file", async () => {
   const { directory, markers } = scratchRepo({ "long-1": longFile("1") });
-  // A double fork: the subshell waits until the outer shell has gone, then replaces itself with bun, so bun starts with parent pid 1.
+  // A double fork: the subshell waits until the outer shell has gone, then replaces itself with bun, so bun starts without its parent (pid 1, or a subreaper on a Linux runner).
   const forked = Bun.spawn(
     [
       "sh",
@@ -227,12 +227,11 @@ test("ARK-T708 a serial bun test run that the host started with parent pid 1 kee
     "start of the serial run",
     30_000,
   );
-  const pid = Number(lineOf(markers, "pid-1")![0]);
+  const [pid, parent] = lineOf(markers, "pid-1")!.map(Number);
   started.push(pid);
-  const parent = Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)])
-    .stdout.toString()
-    .trim();
-  expect(parent, "the serial run did not start with parent pid 1").toBe("1");
+  // The run read its own parent. The outer shell has exited by then, so the run lost it: on macOS and in a container
+  // the new parent is pid 1, on a Linux runner it is the nearest subreaper. Only the loss is asserted, never "1".
+  expect(parent, "the serial run still has the outer shell as its parent").not.toBe(forked.pid);
 
   await waitFor(
     markers,

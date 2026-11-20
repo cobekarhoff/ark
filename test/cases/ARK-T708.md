@@ -24,7 +24,7 @@ A real `bun test --parallel=2` whose coordinator is killed by SIGKILL leaves no 
 1. Start `bun test --parallel=2` over `hold` files (two files, so two workers). Wait until both `pids-*` files exist: read the two worker pids and check each one's ppid is the coordinator's pid.
 2. Kill the coordinator with SIGKILL by its pid. Poll `kill -0` for both worker pids with a 10 s limit counted from the kill.
 3. Control, parent alive: start `bun test --parallel=2` over two copies of `long`. Wait for the exit. Read the tick files.
-4. Control, serial run with ppid 1: start `bun test test/long.test.ts` through a double fork (`sh -c '(bun test ... &)'`, so its ppid becomes 1) and wait until its result file exists.
+4. Control, serial run that lost its parent: start `bun test test/long.test.ts` through a double fork (`sh -c '(bun test ... &)'`, the subshell waits until the outer shell has exited), wait until the run writes its own pid and ppid, and wait until its result file exists. The run reads its own ppid: on macOS and in a container it is 1, on a Linux runner it is the nearest subreaper, so the case never asserts 1.
 5. Release the pipe of step 1's files if a worker is still alive after step 2 (cleanup by pid, never a name pattern).
 
 ## Expected results
@@ -32,7 +32,7 @@ A real `bun test --parallel=2` whose coordinator is killed by SIGKILL leaves no 
 - Step 1: two workers, each with ppid equal to the coordinator.
 - Step 2: both worker pids are gone within 10 s of the kill. At the base commit they are still alive after 10 s, so the case fails there.
 - Step 3: exit 0, every `long` wrote its 12 ticks; no worker stopped.
-- Step 4: the serial run (itself not a `--test-worker`) passes with its 12 ticks even though its ppid is 1.
+- Step 4: the ppid the run read is not the pid of the outer shell (it lost its parent), and the serial run (itself not a `--test-worker`) passes with its 12 ticks.
 
 ## Screenshot checkpoints
 
