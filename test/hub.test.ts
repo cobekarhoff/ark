@@ -3868,8 +3868,9 @@ async function conversationWhen<Reply extends ConversationHead>(
   baseUrl: string,
   ready: (reply: Reply) => boolean,
   path = "/api/conversation",
+  timeoutMs = 15_000,
 ): Promise<Reply> {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
     const response = await fetch(`${baseUrl}${path}`);
     const body = await response.text();
@@ -3901,8 +3902,14 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
   const { run, messages, orca } = conversationFixture();
   const state = installFakeTools({ orca, orcaInboxDelaySeconds: 0.5 });
   process.env.ARK_HUB_INTERVAL_MS = "100";
+  // Slow Orca calls: the handle directory read outlasts the 2 s wait, so the first reply is the loading reply (every handle unmapped).
+  writeFileSync(join(state, "orca.sleep"), "3");
   const { baseUrl } = await start();
   delete process.env.ARK_HUB_INTERVAL_MS;
+  // Keep the delay until the loading reply is read, then speed Orca up so the directory read finishes.
+  // The slow Orca calls (about 5.5 s before the first reply) stay out of the default 15 s wait.
+  await conversationWhen<ProjectReply>(baseUrl, () => true, "/api/conversation", 45_000);
+  writeFileSync(join(state, "orca.sleep"), "0");
   // The liveness read is `--limit 200 --full`; the conversation read names a larger limit.
   const fullReads = () =>
     readFileSync(join(state, "orca.log"), "utf8")
@@ -3914,8 +3921,11 @@ test("ARK-T319 the hub reads the full Orca inbox in the background, keeps the la
           !line.includes("--terminal "),
       );
 
-  // A good read: below the limit, nothing stale, every field kept.
-  const first = await conversationWhen<ProjectReply>(baseUrl, (reply) => !reply.stale);
+  // A good read: below the limit, nothing stale, every field kept. Take it from a reply built after the directory read landed: msg_1 maps to Master Chief (the loading reply has every handle unmapped).
+  const first = await conversationWhen<ProjectReply>(
+    baseUrl,
+    (candidate) => agentOfMessage(candidate, "msg_1", "to").kind === "chief",
+  );
   const limit = Number(
     fullReads()
       .at(-1)!
