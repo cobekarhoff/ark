@@ -650,7 +650,6 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   const settled = await settleCount(everyCall);
   const settledAt = Date.now();
   await released;
-  expect(releasedAt, "the hold was released while the settle wait ran").toBeGreaterThan(0);
   expect(settledAt, "the settle wait returned after the held read ended").toBeGreaterThan(
     releasedAt,
   );

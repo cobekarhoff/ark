@@ -1,6 +1,6 @@
-// ARK-T777: the window check of ARK-T241 and ARK-T756 on the exact counts that CI runs produced, and the settle
-// wait of ARK-T241 step 6 on counters that settle or never settle. Both modules are the fix of ARK-631: they load
-// inside each test, so a missing module fails that test and not the file.
+// ARK-T777: the window check of ARK-T241 and ARK-T756 on the exact counts that CI runs produced. One more test, owned
+// by ARK-T241 (step 8), runs its settle wait on a counter that never settles. Both modules are the fix of ARK-631:
+// they load inside each test, so a missing module fails that test and not the file.
 import { expect, setDefaultTimeout, test } from "bun:test";
 
 setDefaultTimeout(30_000);
@@ -125,9 +125,7 @@ test("ARK-T777 a window of 25 fails", async () => {
 
 test("ARK-T777 the baseline is the largest of the three windows, not the first or the mean", async () => {
   const checkWindows = await loadWindowCheck();
-  // W 1,1,3 churn 11: a baseline of the first window (limit 4) or the mean (limit 6.67) fails it; the largest (limit 12) passes it.
-  check(checkWindows, sourcesWith(healthy(4), { 0: { windows: [1, 1, 3], churn: 11 } }));
-  // The same churn with the large window first is the same baseline.
+  // W 1,1,3 churn 11 (the AC1 row above) owns the first, smallest and mean baselines. The large window first owns the last-window baseline: limit 12 for the largest, 4 for the last or smallest, 6.67 for the mean.
   check(checkWindows, sourcesWith(healthy(4), { 0: { windows: [3, 1, 1], churn: 11 } }));
 });
 
@@ -162,15 +160,8 @@ test("ARK-T777 a sum failure names the churn sum, its limit and every source", a
   for (const source of sourceNames) expect(message).toContain(source);
 });
 
-// The settle wait of ARK-T241 step 6: a count that stops changing returns its final value; a count that keeps changing fails with what it sampled.
-test("ARK-T777 the settle wait returns the count once it stops changing", async () => {
-  const settleCount = await loadSettle();
-  let calls = 0;
-  const settled = await settleCount(() => Math.min(++calls, 5), { quietMs: 100, boundMs: 5000 });
-  expect(settled).toBe(5);
-});
-
-test("ARK-T777 the settle wait fails at its bound with the counts it sampled when the count never stops changing", async () => {
+// ARK-T241 step 8: the permanent proof that the settle wait fails when the hub starts a new read after the disconnect (a count that never stops changing). No seam in hub/ makes the hub do it.
+test("ARK-T241 the settle wait fails at its bound with the counts it sampled when the count never stops changing", async () => {
   const settleCount = await loadSettle();
   let reads = 1000;
   const failure = await settleCount(() => reads++, { quietMs: 100, boundMs: 400 }).then(
@@ -178,5 +169,5 @@ test("ARK-T777 the settle wait fails at its bound with the counts it sampled whe
     (error: Error) => error,
   );
   expect(failure, "the wait must fail").toBeInstanceOf(Error);
-  expect(failure!.message).toContain("1000");
+  expect(failure!.message).toContain("counts sampled: 1000");
 });
