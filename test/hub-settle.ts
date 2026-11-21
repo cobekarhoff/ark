@@ -11,8 +11,8 @@ export async function settleCount(
   count: () => number,
   options: { quietMs?: number; boundMs?: number } = {},
 ): Promise<number> {
-  const quietMs = options.quietMs ?? 1000;
-  const boundMs = options.boundMs ?? 5000;
+  const quietMs = options.quietMs ?? 2500;
+  const boundMs = options.boundMs ?? 10_000;
   const start = Date.now();
   const sampled: number[] = [];
   let value = count();
