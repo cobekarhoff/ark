@@ -74,7 +74,10 @@ export async function readTerminalSnapshot(
 ): Promise<OrcaRead<{ terminals: OrcaTerminal[]; runs: OrcaRun[] }>> {
   const [runList, terminalList] = await Promise.all([
     orcaPages<OrcaRun>("run-list", "runs", ["--full"], timeoutMilliseconds),
-    execJson<{ result?: { terminals?: OrcaTerminal[] } }>(["orca", "terminal", "list", "--json"]),
+    execJson<{ result?: { terminals?: OrcaTerminal[] } }>(
+      ["orca", "terminal", "list", "--json"],
+      timeoutMilliseconds,
+    ),
   ]);
   if (!runList.ok) return runList;
   const terminals = terminalList?.result?.terminals;
