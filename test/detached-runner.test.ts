@@ -1631,18 +1631,13 @@ describe("ark test retry waits for the host load", () => {
   });
 
   // The 90 s limit of the next two tests is the proof of the bound: the default wait is 180 s.
-  test("ARK-T762 a load that never drops holds the retry for ARK_RETRY_LOAD_WAIT_S seconds, then the file still runs again and the output says it reran under load", async () => {
+  test("ARK-T762 a load that never drops ends the retry wait at ARK_RETRY_LOAD_WAIT_S: the file still runs again within the test limit and the output says it reran under load", async () => {
     const { fixture } = loadedFixture("2.9");
     fixture.environment.ARK_FAKE_LOAD_ONE = "50";
     fixture.environment.ARK_RETRY_LOAD_WAIT_S = "1";
-    const spawned = spawnArk(fixture, ["test", fixture.runId]);
-    await spawned.outputHas("retry waits for load");
-    const waitLineAt = Date.now();
-    const result = await spawned.finished();
+    const result = await arkDone(fixture, "test", fixture.runId);
 
     expect(result.code, result.err).toBe(0);
-    // a 1 s wait ends well before 60 s; the default wait of 180 s does not
-    expect(Date.now() - waitLineAt).toBeLessThan(60_000);
     expect(headStarts(fixture, "flaky")).toBe(2);
     const waited = result.out.indexOf("retry waits for load");
     const reran = result.out.search(/suite {6}loaded head {2}reran under load/);
