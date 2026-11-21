@@ -4,7 +4,7 @@ title: ARK-T759 a run whose own edit makes a generated Markdown file differ from
 level: integration
 technique: equivalence classes of a generated Markdown edit (inside the generated block, against ARK-T758's edit outside it), state transition (quick test failed, then check and open)
 priority: high
-risk: "a quick test of a Markdown-only diff skips or does not record the checks of `ark.yml`, or runs them in the base checkout and not in the run worktree, so an out-of-sync `docs/reference/cli.md` passes the quick test; or the new rule accepts a generated `.md` because a matching check exists in `ark.yml` without reading its `passed` in the last test, so the open pushes a stale generated file on a quick test"
+risk: "a quick test of a Markdown-only diff skips the checks of `ark.yml`, so it exits 0 on an out-of-sync `docs/reference/cli.md`, or runs them in the base checkout and not in the run worktree, so the check is recorded passed and the open pushes the stale file on the quick-test path; or the new rule accepts a generated `.md` because a matching check exists in `ark.yml` without reading its `passed` in the last test, so `noCodeRun` reads the stale file as no-code and the first refusal of `open` becomes the `did not pass` line instead of the quick line (a later rule still refuses, so the rule's own check is gone unseen)"
 status: active
 changed_by: 2026-11-21-ARK-625-1
 ---
