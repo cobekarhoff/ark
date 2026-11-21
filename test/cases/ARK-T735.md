@@ -7,7 +7,7 @@ priority: medium
 risk: >-
   a change to the orca pass (yields between runs, bounded spawns, a worker) turns a failure of one call into a partial value: the run whose call failed vanishes from the agents, or its good neighbours show a half-read list, or the pass publishes an empty list of waits, so the page shows no one waiting when Orca could not answer; or a failure leaves the slot not ok forever after the call works again; or a failure of Master Chief's worker-list, which today only hides a run lead that nothing else lists, fails the whole pass, or leaves the run lead of a run in the agents from a stale read
 status: active
-changed_by: 2026-11-20-ARK-606-1
+changed_by: 2026-11-20-ARK-613-1
 ---
 
 ## Objective
@@ -24,7 +24,7 @@ No `setTimeout(`, `Bun.sleep(`, `waitForTimeout(` or `.toBeLessThan(<3 or more d
 
 ## Preconditions
 
-- The `stage()` of `test/hub-stall.test.ts` with its fake `orca` opt-in files from ARK-T734 (`orca.workers`, `orca.workers.<orca run id>`, `orca.tasks`), plus one more opt-in file read only by this test: `orca.fail`, holding lines `<verb> <orca run id>` (`worker-list`, `task-list`) or `run-list` or `inbox`; the fake exits 1 for a call that matches a line (`inbox` matches every `inbox` call without `--terminal`, so the `--limit 200` call of `readOrca`). The shared fake of `test/hub-fixtures.ts` is not edited; the other callers of this `stage()` (ARK-T699, ARK-T700, ARK-T701, ARK-T702, ARK-T703) see the same answers as now because they write none of these files.
+- The `stage()` of `test/hub-stall-support.ts` with its fake `orca` opt-in files from ARK-T734 (`orca.workers`, `orca.workers.<orca run id>`, `orca.tasks`), plus one more opt-in file read only by this test: `orca.fail`, holding lines `<verb> <orca run id>` (`worker-list`, `task-list`) or `run-list` or `inbox`; the fake exits 1 for a call that matches a line (`inbox` matches every `inbox` call without `--terminal`, so the `--limit 200` call of `readOrca`). The shared fake of `test/hub-fixtures.ts` is not edited; the other callers of this `stage()` (ARK-T699, ARK-T700, ARK-T701, ARK-T702, ARK-T703) see the same answers as now because they write none of these files.
 - One more opt-in file, read only by step 9: `orca.null`, holding lines `<verb> <orca run id>`; the fake answers `{"result":null}` (exit 0, no rows) for a call that matches a line.
 - Three open runs in `building`, each with its Orca run (objective `Ark run <run>`), and Master Chief's Orca run (`Master Chief: p tickets`, its terminal connected). The runs 1 and 3 have a connected run lead terminal. The run 2 has a run lead terminal that `orca.terminals` does not list as connected, and Master Chief's run lists that lead as a live worker (`orca.workers.<chief orca run id>`, its `terminal` the lead's handle, a `projection` with liveness), so the agents of run 2 hold a run lead with presence `running`, from Master Chief's `worker-list` alone.
 - Each open run has its own `orca.workers.<orca run id>` with two workers, each with a `taskId`; `orca.tasks` holds the task of each worker with a distinct title in the form `stepTask` reads (hub/sources.ts), `<step id> (<role>, <repo>)`, for example `s1 (implementer, .)` and `s2 (validator, .)`, because the agent title comes from `task-list` and a worker row has no title; the step id and the role of the agent come from that title. One unread `question` in `orca.inbox` for run 2 gives its wait.
