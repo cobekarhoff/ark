@@ -1,7 +1,8 @@
 /**
  * `postMergeRequest` creates or updates the one MR of a branch on GitHub (`gh`) or GitLab (`glab`), with the body
  * from a file. It probes the host twice, the second time just before it writes. An update replaces only the text
- * between the two markers. The final body is linted, and a `fail` refuses the post before any write.
+ * between the two markers. The final body is linted, and a `fail` refuses the post before any write. A repo that is not
+ * private (or whose visibility cannot be read) gets only checkpoint screenshots of the run's test cases.
  * `buildTitle` is the one place that makes an MR title.
  */
 import {
@@ -14,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { beginMarker, endMarker, githubBodyLimit } from "./body.ts";
 import type { Ledger } from "./ledger.ts";
@@ -97,6 +98,9 @@ type Existing = OpenMergeRequest;
 
 /** The open-MR probe failed: the host did not answer or answered nonsense. Scripts map it to exit 2. */
 export class ProbeFailure extends ArkError {}
+
+/** A repo that is not private (or whose visibility is unknown) was asked to take media that is not a checkpoint screenshot. Nothing was sent. */
+export class MediaRefusal extends ArkError {}
 
 /** The one place a host command runs. In a dry run it prints each call, and a write is not run. */
 function host(command: string[], directory: string, input: { dryRun?: boolean }, write = false) {
@@ -403,9 +407,16 @@ function mapImages(body: string, replace: (target: string) => string | undefined
     .join("\n");
 }
 
-/** Each distinct local image or video that an image of the body names, that exists and that lies inside `root`, as an absolute path. */
-function localMedia(body: string, root: string): Map<string, string> {
-  const found = new Map<string, string>();
+/**
+ * Each distinct local image or video that an image of the body names and that exists, keyed by the path the body names:
+ * `inside` lies inside `root` (these are uploaded), `outside` does not (never uploaded, but a repo that is not private refuses it).
+ */
+function localMedia(
+  body: string,
+  root: string,
+): { inside: Map<string, string>; outside: Map<string, string> } {
+  const inside = new Map<string, string>();
+  const outside = new Map<string, string>();
   mapImages(body, (target) => {
     const file = resolve(root, target);
     if (
@@ -414,12 +425,73 @@ function localMedia(body: string, root: string): Map<string, string> {
       existsSync(file) &&
       statSync(file).isFile()
     ) {
-      const inside = relative(realpathSync(root), realpathSync(file));
-      if (!inside.startsWith("..") && !isAbsolute(inside)) found.set(target, file);
+      const within = relative(realpathSync(root), realpathSync(file));
+      (!within.startsWith("..") && !isAbsolute(within) ? inside : outside).set(target, file);
     }
     return undefined;
   });
-  return found;
+  return { inside, outside };
+}
+
+const checkpointImage = /\.(png|jpe?g|gif|webp)$/i;
+
+/**
+ * Whether `file` is a checkpoint screenshot of a test case of the run: an image under
+ * `<run folder>/results/evidence/<case>/(head|base)/screenshots/`, by real path, so a symlink or a `..` segment cannot lead out.
+ * It trusts the folder: it does not prove that the test ran on fixture data.
+ */
+function isCheckpointScreenshot(file: string, runDirectory: string | undefined): boolean {
+  if (runDirectory === undefined || !checkpointImage.test(file)) return false;
+  const parts = relative(realpathSync(runDirectory), realpathSync(file)).split(sep);
+  return (
+    parts.length >= 6 &&
+    parts[0] === "results" &&
+    parts[1] === "evidence" &&
+    (parts[3] === "head" || parts[3] === "base") &&
+    parts[4] === "screenshots"
+  );
+}
+
+/** The visibility the host reports for the repo (`gh repo view --json visibility`, `glab api projects/:fullpath`), or `null` when it cannot be read. */
+function readVisibility(input: PostInput): string | null {
+  const result = host(
+    input.host === "github"
+      ? ["gh", "repo", "view", "--json", "visibility"]
+      : ["glab", "api", "projects/:fullpath"],
+    input.directory,
+    input,
+  );
+  if (!result.ok) return null;
+  try {
+    const value = (JSON.parse(result.output) as { visibility?: unknown }).visibility;
+    return typeof value === "string" && value !== "" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The refusal of an upload to a repo that is not private, or `null` when every file may go: only `private` (any case) is private,
+ * and a failed or empty read counts as not private. On such a repo only checkpoint screenshots of the run's test cases pass.
+ */
+function refuseNonCheckpointMedia(
+  input: PostInput,
+  media: Map<string, string>,
+  outside: Map<string, string>,
+): string | null {
+  if (media.size + outside.size === 0) return null;
+  const visibility = readVisibility(input);
+  if (visibility?.toLowerCase() === "private") return null;
+  const runDirectory = input.ledger.run?.directory;
+  const refused = [...media, ...outside]
+    .filter(([, file]) => !isCheckpointScreenshot(file, runDirectory))
+    .map(([target]) => target);
+  if (refused.length === 0) return null;
+  const state =
+    visibility === null
+      ? "the visibility is unknown, so the repo counts as not private"
+      : `the repo is ${visibility.toUpperCase()}`;
+  return `${state}, so only checkpoint screenshots of the run's test cases are uploaded. Refused: ${refused.join(", ")}. Keep each in the run folder and name it in the body as \`Not run:\` with the reason. Nothing was uploaded or posted.`;
 }
 
 /** Replaces exactly the image targets that `replacements` names, so a path in backticks, in a fence or inside a longer path stays. */
@@ -513,7 +585,22 @@ export function postMergeRequest(input: PostInput): Posted {
     };
 
   // Uploads come after every refusal and before the write: a failure here posts nothing.
-  const media = localMedia(body, input.ledger.run?.directory ?? input.directory);
+  const { inside: media, outside } = localMedia(
+    body,
+    input.ledger.run?.directory ?? input.directory,
+  );
+  const refusal = refuseNonCheckpointMedia(input, media, outside);
+  if (refusal !== null) {
+    if (!input.dryRun) throw new MediaRefusal(refusal);
+    console.log(`would refuse: ${refusal}`);
+    return {
+      action: "dry-run",
+      url: existing?.url ?? "",
+      number: existing?.number ?? 0,
+      draft: existing?.draft ?? input.draft === true,
+      note,
+    };
+  }
   if (input.host === "github") {
     if (body.length > githubBodyLimit)
       throw new ArkError(
