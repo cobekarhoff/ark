@@ -36,8 +36,8 @@ Prove that `ark status` without a run argument prints one line for each open run
 - When no project is named, the system shall exit with code 0 and print `<demo run id>  building  build  0m` and `<other run id>  awaiting_criteria  -  0m` as two separate lines.
 - When no project is named, the system shall not print the id of the closed run.
 - When `--project other` is set, the system shall exit with code 0, print `<other run id>  awaiting_criteria  -  0m`, and print neither the id of the open `demo` run nor the id of the closed run.
-- When `ARK_PROJECT=other` is set and no `--project` is given, the system shall print the same run lines as step 2.
-- When `--project quiet` names a project with no open run, the system shall print `no open runs` and no run id of `demo` or `other`.
+- When `ARK_PROJECT=other` is set and no `--project` is given, the system shall exit with code 0 and print the same run lines as step 2.
+- When `--project quiet` names a project with no open run, the system shall exit with code 0, print `no open runs`, and print no run id of `demo` or `other`.
 
 ## Screenshot checkpoints
 
