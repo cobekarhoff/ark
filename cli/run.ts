@@ -743,7 +743,7 @@ export function status(runId?: string, project?: string): void {
     }
   }
   const lines: string[] = [];
-  for (const project of projects) {
+  for (const project of requested ? [requested] : projects) {
     const runsRoot = runsDirectory(project);
     for (const name of existsSync(runsRoot) ? readdirSync(runsRoot).sort() : []) {
       const directory = join(runsRoot, name);
