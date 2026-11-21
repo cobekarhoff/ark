@@ -362,6 +362,32 @@ function waitFor(condition: () => boolean): Promise<void> {
   return promise;
 }
 
+/**
+ * Resolves when every marker in `names` exists in `home`, checked every 25 ms with no fs.watch (a lost event must not hang the wait).
+ * Rejects after `limitMs` with the missing markers and the files of `home`. The timer is cleared on both ends.
+ */
+function waitForMarkers(home: string, names: string[], limitMs: number): Promise<void> {
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const deadline = performance.now() + limitMs;
+  const check = () => {
+    const missing = names.filter((name) => !existsSync(join(home, name)));
+    if (missing.length === 0) {
+      clearInterval(timer);
+      resolve();
+    } else if (performance.now() >= deadline) {
+      clearInterval(timer);
+      reject(
+        new Error(
+          `no ${missing.join(", ")} within ${limitMs} ms; files in the scenario home: ${readdirSync(home).join(", ")}`,
+        ),
+      );
+    }
+  };
+  const timer = setInterval(check, 25);
+  check();
+  return promise;
+}
+
 const logLines = () => readLog().split("\n").filter(Boolean);
 const countOf = (text: string, needle: string) => text.split(needle).length - 1;
 const started = (run: string) => () => logLines().includes(`start ${run}`);
@@ -707,17 +733,8 @@ budget.close();`;
         }),
       );
     };
-    const waitFor = (...names: string[]) => {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      const check = () => {
-        if (!names.every(has)) return;
-        watcher.close();
-        resolve();
-      };
-      const watcher = watch(home, check);
-      check();
-      return promise;
-    };
+    // Per call, not per test: a child that is slow to start must show the marker within 20 s.
+    const waitFor = (...names: string[]) => waitForMarkers(home, names, 20_000);
     try {
       await steps({
         home,
@@ -729,8 +746,7 @@ budget.close();`;
             pauses,
           ),
         waitFor,
-        // ponytail: ARK-618 red-proof delegate, it ignores the limit; the implementer replaces it with the polling waitForMarkers.
-        waitForWithin: (_limitMs, ...names) => waitFor(...names),
+        waitForWithin: (limitMs, ...names) => waitForMarkers(home, names, limitMs),
         has,
         go: (name, point) => writeFileSync(join(home, `${name}-go-${point}`), ""),
         stop: (name) => {
