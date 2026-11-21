@@ -19,6 +19,7 @@ import {
   runId,
   scenario,
   useCompanionTestEnvironment,
+  withProductionLimits,
 } from "./companions-fixtures.ts";
 
 // A sync or a command starts the fake orca (a bun process) several times, and a hung call lasts seconds.
@@ -144,29 +145,6 @@ function pairOfCompanions() {
 /** Removes every cause of a failed wake from the fake. */
 const heal = (fake: FakeCompanionTools): void =>
   fake.configure({ failAll: false, failVerbs: [], failSendTo: [], hangVerbs: [] });
-
-/**
- * Runs `body` with the limits of production: an empty ARK_ORCA_TIMEOUT_MS, which `orcaTimeout` reads
- * as unset (the wake bounds each Orca call at 3 s) and which the helper's 60 s default does not
- * replace, and the 2 s reader limit that `ark` has when ARK_READER_TIMEOUT_MS is unset (the test
- * helper sets 30 s).
- */
-function withProductionLimits(body: () => void): void {
-  const saved = [process.env.ARK_ORCA_TIMEOUT_MS, process.env.ARK_READER_TIMEOUT_MS];
-  process.env.ARK_ORCA_TIMEOUT_MS = "";
-  process.env.ARK_READER_TIMEOUT_MS = "2000";
-  try {
-    body();
-  } finally {
-    for (const [name, value] of [
-      ["ARK_ORCA_TIMEOUT_MS", saved[0]],
-      ["ARK_READER_TIMEOUT_MS", saved[1]],
-    ] as const) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
-}
 
 // ------------------------------------------------------------------ ARK-T731
 
