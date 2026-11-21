@@ -439,15 +439,32 @@ let budgetCores = 0;
 
 /**
  * The `--grep` pattern of one failed Playwright test: Playwright matches the titles of the describe blocks and
- * the test joined with a space (a report name joins them with ` › `), and the title is the end of what it matches,
- * apart from tags, so a title that is the start of another title does not match it.
+ * the test joined with a space, each describe title followed by its tags (a report name joins them with ` › ` and
+ * has no tags), and the title is the end of what it matches, apart from tags, so a title that is the start of
+ * another title does not match it.
  */
 function playwrightGrepOf(name: string): string {
   const title = name
     .split(" › ")
-    .join(" ")
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("(?: @\\S+)* ");
   return `(?:^| )${title}(?: @\\S+)*$`;
+}
+
+/**
+ * Before the first retry of a suite: waits for a load below the budget, for a bounded time, once for the whole suite
+ * (every later retry starts at once). Returns the lines it printed, for the suite log.
+ */
+async function waitForRetryLoad(suite: Suite): Promise<string> {
+  const stillHigh = await waitForLoadBelow(budgetCores, (load) =>
+    console.log(
+      `suite      ${suite.name} head  retry waits for load  (load ${load} is not below the budget ${budgetCores})`,
+    ),
+  );
+  if (stillHigh === null) return "";
+  const line = `suite      ${suite.name} head  reran under load  (load ${stillHigh} is not below the budget ${budgetCores} after the wait limit)`;
+  console.log(line);
+  return `${line}\n`;
 }
 
 /** The retry command of one suite: `{files}` is replaced by `filesArgument` as it stands. */
@@ -461,18 +478,6 @@ async function retryOnce(
   tmp: string,
   cores: number,
 ): Promise<{ again: TestResult[]; code: number; log: string }> {
-  // A retry on a loaded host fails for the same reason: it waits for a load below the budget, for a bounded time.
-  const stillHigh = await waitForLoadBelow(budgetCores, (load) =>
-    console.log(
-      `suite      ${suite.name} head  retry waits for load  (load ${load} is not below the budget ${budgetCores})`,
-    ),
-  );
-  let log = "";
-  if (stillHigh !== null) {
-    const line = `suite      ${suite.name} head  reran under load  (load ${stillHigh} is not below the budget ${budgetCores} after the wait limit)`;
-    console.log(line);
-    log += `${line}\n`;
-  }
   const command = suite
     .base_command!.replaceAll("{files}", () => filesArgument)
     .replaceAll("{report}", reportPath)
@@ -485,7 +490,7 @@ async function retryOnce(
   const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
   const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
   const separator = output === "" || output.endsWith("\n") ? "" : "\n";
-  log += `retry ${label}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
+  const log = `retry ${label}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
   return { again, code: outcome.code, log };
 }
 
@@ -494,8 +499,9 @@ async function retryOnce(
  * time is flaky: its second results replace the failed ones. A Playwright suite (`playwright test` in its
  * `base_command`) writes no `file` in its report, so there every failed test runs once more by its title, all in one
  * process through `--grep`; a title that passes is flaky and is listed by its report name where a file would be.
- * Each retry waits for a load below the test budget (`waitForLoadBelow`). No retry (null) when the suite has no
- * `base_command`, or a failed test has no `file` in a suite that is not a Playwright one, so the failure stands.
+ * The retries of a suite wait once, before the first, for a load below the test budget (`waitForLoadBelow`). No
+ * retry (null) when the suite has no `base_command`, or a failed test has no `file` in a suite that is not a
+ * Playwright one, so the failure stands.
  */
 async function retryFailedFiles(
   suite: Suite,
@@ -518,7 +524,8 @@ async function retryFailedFiles(
       `suite      ${suite.name} head  retry by title: ${names.length} failed test${names.length === 1 ? "" : "s"}, one process`,
     );
     const grep = `--grep ${shellQuote(names.map(playwrightGrepOf).join("|"))}`;
-    const { again, log } = await retryOnce(
+    const waitLog = await waitForRetryLoad(suite);
+    const { again, code, log } = await retryOnce(
       suite,
       "by title",
       grep,
@@ -528,19 +535,24 @@ async function retryFailedFiles(
       tmp,
       cores,
     );
-    // a title is back and passed in the second run, whatever else failed there: a title that fails again stays failed
-    const flaky = names.filter((name) =>
-      again.some((result) => result.name === name && result.status === "passed"),
+    // a title is flaky when its second run holds a passed result and no failed one (a title shared by two tests
+    // fails when either copy fails). When every title is back, the second run must also exit 0: an error outside
+    // every test (a teardown) fails the suite. A title that fails again stays failed beside the ones that passed.
+    const back = names.filter(
+      (name) =>
+        again.some((result) => result.name === name && result.status === "passed") &&
+        !again.some((result) => result.name === name && result.status === "failed"),
     );
+    const flaky = back.length === names.length && code !== 0 ? [] : back;
     const kept = [
       ...results.filter((result) => !flaky.includes(result.name)),
       ...again.filter((result) => flaky.includes(result.name)),
     ];
-    return { results: kept, flaky, failedFiles: names, log };
+    return { results: kept, flaky, failedFiles: names, log: waitLog + log };
   }
   const failedFiles = [...new Set(failed.map((result) => result.file!))];
   let kept = results;
-  let log = "";
+  let log = await waitForRetryLoad(suite);
   const flaky: string[] = [];
   for (const [index, file] of failedFiles.entries()) {
     const retry = await retryOnce(
