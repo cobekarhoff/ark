@@ -3,9 +3,9 @@
 const pollMs = 50;
 
 /**
- * Polls `count` until it has stayed the same for `quietMs`, and returns it. The quiet span is longer than the
- * hold of step 6, so a count that is flat only because a read is held does not settle early. Rejects with the
- * counts it sampled when the count has not settled `boundMs` after the start.
+ * Polls `count` until it has stayed the same for `quietMs`, and returns it. Call it once the last read in flight
+ * has been released, so the quiet span is counted from the end of that read. Rejects with the counts it sampled
+ * when the count has not settled `boundMs` after the start.
  */
 export async function settleCount(
   count: () => number,

@@ -637,22 +637,14 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   const churnWindow = await windowOf(fake);
   checkWindows(sourceNames, windows, churnWindow);
 
-  // Step 6: no page, no read. A read is in flight at the disconnect and ends 700 ms after it; the settled count is taken after it ended.
+  // Step 6: no page, no read. A read is in flight at the disconnect and ends 700 ms after it; the settle wait starts at that release, so its quiet span is counted from the end of the read and not from the disconnect.
   fake.control("orca.hold", true);
   const heldRead = fake.reads("orca") + 1;
   await until("an orca read in flight", () => fake.reads("orca") >= heldRead);
   client.close();
-  let releasedAt = 0;
-  const released = sleep(700).then(() => {
-    fake.control("orca.hold", false);
-    releasedAt = Date.now();
-  });
+  await sleep(700);
+  fake.control("orca.hold", false);
   const settled = await settleCount(everyCall);
-  const settledAt = Date.now();
-  await released;
-  expect(settledAt, "the settle wait returned after the held read ended").toBeGreaterThan(
-    releasedAt,
-  );
   const settledConversation = fake.conversationReads();
   const settledUnread = fake.reads("chiefUnread");
   await sleep(1500);
