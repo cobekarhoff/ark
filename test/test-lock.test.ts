@@ -23,7 +23,7 @@ import {
   watch,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpus, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { openTestBudget } from "../cli/test-lock.ts";
 import { type FakeProcess, fakeProcesses } from "./fake-ps.ts";
@@ -35,6 +35,8 @@ import {
   setFakeHost,
   tempArkHome,
   tempGitRepo,
+  withFakeHarnesses,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -145,10 +147,10 @@ function startRun(
   const config = (suites: Suite[]) => ({
     workspace,
     ticket_source: "local",
-    test_budget_cores: 6,
     suites,
     roles,
   });
+  writeHost({ test_budget_cores: 6 });
   writeProject(
     project,
     config([
@@ -1044,27 +1046,126 @@ describe("ark test memory admission", () => {
     },
   );
 
-  test.skipIf(!onMac)("ARK-T187 uses the ark.yml limits in place of the defaults", async () => {
-    const file = join(arkHome, "projects", projectA, "ark.yml");
-    const original = readFileSync(file, "utf8");
+  // ARK-T769: the limits come from host.yml of ARK_HOME, for a project whose ark.yml sets none of the three host keys.
+  /** Runs `body` with `host.yml` holding `settings` beside this file's budget of 6, then puts the plain budget back. */
+  async function withHost(settings: Record<string, number>, body: () => Promise<void>) {
+    writeHost({ test_budget_cores: 6, ...settings });
     try {
-      writeFileSync(
-        file,
-        JSON.stringify({
-          ...JSON.parse(original),
-          test_min_free_memory_percent: 10,
-          test_max_swap_gb: 12,
-        }),
-      );
-      setFakeHost({ freePercent: 15, swapGigabytes: 10 });
-      const { code, out } = await runToEnd();
-      expect(code).toBe(0);
-      expect(logLines()).toContain(`start ${runA}`);
-      expect(out).not.toContain("memory");
+      await body();
     } finally {
-      writeFileSync(file, original);
+      writeHost({ test_budget_cores: 6 });
+    }
+  }
+
+  test.skipIf(!onMac)(
+    "ARK-T769 a floor of 10 in host.yml starts the suite at 17 percent free with no waiting line",
+    () =>
+      withHost({ test_min_free_memory_percent: 10 }, async () => {
+        setFakeHost({ freePercent: 17, swapGigabytes: 2 });
+        const { code, out } = await runToEnd();
+        expect(code).toBe(0);
+        expect(logLines()).toContain(`start ${runA}`);
+        expect(out).not.toContain("memory");
+      }),
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T769 a floor of 20 in host.yml holds the suite at 17 percent free with one line, and starts it when memory recovers",
+    () =>
+      withHost({ test_min_free_memory_percent: 20 }, () =>
+        holdsThenStarts(
+          { freePercent: 17, swapGigabytes: 2 },
+          /^ark test: waiting for memory: free 17% is below the 20% floor$/,
+        ),
+      ),
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T769 a swap ceiling of 12 in host.yml starts the suite at 10 GB of swap, where the default 8 would hold it",
+    () =>
+      withHost({ test_max_swap_gb: 12 }, async () => {
+        setFakeHost({ freePercent: 50, swapGigabytes: 10 });
+        const { code, out } = await runToEnd();
+        expect(code).toBe(0);
+        expect(logLines()).toContain(`start ${runA}`);
+        expect(out).not.toContain("memory");
+      }),
+  );
+});
+
+// ARK-T770: two projects whose ark.yml sets no budget share the budget of host.yml. Each suite takes 2 cores.
+describe("ark test host budget", () => {
+  const configFiles = () =>
+    [projectA, "lock-two"].map((project) => join(arkHome, "projects", project, "ark.yml"));
+  const originals = new Map<string, string>();
+  beforeEach(() => {
+    for (const file of configFiles()) {
+      const text = readFileSync(file, "utf8");
+      originals.set(file, text);
+      const config = JSON.parse(text);
+      config.suites = config.suites.map((suite: object) => ({ ...suite, cores: 2 }));
+      writeFileSync(file, JSON.stringify(config));
     }
   });
+  afterEach(() => {
+    for (const [file, text] of originals) writeFileSync(file, text);
+    writeHost({ test_budget_cores: 6 });
+  });
+
+  const storedTickets = () =>
+    tickets()
+      .map((name) => JSON.parse(readFileSync(join(budgetDirectory(), name), "utf8")))
+      .sort((a, b) => a.run.localeCompare(b.run));
+
+  test.skipIf(!onMac)(
+    "ARK-T770 with a budget of 2 in host.yml, the 2-core suite of the second project waits until the first project releases its cores",
+    async () => {
+      writeHost({ test_budget_cores: 2 });
+      writeFileSync(join(fixtures, "hold"), "");
+      const first = startTest(runA);
+      await waitFor(started(runA));
+      const second = startTest(runB);
+      await second.until(`waiting: place 1 of 1; running: ${runA} 2 cores`);
+      expect(logLines()).not.toContain(`start ${runB}`);
+      expect(
+        storedTickets().map((ticket) => [ticket.run, ticket.cores, ticket.started !== undefined]),
+      ).toEqual([
+        [runA, 2, true],
+        [runB, 2, false],
+      ]);
+
+      writeFileSync(join(fixtures, "release"), "");
+      expect(await first.process.exited).toBe(0);
+      expect(await second.process.exited).toBe(0);
+      // The cores are taken for each suite, so the two runs interleave suite by suite: every start is followed at once
+      // by the end of the same suite (the two never overlap), and the second run starts after the first suite ended.
+      const lines = logLines();
+      for (let i = 0; i < lines.length; i += 2)
+        expect(lines[i + 1]).toBe(lines[i]!.replace("start", "end"));
+      expect(lines.indexOf(`end ${runA}`)).toBeGreaterThan(-1);
+      expect(lines.indexOf(`start ${runB}`)).toBeGreaterThan(lines.indexOf(`end ${runA}`));
+      expect(tickets()).toEqual([]);
+    },
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T770 with a budget of 4 in host.yml, the 2-core suites of both projects run together",
+    async () => {
+      writeHost({ test_budget_cores: 4 });
+      writeFileSync(join(fixtures, "hold"), "");
+      const first = startTest(runA);
+      await waitFor(started(runA));
+      const second = startTest(runB);
+      await waitFor(started(runB));
+      expect(logLines()).not.toContain(`end ${runA}`); // the first suite still runs: they overlap
+
+      writeFileSync(join(fixtures, "release"), "");
+      expect(await first.process.exited).toBe(0);
+      expect(await second.process.exited).toBe(0);
+      expect(second.seen()).not.toContain(`running: ${runA}`); // the second never waits on the first
+      expect(tickets()).toEqual([]);
+    },
+  );
 });
 
 describe("ark chief state host", () => {
@@ -1261,21 +1362,46 @@ describe("ark chief state host", () => {
       expect(holdLines(text)[0]).not.toMatch(/free \d+%|swap/);
     },
   );
+
+  // ARK-T771: the run-start hold takes the floor and the swap ceiling from host.yml, so two projects print one line.
+  test.skipIf(!onMac)(
+    "ARK-T771 two projects print the same hold new runs line for one host reading, from the floor and the swap ceiling of host.yml",
+    () => {
+      setFakeHost({ freePercent: 15, swapGigabytes: 10 });
+      try {
+        for (const [settings, expected] of [
+          [{ test_min_free_memory_percent: 10, test_max_swap_gb: 12 }, "hold new runs: no"],
+          [
+            { test_min_free_memory_percent: 16, test_max_swap_gb: 9 },
+            "hold new runs: free 15% is below the 16% floor; swap 10.0 GB is above the 9 GB ceiling",
+          ],
+        ] as const) {
+          writeHost({ test_budget_cores: 6, ...settings });
+          for (const project of [projectA, "lock-two"]) {
+            const result = ark("chief", "state", "--project", project);
+            expect(result.code, result.err).toBe(0);
+            expect(holdLines(result.out)).toEqual([expected]);
+          }
+        }
+      } finally {
+        writeHost({ test_budget_cores: 6 });
+      }
+    },
+  );
 });
 
+const recordFile = () => join(fixtures, "record");
+const recorded = () =>
+  readFileSync(recordFile(), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [suite, directory, cores, files] = line.split(" ");
+      return { suite, directory: directory!, cores, files };
+    });
+const recorderCommand = (suite: string, cores?: number) =>
+  `sh ${join(fixtures, "recorder.sh")} ${fixtures} {report} ${suite} ${cores === undefined ? "none" : "<cores>"}`;
 describe("ark test suite TMPDIR and cores", () => {
-  const recordFile = () => join(fixtures, "record");
-  const recorded = () =>
-    readFileSync(recordFile(), "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [suite, directory, cores, files] = line.split(" ");
-        return { suite, directory: directory!, cores, files };
-      });
-  const recorderCommand = (suite: string, cores?: number) =>
-    `sh ${join(fixtures, "recorder.sh")} ${fixtures} {report} ${suite} ${cores === undefined ? "none" : "<cores>"}`;
-
   /** `ark test` with a caller TMPDIR of its own, to read what the suites saw. */
   async function runWithCallerTmpdir(run: string): Promise<{ exitCode: number; caller: string }> {
     const caller = mkdtempSync(join(tmpdir(), "caller-tmpdir-"));
@@ -1363,6 +1489,169 @@ describe("ark test suite TMPDIR and cores", () => {
     expect(Object.fromEntries(head)).toEqual({ three: "3", eight: "6", whole: "6" });
     expect(tickets()).toEqual([]);
   });
+});
+
+// ARK-T772 and ARK-T773: the refusals and the readers that keep working. The project has one suite that records the
+// `<cores>` it ran with.
+describe("ark test host.yml that is missing, empty or bad", () => {
+  const project = "host-file-project";
+  let run: string;
+  const hostFile = () => join(arkHome, "host.yml");
+  const configFile = () => join(arkHome, "projects", project, "ark.yml");
+  const events = () =>
+    readFileSync(join(arkHome, "projects", project, "runs", run, "events.ndjson"), "utf8");
+  beforeAll(() => {
+    run = startRun(project, "HOSTF-1", "", () => [
+      {
+        name: "host",
+        level: "integration",
+        repo: ".",
+        command: recorderCommand("host", 1),
+        parser: "bun",
+      },
+    ]);
+  });
+  afterEach(() => {
+    writeHost({ test_budget_cores: 6 });
+    rmSync(join(arkHome, "projects", project, "test-cache"), { recursive: true, force: true });
+  });
+
+  /** The first line `ark test` printed on a refusal, without the `ark: ` prefix; asserts it started nothing. */
+  function refusalOf(host: string): string {
+    writeFileSync(hostFile(), host);
+    const completedBefore = countOf(events(), "test.completed");
+    const result = ark("test", run);
+    expect(result.code, result.out).toBe(1);
+    expect(result.err).not.toContain("SyntaxError");
+    expect(existsSync(join(fixtures, "record"))).toBe(false);
+    expect(tickets()).toEqual([]);
+    expect(countOf(events(), "test.completed")).toBe(completedBefore);
+    return result.err
+      .trim()
+      .split("\n")[0]!
+      .replace(/^ark: /, "");
+  }
+
+  test.each([
+    ["an ark.yml with test_budget_cores", "test_budget_cores", 6],
+    ["an ark.yml with test_min_free_memory_percent", "test_min_free_memory_percent", 10],
+    ["an ark.yml with test_max_swap_gb", "test_max_swap_gb", 8],
+  ] as const)(
+    "ARK-T772 ark status refuses %s and names the key and host.yml, not the nearest key",
+    (_title, key, value) => {
+      const original = readFileSync(configFile(), "utf8");
+      try {
+        writeFileSync(configFile(), JSON.stringify({ ...JSON.parse(original), [key]: value }));
+        const result = ark("status");
+        expect(result.code).toBe(1);
+        const text = result.out + result.err;
+        expect(text).toContain(`config error: ${project}: `);
+        expect(text).toContain(configFile());
+        expect(text).toContain(key);
+        expect(text).toContain(hostFile());
+        expect(text).not.toContain("did you mean");
+        expect(text).toContain("1 project config(s) invalid");
+      } finally {
+        writeFileSync(configFile(), original);
+      }
+    },
+  );
+
+  test.each([
+    ["an unknown key", "test_budget_core: 6\n", "did you mean test_budget_cores?"],
+    ["a budget of 0", "test_budget_cores: 0\n", "test_budget_cores must be an integer >= 1"],
+    ["a budget of 2.5", "test_budget_cores: 2.5\n", "test_budget_cores must be an integer >= 1"],
+    [
+      "a floor of -1",
+      "test_min_free_memory_percent: -1\n",
+      "test_min_free_memory_percent must be an integer >= 0",
+    ],
+    ["a swap ceiling of -1", "test_max_swap_gb: -1\n", "test_max_swap_gb must be an integer >= 0"],
+    ["a YAML list", "- 1\n", "must be a mapping"],
+    ["YAML that does not parse", "test_budget_cores: [\n", "not valid YAML"],
+  ])(
+    "ARK-T772 ark test refuses a host.yml with %s, names the file and starts nothing",
+    (_title, host, fragment) => {
+      const message = refusalOf(host);
+      expect(message).toContain(hostFile());
+      expect(message).toContain(fragment);
+    },
+  );
+
+  test.skipIf(!onMac)(
+    "ARK-T772 ark test runs with 1 core when each key of host.yml is at its minimum",
+    async () => {
+      setFakeHost({ freePercent: 50, swapGigabytes: 0 });
+      writeFileSync(
+        hostFile(),
+        "test_budget_cores: 1\ntest_min_free_memory_percent: 0\ntest_max_swap_gb: 0\n",
+      );
+      const child = startTest(run);
+      const out = await child.stdout;
+      expect(await child.process.exited, out).toBe(0);
+      expect(new Set(recorded().map((suiteRun) => suiteRun.cores))).toEqual(new Set(["1"]));
+    },
+  );
+
+  test.skipIf(!onMac).each([
+    ["no host.yml", () => rmSync(hostFile(), { force: true }), false],
+    ["an empty host.yml", () => writeFileSync(hostFile(), ""), true],
+  ])(
+    "ARK-T772 ark test runs on the default budget with %s",
+    async (_title, prepare, fileExists) => {
+      prepare();
+      const child = startTest(run);
+      const out = await child.stdout;
+      expect(await child.process.exited, out).toBe(0);
+      expect(out).not.toContain("host.yml");
+      expect(await new Response(child.process.stderr).text()).not.toContain("host.yml");
+      const defaultBudget = String(Math.max(1, Math.floor(0.6 * cpus().length)));
+      expect(new Set(recorded().map((suiteRun) => suiteRun.cores))).toEqual(
+        new Set([defaultBudget]),
+      );
+      expect(existsSync(hostFile())).toBe(fileExists); // no reader creates the file
+    },
+  );
+
+  // ARK-T773: only ark test refuses. ark status and ark chief state print the same error and keep their output.
+  const badFiles = [
+    [
+      "an unknown key next to a valid one",
+      "test_min_free_memory_percent: 10\ntest_budget_core: 6\n",
+    ],
+    ["a budget of 0", "test_budget_cores: 0\n"],
+    ["YAML that does not parse", "test_budget_cores: [\n"],
+  ] as const;
+
+  test.each(badFiles)(
+    "ARK-T773 ark status with a host.yml of %s prints the host file error of ark test once, lists the open run and exits 0",
+    (_title, host) => {
+      const message = refusalOf(host);
+      // `ark status` checks that each role's harness is installed: the fixture's roles run on fakes, never the host's.
+      withFakeHarnesses([], () => {
+        const result = ark("status");
+        expect(result.code, result.err).toBe(0);
+        expect(countOf(result.out, `host file error: ${message}`)).toBe(1);
+        expect(result.out).toContain(run);
+      });
+    },
+  );
+
+  test.skipIf(!onMac).each(badFiles)(
+    "ARK-T773 ark chief state with a host.yml of %s prints the host file error once and holds on the default floor",
+    (_title, host) => {
+      const message = refusalOf(host);
+      setFakeHost({ freePercent: 17, swapGigabytes: 2 });
+      const result = ark("chief", "state", "--project", project);
+      expect(result.code, result.err).toBe(0);
+      expect(countOf(result.out, `host file error: ${message}`)).toBe(1);
+      expect(result.out).toContain("## Open runs");
+      expect(result.out).toContain("## Host");
+      expect(result.out.split("\n").filter((line) => line.startsWith("hold new runs:"))).toEqual([
+        "hold new runs: free 17% is below the 20% floor",
+      ]);
+    },
+  );
 });
 
 // ARK-551: a quick `ark test` ticket that fits the free cores starts ahead of a blocked full ticket. The budget is 6

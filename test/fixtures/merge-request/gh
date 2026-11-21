@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 // Fake `gh`: records each call, keeps open PRs in the fake host state, and answers the calls `ark merge-request open` makes.
+// `gh repo view --json visibility` answers {"visibility":"<FAKE_GH_VISIBILITY>"} (default PUBLIC, the visibility of ark's own repo);
+// FAKE_GH_VISIBILITY=<fail> fails as gh 2.103.3 did with a bad token, and <empty> answers nothing.
 import { readFileSync } from "node:fs";
 import { creates, editAfterFirstProbe, nextNumber, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
 
@@ -16,6 +18,13 @@ if (argv.includes("--help")) {
   console.log(`Usage: gh pr ${argv[1]} [flags]\n\nFlags:\n  --body-file file\n${process.env.FAKE_GH_NO_ATTACH ? "" : "  --attach strings   Attach local images or videos\n"}`);
 } else if (argv[0] === "api" && argv[1] === "user") {
   console.log(owner);
+} else if (argv[0] === "repo" && argv[1] === "view" && option(argv, "--json") === "visibility") {
+  const visibility = process.env.FAKE_GH_VISIBILITY ?? "PUBLIC";
+  if (visibility === "<fail>") {
+    console.error("HTTP 401: Bad credentials (https://api.github.com/graphql)");
+    process.exit(1);
+  }
+  if (visibility !== "<empty>") console.log(JSON.stringify({ visibility }));
 } else if (argv[0] === "pr" && argv[1] === "list") {
   if (process.env.FAKE_PROBE_FAIL) {
     console.error("HTTP 502: bad gateway");

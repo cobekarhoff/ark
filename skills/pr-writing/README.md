@@ -59,3 +59,5 @@ The host is read from the `origin` remote. GitHub uses `gh` and makes a Draft PR
 ## Not built yet
 
 Diagrams: not built (ARK-400), there is no `diagram.ts`. `post_mr.ts` uploads the screenshots and videos of the body on both hosts: GitHub needs `gh` 2.99.0 or newer and write access, and a failed upload exits 2 and posts nothing. Text evidence goes in `<details>` blocks, and evidence is never committed. A body over 65,536 characters has its log tails cut first, then its case blocks and Deleted bullets collapsed to one line each. The fresh-context self-review is not in `review.ts` either; it runs shell checks only.
+
+On a repo that is not private (or whose visibility is unknown), `post_mr.ts` uploads only checkpoint screenshots of test cases (`results/evidence/<case>/head|base/screenshots/`). It refuses any other screenshot or video with exit 2, and the body names it as `Not run:` with the reason. The rule trusts the checkpoint folder and does not prove that the test ran on fixture data.

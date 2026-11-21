@@ -2,14 +2,14 @@ import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { openTestBudget, readTestLock, type TestBudget } from "../cli/test-lock.ts";
-import { tempArkHome, tempGitRepo } from "./helpers.ts";
+import { tempArkHome } from "./helpers.ts";
 
 setDefaultTimeout(30_000);
 
 // The real ticket store under a temp ARK_HOME. Every client is one `ark test` of one run; all of them live in this
 // process, so their pids are alive. The wait loops run for real: the tests wait on the lines they print and on
 // their own clock reads, never on a timer.
-const configModule = resolve(import.meta.dir, "..", "cli", "config.ts");
+const hostModule = resolve(import.meta.dir, "..", "cli", "host.ts");
 
 const budgets: TestBudget[] = [];
 const children: ReturnType<typeof Bun.spawn>[] = [];
@@ -146,16 +146,16 @@ for (let take = 0; take < ${takes}; take++) await budget.take(2);`,
     [10, 6],
     [1, 1],
   ])(
-    "ARK-T155 with no test_budget_cores on a %i-core host the budget is %i",
+    "ARK-T155 with no host.yml on a %i-core host the budget is %i",
     async (hostCores, expected) => {
       const script = `import { mock } from "bun:test";
 import * as os from "node:os";
 mock.module("node:os", () => ({ ...os, cpus: () => Array(${hostCores}).fill({}) }));
-const { validateConfig } = await import(${JSON.stringify(configModule)});
-const roles = { implementer: { harness: "claude", model: "m" }, validator: { harness: "codex", model: "m" }, reviewer: { harness: "codex", model: "m" } };
-const suite = { name: "s", level: "unit", repo: ".", command: "true {report}", parser: "bun" };
-console.log(validateConfig({ workspace: ${JSON.stringify(tempGitRepo())}, ticket_source: "local", suites: [suite], roles }, "ark.yml").test_budget_cores);`;
-      const result = Bun.spawnSync(["bun", "-e", script]);
+const { loadHost } = await import(${JSON.stringify(hostModule)});
+console.log(loadHost().testBudgetCores);`;
+      const result = Bun.spawnSync(["bun", "-e", script], {
+        env: { ...process.env, ARK_HOME: tempArkHome() },
+      });
       expect(result.stderr.toString()).toBe("");
       expect(result.stdout.toString().trim()).toBe(String(expected));
     },

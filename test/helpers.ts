@@ -69,6 +69,14 @@ export function writeProject(name: string, config: Record<string, unknown>): str
   return directory;
 }
 
+/** Writes `$ARK_HOME/host.yml`, the host-wide settings (`test_budget_cores`, `test_min_free_memory_percent`, `test_max_swap_gb`). JSON is valid YAML. */
+export function writeHost(settings: Record<string, unknown>): void {
+  writeFileSync(
+    join(process.env.ARK_HOME as string, "host.yml"),
+    JSON.stringify(settings, null, 2),
+  );
+}
+
 export function writeTicket(
   project: string,
   id: string,

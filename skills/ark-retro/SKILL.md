@@ -94,7 +94,7 @@ The status changes to `approved`, `rejected` or `applied` as the proposal moves.
 
 Before you write a proposal for a lesson, decide where the lesson holds:
 
-- It holds for any repo when it names no tool, version, path or command of one repo: it states how to test, wait, handle processes or prove a claim, and it stays true in a repo with another toolchain. Make it a proposal of scope `skill` whose change is one line in `skills/shared/engineering.md`, and name the entry of `learnings.md` that the move deletes, when one exists (a fresh rule line of `rules.md` has none). [`skills/shared/engineering.md`](../shared/engineering.md) is the Ark-wide file that every worker reads.
+- It holds for any repo when it names no tool, version, path or command of one repo: it states how to test, keep checks and CI strong, wait, handle processes or prove a claim, and it stays true in a repo with another toolchain. Make it a proposal of scope `skill` whose change is one line in `skills/shared/engineering.md`, and name the entry of `learnings.md` that the move deletes, when one exists (a fresh rule line of `rules.md` has none). [`skills/shared/engineering.md`](../shared/engineering.md) is the Ark-wide file that every worker reads.
 - It holds for one repo when it names a version, a path or a command of that repo (a runtime version, a test command, a helper file, a convention of its `AGENTS.md`). Make it a proposal of scope `project`: it stays in that project's `learnings.md`.
 
 Only the human approves a move, as for every proposal.
@@ -127,7 +127,7 @@ A skill change is a diff to the skill wherever it lives.
 1. Find the skill's directory: `read skill://<name>` resolves it, and in a shell `realpath` of `skill://<name>` prints the physical path. An Ark skill lives in the Ark repo under `skills/ark-<role>/`; a skill proposal names that one folder, except that a proposal that moves a learning into the Ark-wide principles names `skills/shared/`. A project skill lives under the workspace, such as `<workspace>/.claude/skills/<name>/`. A user skill lives under `~/.omp/agent/skills/` or `~/.claude/skills/`.
 2. Make the edit in that place, with the `edit` tool.
 3. Show the human the diff (`git -C <directory> diff` when the directory is in a git repository) before you tell them it is applied. If the skill is in a repository, leave the change uncommitted for the human to commit.
-4. A proposal that moves a learning into `skills/shared/engineering.md`, once approved: add the principle as one line under the heading that fits it (Tests, Processes or Evidence), as a sentence with no command, version or path of one repo. Then delete the entry from `~/.ark/projects/<project>/learnings.md` when one exists, and leave nothing behind in it. Write the change in the Ark repo only; never copy the file into another repo.
+4. A proposal that moves a learning into `skills/shared/engineering.md`, once approved: add the principle as one line under the heading that fits it (Tests, Checks and CI, Processes or Evidence), as a sentence with no command, version or path of one repo. Then delete the entry from `~/.ark/projects/<project>/learnings.md` when one exists, and leave nothing behind in it. Write the change in the Ark repo only; never copy the file into another repo.
 
 ## Part 2: Deep interview
 

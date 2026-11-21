@@ -229,6 +229,10 @@ _Avoid_: Playbook, router
 One workspace plus the settings for its runs: ticket source, models, test suites and round budget.
 _Avoid_: Product, estate, manifest
 
+**Host file**:
+`host.yml` in ARK_HOME: the test budget, the free memory floor and the swap limit of the host, shared by every project and never set in an `ark.yml`. A missing file gives the defaults.
+_Avoid_: Host config, host settings file
+
 **Workspace**:
 The directory a project lives in: a single repo, or a meta-repo that holds several repos. Run leads find the repos by reading it.
 _Avoid_: Monorepo, environment

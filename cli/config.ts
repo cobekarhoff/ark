@@ -1,9 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { cpus } from "node:os";
-import { defaultMaximumSwapGigabytes, defaultMinimumFreeMemoryPercent } from "./host.ts";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { ArkError, yamlQuoteHint } from "./errors.ts";
-import { projectDirectory } from "./paths.ts";
+import { arkHome, projectDirectory } from "./paths.ts";
 import { discoverRepos } from "./workspace.ts";
 
 const ticketSources = ["local", "github", "jira"];
@@ -73,7 +71,7 @@ export type ProjectConfig = {
     repo: string;
     command: string;
     parser: string;
-    /** CPU cores the suite takes from `test_budget_cores`, and the value of `<cores>` in its commands. Omitted: the whole budget. */
+    /** CPU cores the suite takes from `test_budget_cores` of the host file `host.yml`, and the value of `<cores>` in its commands. Omitted: the whole budget. */
     cores?: number;
     /** Glob of the repo's test files that `base_command` runs at the base (own-commit files only). */
     base_files?: string;
@@ -92,12 +90,6 @@ export type ProjectConfig = {
   }[];
   /** Commands `ark test` runs in the repo's worktree before the suites. They must not write files. */
   checks: { name: string; repo: string; command: string; cores: number }[];
-  /** CPU cores that the suites and checks of all `ark test` runs of the host share. Default floor(0.6 x cores). */
-  test_budget_cores: number;
-  /** `ark test` starts no suite while free memory is below this percent. Inclusive: equal admits. Default 20. */
-  test_min_free_memory_percent: number;
-  /** `ark test` starts no suite while swap used is above this many GB. Inclusive: equal admits. Default 8. */
-  test_max_swap_gb: number;
   roles: Record<Role, RoleConfig> & {
     evaluator?: RoleConfig;
     designer?: RoleConfig;
@@ -134,9 +126,6 @@ const topLevelKeys = keysOf<ProjectConfig>({
   setup: true,
   suites: true,
   checks: true,
-  test_budget_cores: true,
-  test_min_free_memory_percent: true,
-  test_max_swap_gb: true,
   roles: true,
   repos: true,
   concurrency: true,
@@ -204,7 +193,7 @@ function editDistance(a: string, b: string): number {
 }
 
 /** The valid key that `key` most likely mistypes, or undefined when none is near. */
-function nearestKey(key: string, validKeys: readonly string[]): string | undefined {
+export function nearestKey(key: string, validKeys: readonly string[]): string | undefined {
   const limit = Math.max(2, Math.floor(key.length / 3));
   let best: string | undefined;
   let bestDistance = limit + 1;
@@ -214,6 +203,23 @@ function nearestKey(key: string, validKeys: readonly string[]): string | undefin
   }
   return best;
 }
+
+/** An integer field of at least `minimum`; a missing key is `fallback`. `fail` throws the caller's error. */
+export function integerField(
+  fields: Record<string, unknown>,
+  key: string,
+  minimum: number,
+  fallback: number,
+  fail: (message: string) => never,
+): number {
+  const value = fields[key] ?? fallback;
+  if (!Number.isInteger(value) || (value as number) < minimum)
+    fail(`${key} must be an integer >= ${minimum}`);
+  return value as number;
+}
+
+/** The settings of the host, not of a project: they live in `host.yml` of ARK_HOME. */
+export const hostKeys = ["test_budget_cores", "test_min_free_memory_percent", "test_max_swap_gb"];
 
 export function loadConfig(project: string): ProjectConfig {
   const file = join(projectDirectory(project), "ark.yml");
@@ -253,12 +259,8 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     if (!allowed.includes(value)) fail(`${field} must be one of ${allowed.join(", ")}`);
     return value;
   };
-  const integer = (fields: Fields, key: string, minimum: number, fallback: number): number => {
-    const value = fields[key] ?? fallback;
-    if (!Number.isInteger(value) || (value as number) < minimum)
-      fail(`${key} must be an integer >= ${minimum}`);
-    return value as number;
-  };
+  const integer = (fields: Fields, key: string, minimum: number, fallback: number): number =>
+    integerField(fields, key, minimum, fallback, fail);
 
   const positiveNumber = (fields: Fields, key: string, field: string): number | undefined => {
     const value = fields[key];
@@ -281,6 +283,11 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
   };
 
   const fields = asObject(raw, "ark.yml");
+  for (const key of hostKeys)
+    if (key in fields)
+      fail(
+        `${key} is a host setting, not a project setting: remove it from ark.yml and set it in ${join(arkHome(), "host.yml")}`,
+      );
   onlyKeys(fields, "", topLevelKeys);
 
   const workspace = text(fields, "workspace", "workspace");
@@ -554,19 +561,6 @@ export function validateConfig(raw: unknown, path: string): ProjectConfig {
     suites,
     checks,
     roles,
-    test_budget_cores: integer(
-      fields,
-      "test_budget_cores",
-      1,
-      Math.max(1, Math.floor(0.6 * cpus().length)),
-    ),
-    test_min_free_memory_percent: integer(
-      fields,
-      "test_min_free_memory_percent",
-      0,
-      defaultMinimumFreeMemoryPercent,
-    ),
-    test_max_swap_gb: integer(fields, "test_max_swap_gb", 0, defaultMaximumSwapGigabytes),
     concurrency: integer(fields, "concurrency", 1, 2),
     round_budget: integer(fields, "round_budget", 0, 2),
     escalation_rounds: integer(fields, "escalation_rounds", 0, 2),
