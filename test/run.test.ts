@@ -335,7 +335,7 @@ test("ARK-T443 ARK-152-AC5 a failed step stays the current step", () => {
   expect(ark("status", runId).out).toContain("current step: build (failed)");
 });
 
-test("ARK-T165 status without a run lists every open run with phase and current step, across projects", () => {
+test("ARK-T767 ark status lists the open runs of every project with no project named, and only the open runs of the project that --project or ARK_PROJECT names", () => {
   withControlledPath(
     "ok",
     () => {
@@ -346,13 +346,35 @@ test("ARK-T165 status without a run lists every open run with phase and current 
       const second = startRun("other", "ARK-910");
       const closed = startRun("demo", "ARK-920");
       ark("run", "close", closed.runId, "aborted");
+      writeProject("quiet", validConfig());
+      const firstLine = `${first.runId}  building  build  0m`;
+      const secondLine = `${second.runId}  awaiting_criteria  -  0m`;
 
-      const listing = ark("status");
-      expect(listing.code).toBe(0);
-      const lines = listing.out.trim().split("\n");
-      expect(lines).toContain(`${first.runId}  building  build  0m`);
-      expect(lines).toContain(`${second.runId}  awaiting_criteria  -  0m`);
-      expect(listing.out).not.toContain(closed.runId);
+      const everyProject = ark("status");
+      expect(everyProject.code).toBe(0);
+      const lines = everyProject.out.trim().split("\n");
+      expect(lines).toContain(firstLine);
+      expect(lines).toContain(secondLine);
+      expect(everyProject.out).not.toContain(closed.runId);
+
+      const byFlag = ark("status", "--project", "other");
+      expect(byFlag.code).toBe(0);
+      expect(byFlag.out.trim().split("\n")).toEqual([secondLine]);
+
+      try {
+        process.env.ARK_PROJECT = "other";
+        const byVariable = ark("status");
+        expect(byVariable.code).toBe(0);
+        expect(byVariable.out.trim().split("\n")).toEqual([secondLine]);
+      } finally {
+        delete process.env.ARK_PROJECT;
+      }
+
+      const quiet = ark("status", "--project", "quiet");
+      expect(quiet.code).toBe(0);
+      expect(quiet.out).toContain("no open runs");
+      expect(quiet.out).not.toContain(first.runId);
+      expect(quiet.out).not.toContain(second.runId);
     },
     ["claude", "codex"],
   );
