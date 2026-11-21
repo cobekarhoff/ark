@@ -302,7 +302,7 @@ const localId = (criterionId: string): string => criterionId.split("/").pop()!;
  * (the tested head for a repo that is not in `currentHeadOf`: a clean sync moved its head, see `cleanSyncMerged`).
  * One line for each missing or bad item, so the refusal names every AC. `reportMissing` says which absent
  * files count; `strict` demands the last lines that a later writer adds, and the test evidence of a `test` AC
- * (it needs `lastTest`).
+ * (it needs `lastTest`, and `quickNoCode` leaves it out).
  */
 function evidenceProblems(
   directory: string,
@@ -310,10 +310,12 @@ function evidenceProblems(
   currentHeadOf: Map<string, string>,
   {
     strict,
+    quickNoCode,
     reportMissing,
     includes,
   }: {
     strict: boolean;
+    quickNoCode: boolean;
     reportMissing: (criterionId: string, method: Method) => boolean;
     includes: (criterionId: string) => boolean;
   },
@@ -330,7 +332,8 @@ function evidenceProblems(
     const problem = evidenceProblem(method, readFileSync(file, "utf8"), { lastLine: strict });
     if (problem !== undefined) lines.push(`evidence malformed: ${localId(id)}: ${problem}`);
   }
-  if (!strict || lastTest === undefined) return lines;
+  // A quick no-code run writes no test evidence: CI's full suite is the proof (`noCodeRun`).
+  if (!strict || lastTest === undefined || quickNoCode) return lines;
   // Each result.json names the repo that ran its case: its SHA must be that repo's current head.
   const heads = new Map<string, string>([
     ...Object.entries((lastTest.data.heads ?? {}) as Record<string, string>),
@@ -360,6 +363,63 @@ function evidenceProblems(
   return lines;
 }
 
+/** Folder names whose Markdown a program reads as test data: a fixture, an eval input, a snapshot. Such a file is code. */
+const dataFolders = [
+  "test",
+  "tests",
+  "__tests__",
+  "fixtures",
+  "__fixtures__",
+  "__snapshots__",
+  "testdata",
+  "evals",
+];
+
+/**
+ * ARK-604: a run with no code file may open its MR on a passing quick test, because CI runs the whole suite on every push.
+ * True when the plan has only `reuse` test cases (none, or all) and, in every run worktree, `git diff <base or synced>...HEAD`
+ * (three dots: the run's own commits, not what a sync brought in) lists only hand-written Markdown: a path ending `.md` (any
+ * case), outside a test or fixture folder (`dataFolders`), not in the `generated` list of ark.yml, a plain file on both sides (no symlink). A repo
+ * with no run worktree, or with no own commit, lists no file. A missing or invalid plan.yml and a failed git diff read as code.
+ */
+export function noCodeRun(directory: string, state: RunState, config: ProjectConfig): boolean {
+  try {
+    if (!loadPlan(directory, state.ticket.id).test_cases.every(({ action }) => action === "reuse"))
+      return false;
+  } catch {
+    return false;
+  }
+  const generated = new Set((config.generated ?? []).map(({ path }) => path));
+  const plain = new Set(["000000", "100644", "100755"]);
+  return state.worktrees.every((worktree) => {
+    const base = worktree.synced ?? worktree.base;
+    if (base === undefined || !existsSync(worktree.path)) return false;
+    const diff = spawn(
+      ["git", "diff", "--raw", "--no-renames", "-z", `${base}...HEAD`],
+      worktree.path,
+    );
+    if (!diff.ok) return false;
+    // `-z --raw`: `:<old mode> <new mode> <old sha> <new sha> <status>` NUL `<path>` NUL, once per file.
+    const fields = diff.stdout.split("\0");
+    for (let i = 0; i + 1 < fields.length; i += 2) {
+      const [oldMode, newMode] = fields[i]!.slice(1).split(" ");
+      const path = fields[i + 1]!;
+      if (
+        !plain.has(oldMode!) ||
+        !plain.has(newMode!) ||
+        !path.toLowerCase().endsWith(".md") ||
+        path
+          .split("/")
+          .slice(0, -1)
+          .some((folder) => dataFolders.includes(folder)) ||
+        generated.has(path)
+      )
+        return false;
+    }
+    return true;
+  });
+}
+
 /** `head`: what needs only the current head. `step`: and the evidence files of the ACs a step serves. `final`: and every refusal of `ark merge-request open`. */
 export type Stage = "head" | "step" | "final";
 export const stages: readonly Stage[] = ["head", "step", "final"];
@@ -374,6 +434,8 @@ export type StageCheck = {
   /** The head of each repo and the repos that only clean sync merges moved: stage `final` only. */
   heads: Map<string, string>;
   cleanSyncs: CleanSync[];
+  /** Stage `final` only: the last test is a quick run that `noCodeRun` accepts as the gate. `open` writes the `Full suite:` line for it. */
+  quickNoCode: boolean;
 };
 
 /**
@@ -415,12 +477,14 @@ export function checkStage(
   const warnings: string[] = [];
   let heads = new Map<string, string>();
   let cleanSyncs: CleanSync[] = [];
+  let quickNoCode = false;
   const outcome = (evidence: string[] = []): StageCheck => ({
     problems,
     evidence,
     warnings,
     heads,
     cleanSyncs,
+    quickNoCode,
   });
   const stop = () => firstOnly && problems.length > 0;
 
@@ -428,8 +492,11 @@ export function checkStage(
   const config = loadConfig(project);
   if (final) {
     if (lastTest === undefined) problems.push("no test result yet: run `ark test` first");
-    else if (lastTest.data.mode === "quick")
-      problems.push(`the last test at this head is quick, not a gate: run \`ark test ${runId}\``);
+    else if (lastTest.data.mode === "quick") {
+      quickNoCode = noCodeRun(directory, state, config);
+      if (!quickNoCode)
+        problems.push(`the last test at this head is quick, not a gate: run \`ark test ${runId}\``);
+    }
     if (stop()) return outcome();
     const manual = new Set(manualCriteria(directory));
     const unproven = [...manual].filter(
@@ -449,8 +516,10 @@ export function checkStage(
           ([id, status]) => [canonicalCriterion(id, state.ticket.id), status],
         ),
       );
+      // A quick no-code run records every automated AC `not run`: that is accepted, `failing` is not.
       const notPassing = state.criteria.filter(
-        ({ id }) => !manual.has(id) && tested[id] !== "passing",
+        ({ id }) =>
+          !manual.has(id) && tested[id] !== "passing" && !(quickNoCode && tested[id] === "not run"),
       );
       if (notPassing.length > 0)
         problems.push(
@@ -521,6 +590,7 @@ export function checkStage(
   if (
     final &&
     state.kind === "refactor" &&
+    !quickNoCode &&
     state.base_passed !== true &&
     hasTestCriterion(directory)
   )
@@ -549,6 +619,7 @@ export function checkStage(
   return outcome(
     evidenceProblems(directory, lastTest, evidenceHeads, {
       strict: final,
+      quickNoCode,
       reportMissing,
       includes,
     }),
@@ -576,7 +647,11 @@ export function assertShippable(
   directory: string,
   events: ArkEvent[],
   state: RunState,
-): { heads: Map<string, string>; cleanSyncs: CleanSync[]; security: Map<string, string[]> } {
+): {
+  heads: Map<string, string>;
+  cleanSyncs: CleanSync[];
+  security: Map<string, string[]>;
+} {
   const { problems, evidence, heads, cleanSyncs } = checkStage(
     runId,
     project,

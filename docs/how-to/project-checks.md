@@ -44,7 +44,7 @@ A suite can set `changed_command`, the command that runs the tests a change can 
 - It records the test files that ran in `files` of the suite row in `test.completed`, from the `file` of each test in the report, and prints them on the `suite` line. A reused suite prints them too.
 - A changed command that selects no test file prints `suite <name> head  skipped  (no test files are affected)`, never `passed`. A command that exits non-zero, with or without a report, fails the suite.
 - A suite with no `changed_command` runs as before: the own-commit files when it has `base_files`, else in full.
-- A full `ark test`, with or without `--keep-going`, never reads `changed_command`: it runs the `command` of every suite. `--quick` records `mode: quick`, so `ark merge-request open` still refuses until a full run passes at the head.
+- A full `ark test`, with or without `--keep-going`, never reads `changed_command`: it runs the `command` of every suite. `--quick` records `mode: quick`, so `ark merge-request open` refuses until a full run passes at the head, unless the run has no code file ([a quick test as the gate](#a-quick-test-as-the-gate-for-a-run-with-no-code-file)).
 - The report of the changed command must name the test file in `file` on each test, or the `files` list is empty. The Bun parser reads Bun's JUnit report and the JUnit report of Jest, Vitest or Playwright; use `parser: bun` for them, as for Playwright.
 
 | Runner | `changed_command`                                                                                                                        | `parser` | Checked                                                                                                                          |
@@ -68,7 +68,7 @@ changed=$(git diff --name-only --diff-filter=d {base} -- '*.py' | grep test); py
 
 This selects the changed test files only, not the tests that a change to a source file reaches (use pytest-testmon for that). When no changed file has `test` in its path, `$changed` is empty, pytest gets no path and runs the whole suite, so a source-only change gives a full run. The pytest parser refuses an empty report, so a command that exits 0 and writes no test case is no way out. To run a cheap test file instead, add `[ -n "$changed" ] || changed=<that file>;` before `pytest`. `--passWithNoTests` keeps Jest and Vitest from exiting 1 when nothing is affected, which would fail the quick run.
 
-Selection is by the import graph (`bun test --changed`) or by the changed files, so a test that reads a Markdown file, a skill or a config file is not reached by a change to it. A quick run can pass where the full run fails: a quick run is never proof, and the full `ark test` stays the gate before the MR. On a dirty checkout the command also selects the tests that the uncommitted changes reach.
+Selection is by the import graph (`bun test --changed`) or by the changed files, so a test that reads a Markdown file, a skill or a config file is not reached by a change to it. A quick run can pass where the full run fails: a quick run is never proof, and the full `ark test` stays the gate before the MR, except for a run with no code file, where CI's full suite is the proof ([a quick test as the gate](#a-quick-test-as-the-gate-for-a-run-with-no-code-file)). On a dirty checkout the command also selects the tests that the uncommitted changes reach.
 
 ## Limit the time of a suite and of a test
 
@@ -178,7 +178,7 @@ An AC with no `verified_by` needs no test evidence.
 
 ## What refuses an MR
 
-`ark merge-request open <run>` refuses in these cases. `ark run close <run> handed_off` applies the same refusals, except the clean-merge check, before it appends `run.closed` or removes a worktree. On a refusal, run `ark test <run>` again or fix the AC text with `ark criteria amend`.
+`ark merge-request open <run>` refuses in these cases. `ark run close <run> handed_off` applies the same refusals, except the clean-merge check and the quick-test exception below, before it appends `run.closed` or removes a worktree. On a refusal, run `ark test <run>` again or fix the AC text with `ark criteria amend`.
 
 - A non-manual AC is not `passing` in the last `test.completed`.
 - A manual AC has no `ok` answer.
@@ -187,6 +187,18 @@ An AC with no `verified_by` needs no test evidence.
 - A counted string in an AC is in no tracked file. See below.
 - A `not:` string is still in a tracked file. See below.
 - The evidence is missing, malformed or stale. See [Evidence refusals](#evidence-refusals).
+
+### A quick test as the gate for a run with no code file
+
+The last test at the head must be a full `ark test <run>`: a quick last test refuses with `the last test at this head is quick, not a gate: run ark test <run>`. One exception: a passing quick test is the gate when the run has no code file. CI runs the whole suite on every push, so the local full test would repeat its proof. All three must hold:
+
+- `plan.yml` `test_cases` are all `reuse`, or there are none. An `add`, `update`, `retire` entry, an entry with no action (the old plan shape), and a missing or invalid `plan.yml` all mean code.
+- In every run worktree, `git diff <base or synced>...HEAD` (three dots, so a clean sync's target files do not count; the base is `worktrees[].synced` in `state.json` when set, else `worktrees[].base`) lists only hand-written Markdown: a `.md` file (any case) outside a test or fixture folder (a folder named `test`, `tests`, `__tests__`, `fixtures`, `__fixtures__`, `__snapshots__`, `testdata` or `evals`), not a symlink and not in the `generated` list of `ark.yml` (this repo lists `docs/reference/cli.md`). A `.ts`, a script, a fixture, `package.json`, a rename to `.md` and a failed `git diff` all mean code. A repo with no run worktree, or with no own commit, lists no file.
+- The last `test.completed` at the head is a quick run that passed, with every check passing. A failed check or a failed quick suite refuses with `the last test run did not pass`. A manual AC still needs `manual ok`.
+
+On that path a criterion that reads `not run` counts as passing (a quick run records every automated AC `not run`; `failing` still refuses), and the test evidence of a `test` AC and the `refactor` base rule are skipped, because a quick run writes no evidence and runs no base. A quick run that selects no test file records `passed: true`. The same check runs on every push of `ark merge-request open`, the refresh of an open MR included, and in `ark merge-request check <run> --stage final`. The MR body then has the line `Full suite: CI (no code file in this diff)` in place of the Tests line, and loses it when a later head holds a code file.
+
+`ark run close <run> handed_off` keeps its own rule and refuses a quick last test, so a Markdown-only run of a project with `merge_requests: none` still needs the full `ark test <run>`. `ark test --quick` still prints `mode: quick (not a gate: ...)`: for a run with no code file that line is not the verdict, `ark merge-request check <run> --stage final` is. Tests that read Markdown or skills but that no import graph reaches (`test/playbooks.test.ts`, `test/pr-writing.test.ts`, `test/worker-start.test.ts` and others) are not run by the quick test, so on such a run they run in CI only.
 
 ### See the refusals before open
 
