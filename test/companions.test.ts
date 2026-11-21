@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readTicket } from "../cli/ticket.ts";
 import { runDirectoryOf, writeRun } from "./hub-fixtures.ts";
-import { writeTicket } from "./helpers.ts";
+import { writeFakeCommand, writeTicket } from "./helpers.ts";
 import {
   advance,
   appendRaw,
@@ -814,4 +814,78 @@ test("ARK-T659 a ticket proposed with a source key reads with no warning and no 
   } finally {
     warn.mockRestore();
   }
+});
+
+// ------------------------------------------------------------------ ARK-612
+
+/** The hung `run-list` of the two cases: 12 s, past the 10 s production Orca limit and inside the 60 s limit of the test helper. */
+const slowRunListMilliseconds = 12_000;
+
+test("ARK-T746 an ark process started by the test helper waits up to 60 s for an Orca read, so ark companion advise succeeds when the fake orca answers run-list after 12 s", () => {
+  const { fake } = adviceProject();
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBeUndefined();
+  fake.configure({ hangVerbs: ["run-list"], hangMilliseconds: slowRunListMilliseconds });
+  const result = arkP("companion", "advise", "cortana", leadRun, adviceText);
+  expect(result.err).not.toContain("Orca did not answer");
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  expect(fake.sent().map((message) => message.to)).toEqual(["term_lead1", "term_chief"]);
+  // The pause ran to its end: the command waited for the answer instead of giving up at 10 s.
+  expect(fake.hungDone().map((call) => call[1])).toEqual(["run-list"]);
+});
+
+test("ARK-T747 the ark process of the test helper sees ARK_ORCA_TIMEOUT_MS 60000 when the test sets none and the test's own value when it sets one, and an ark process with no ARK_ORCA_TIMEOUT_MS started outside the helper still cuts an Orca read at 10 s", () => {
+  const { fake } = adviceProject();
+  // A wrapper first on PATH logs the value the ark process passes to each orca call, then runs the fake.
+  const logFile = join(process.env.FAKE_COMPANION_DIR as string, "orca-timeout.log");
+  writeFakeCommand(
+    "orca",
+    `printf '%s\\n' "\${ARK_ORCA_TIMEOUT_MS-absent}" >> "${logFile}"\nexec "$FAKE_COMPANION_DIR/bin/orca" "$@"`,
+  );
+  const loggedValues = (): string[] =>
+    existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter(Boolean) : [];
+
+  // The test sets none: the helper gives the ark process 60000.
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBeUndefined();
+  expect(arkP("companion", "advise", "cortana", leadRun, adviceText).code).toBe(0);
+  expect(new Set(loggedValues())).toEqual(new Set(["60000"]));
+
+  // The test sets its own value: it wins over the default. 600000 is far above any stall of the host.
+  writeFileSync(logFile, "");
+  process.env.ARK_ORCA_TIMEOUT_MS = "600000";
+  try {
+    expect(arkP("companion", "advise", "cortana", leadRun, adviceText).code).toBe(0);
+  } finally {
+    delete process.env.ARK_ORCA_TIMEOUT_MS;
+  }
+  expect(new Set(loggedValues())).toEqual(new Set(["600000"]));
+
+  // Outside the helper nothing sets the value: ark cuts the hung read at its production 10 s limit.
+  fake.clearCalls();
+  fake.configure({ hangVerbs: ["run-list"], hangMilliseconds: slowRunListMilliseconds });
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name !== "ARK_ORCA_TIMEOUT_MS"),
+  );
+  const started = performance.now();
+  const outside = Bun.spawnSync(
+    [
+      "bun",
+      join(import.meta.dir, "..", "cli", "ark.ts"),
+      "companion",
+      "advise",
+      "cortana",
+      leadRun,
+      adviceText,
+      "--project",
+      project,
+    ],
+    { env: { ...environment, ARK_READER_TIMEOUT_MS: "30000" } },
+  );
+  const elapsedMilliseconds = performance.now() - started;
+  expect(outside.stderr.toString()).toContain("Orca did not answer");
+  expect(outside.exitCode).toBe(1);
+  expect(fake.sent()).toEqual([]);
+  // Cut before the 12 s answer, by the 10 s limit and not by a shorter one.
+  expect(fake.hungDone()).toEqual([]);
+  expect(elapsedMilliseconds).toBeGreaterThanOrEqual(9_500);
 });
