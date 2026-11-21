@@ -499,6 +499,7 @@ describe.each(commands)("ark %s evidence for ACs with no test", (_name, argsFor)
       [...allProven, "AC5"],
     );
     const message = expectRefused(run, argsFor(run));
+    const printedLines = message.split("\n");
     for (const line of [
       "evidence missing: AC1 (demonstration): expected results/evidence/AC1.md",
       "evidence missing: AC2 (inspection): expected results/evidence/AC2.md",
@@ -506,7 +507,8 @@ describe.each(commands)("ark %s evidence for ACs with no test", (_name, argsFor)
       "evidence missing: AC4 (demonstration): expected results/evidence/AC4.md",
       "evidence missing: AC5 (demonstration): expected results/evidence/AC5.md",
     ])
-      expect(message).toContain(line);
+      expect(printedLines).toContain(line);
+    expect(message).not.toContain("; found");
   });
 
   test("ARK-T7 names a missing and each malformed file and not the well-formed one", () => {
@@ -529,6 +531,7 @@ describe.each(commands)("ark %s evidence for ACs with no test", (_name, argsFor)
     mkdirSync(dirname(misplaced), { recursive: true });
     writeFileSync(misplaced, inspection("reviewer: pass"));
     const message = expectRefused(run, argsFor(run));
+    expect(message).toContain("refused: evidence is not complete");
     expect(message.split("\n")).toContain(
       "evidence missing: AC2 (inspection): expected results/evidence/AC2.md; found results/evidence/ARK-900/AC2.md: move it to results/evidence/AC2.md",
     );

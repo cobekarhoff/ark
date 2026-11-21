@@ -826,6 +826,7 @@ test("ARK-T789 merge-request check names results/evidence/<AC id>.md for a missi
   writeEvidenceFile(run.runDirectory, "AC1", "analysis");
   writeEvidence(run, "AC2", "## Files\n\n- cli/a.ts:1-10\n\n## Checked against\n\nThe AC text.\n");
   const printed = expectStage(run, stepArgs, [lines[2]!], false);
+  expect(outputLines(printed)).not.toContain(lines[0]!);
   const malformedLine = outputLines(printed).find((line) => line.includes("AC2"))!;
   expect(malformedLine).toStartWith("evidence malformed: AC2: ");
   expect(malformedLine).not.toContain("expected");
