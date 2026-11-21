@@ -17,7 +17,7 @@ Gate answers:
 
 1. Protects the shared host budget across projects: one value for every caller of the one ticket folder `ARK_HOME/test-budget`.
 2. Fails when a caller passes its own default or a project value to `openTestBudget` in place of the host value: with budget 2 the second suite starts next to the first on a host whose default is 4 or more; with budget 4 the second waits on a host whose default is 3 or less. The two rows together fail on any host size.
-3. ARK-T59 proves two runs never run two whole-budget suites together, with the budget from each `ark.yml` (one value for both), so it cannot see two budgets. ARK-T155 owns the first-in-first-out order and the clamp inside one budget. This case owns where the budget comes from when two projects meet.
+3. ARK-T59 proves two runs never run two whole-budget suites together, with one budget of 6 (from `host.yml` after this change, as its `startRun` fixture moves there). On a 10-core host 6 equals the default `max(1, floor(0.6 x 10))`, so ARK-T59 cannot tell `host.yml` from the default. ARK-T155 owns the first-in-first-out order and the clamp inside one budget. This case owns where the budget comes from when two projects meet.
 4. No seam beyond the existing ones: two real `ark test` processes of two projects in one temp `ARK_HOME` (the `lock-one` and `lock-two` fixture of `test/test-lock.test.ts`), the suite script's `hold` and `release` files and the suite log. The memory reading is the healthy fake host of `test/tmpdir-preload.ts` (`ARK_FAKE_HOST`), which reaches macOS only, as for ARK-T187: the case skips off macOS.
 
 ## Preconditions
