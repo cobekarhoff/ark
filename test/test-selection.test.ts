@@ -1437,14 +1437,13 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
     const body = created()[0]!.body;
     expectFullSuiteBody(body);
     const title = created()[0]!.argv[created()[0]!.argv.indexOf("--title") + 1]!;
-    const lint = lintBody({
-      body: body!,
-      title,
-      ledger: buildLedger({
-        runFolder: run.runDirectory,
-        heads: { ".": git(run.mirror, "rev-parse", "HEAD") },
-      }),
+    // gather.ts --run-dir builds this ledger, so it writes the same Full suite line as the open.
+    const ledger = buildLedger({
+      runFolder: run.runDirectory,
+      heads: { ".": git(run.mirror, "rev-parse", "HEAD") },
     });
+    expect(ledger.fullSuiteIsCi).toBe(true);
+    const lint = lintBody({ body: body!, title, ledger });
     expect(lint.filter((check) => check.result === "fail")).toEqual([]);
   });
 
@@ -1644,6 +1643,11 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
         change: (mirrors) =>
           commit(mirrors.site!, "own code", { "src/b.ts": "export const b = 1;\n" }),
       },
+      refusal: quickRefusal,
+    },
+    {
+      label: "adds the Markdown eval input skills/pr-writing/evals/pr-200.md",
+      shape: own("skills/pr-writing/evals/pr-200.md", "# pr 200\n"),
       refusal: quickRefusal,
     },
   ];
