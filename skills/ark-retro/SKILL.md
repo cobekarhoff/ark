@@ -110,7 +110,7 @@ Apply a proposal only after the human answers "approve". Then change the status 
   ```markdown
   - <lesson in one sentence>. Evidence: <run id>, <what showed it>. Added <date>.
   ```
-- A fix to `verify.md` goes into `~/.ark/projects/<project>/verify.md`. Edit only the named lines of the start, reach or feature map part, run the changed command once to check that it now shows the result the map names, and keep the three-part form of bootstrap step 12.
+- A fix to `verify.md` goes into `~/.ark/projects/<project>/verify.md`. Edit only the named lines of the start, reach or feature map part, run the changed command once to check that it now shows the result the map names, and keep the three-part form of the Write `verify.md` step of bootstrap.
 
 ### Scope: Ark
 

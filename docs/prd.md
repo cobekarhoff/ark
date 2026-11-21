@@ -140,13 +140,13 @@ Milestones M1 to M9 in the last table below are defined in `$ARK_HOME/projects/a
 
 ### R8 · Bootstrap
 
-| ID      | Requirement                                                                                                                                                                                          |
-| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R8.1    | The system shall keep each project's configuration in `~/.ark/projects/<project>/ark.yml`: workspace, ticket source, setup command, suites with their parsers, roles, gates, concurrency and checks. |
-| R8.2    | **When** a project is bootstrapped, the bootstrap skill shall detect the stack, suites and repos, and ask only what it cannot detect.                                                                |
-| R8.3    | **When** a worktree is created, the system shall run the project's `setup` command in it.                                                                                                            |
-| Tickets | ARK-150, ARK-158, ARK-198                                                                                                                                                                            |
-| Held by | `skills/ark-bootstrap/SKILL.md`; `cli/config.ts`; [bootstrap-a-project.md](how-to/bootstrap-a-project.md)                                                                                            |
+| ID      | Requirement                                                                                                                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R8.1    | The system shall keep each project's configuration in `~/.ark/projects/<project>/ark.yml`: workspace, ticket source, setup command, suites with their parsers, roles, gates, concurrency and checks.                           |
+| R8.2    | **When** a project is bootstrapped, the bootstrap skill shall detect the stack, repos, setup command, checks, suites at every level and hooks, install the hooks after the human confirms, and ask only what it cannot detect. |
+| R8.3    | **When** a worktree is created, the system shall run the project's `setup` command in it.                                                                                                                                      |
+| Tickets | ARK-150, ARK-158, ARK-198, ARK-624                                                                                                                                                                                             |
+| Held by | `skills/ark-bootstrap/SKILL.md`; `cli/config.ts`; [bootstrap-a-project.md](how-to/bootstrap-a-project.md)                                                                                                                      |
 
 ### R9 · Gates and rounds
 

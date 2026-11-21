@@ -254,7 +254,7 @@ A run's own checkout of one repo. A run folder mirrors its workspace: the repos 
 _Avoid_: Checkout, sandbox
 
 **Bootstrap**:
-The one-time work that teaches Ark a project: its stack, its integration and E2E suites, how its repos run together, and its ticket source.
+The one-time work that teaches Ark a project: its stack, its setup command, its checks, a suite for each repo's tests at every level, its repos' hooks, how its repos run together, and its ticket source.
 _Avoid_: Setup, onboarding, init
 
 ## Improvement
