@@ -2493,6 +2493,41 @@ test("ARK-T363 the MR body holds evidence blocks and screenshots only for the pl
   expect(caseBlocks(evidenceSection(buildBody(small.ledger())))).toHaveLength(12);
 });
 
+test("ARK-T755 the pr-writing ledger lists as test case evidence only the folders of results/evidence that hold base or head", () => {
+  const run = makeRun({
+    criteria: [
+      { id: "AC1", status: "passing", verifiedBy: ["ARK-T1"] },
+      { id: "AC3", status: "passing", verifiedBy: [] },
+    ],
+    prWriting: { ...sensitiveConfig, tier_floor: 1 },
+  });
+  rmSync(join(run.directory, "plan.yml"));
+  const evidence = join(run.directory, "results/evidence");
+  const put = (name: string, text: string) => {
+    mkdirSync(dirname(join(evidence, name)), { recursive: true });
+    writeFileSync(join(evidence, name), text);
+  };
+  put("ARK-T1/head/command.log", "ARK-T1 log line\n");
+  put("ARK-T1/cause.md", "root cause\n");
+  put("ARK-T9/cause.md", "orphan cause\n");
+  put("ARK-T9/profile/p.cpuprofile", "{}");
+  put("AC8/notes.md", "ac8 notes\n");
+  put("ARK-T5/census/result.json", JSON.stringify({ case: "ARK-T5", status: "passed" }));
+  put("AC3.md", "AC3 live check\n");
+
+  const ledger = run.ledger();
+  expect(ledger.evidence?.map((entry) => entry.testCase)).toEqual(["ARK-T1"]);
+  const body = buildBody(ledger);
+  const section = evidenceSection(body);
+  expect(section).toContain("`ARK-T1`: base fail, head pass");
+  expect(section).toContain("ARK-T1 log line");
+  expect(section).toContain("`ARK-9/AC3`: evidence");
+  expect(caseBlocks(section)).toHaveLength(1);
+  for (const name of ["ARK-T9", "AC8", "ARK-T5", "cause.md", "p.cpuprofile"])
+    expect(section).not.toContain(name);
+  expect(result(lintBody({ body, title: defaultTitle, ledger }), "EVID03").result).toBe("pass");
+});
+
 test("ARK-T364 a body over the GitHub limit from plan cases alone has its log tails cut first, says how many lines were left out, and keeps the AC evidence", () => {
   const big = suiteRun(150);
   // A secret-like last line is always in the tail, so `fenced` drops it: it is shown nowhere and is not counted as left out.
