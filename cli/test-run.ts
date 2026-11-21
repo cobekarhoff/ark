@@ -1196,9 +1196,10 @@ async function executeTest(
     throw new ArkError(`${runId} has no workspace mirror: run ark worktree create first`);
   const resultsDirectory = join(directory, "results");
   mkdirSync(resultsDirectory, { recursive: true });
-  // ARK-422: every run writes to a staging folder; only a full run replaces `results/evidence` with it (see below).
-  // A stopped run leaves its staging folder behind: remove it first.
+  // ARK-422: every run writes to a staging folder; only a full run publishes it into `results/evidence` (see `publishEvidence`).
+  // A stopped run leaves its staging folder behind: remove it first. A crash in the swap leaves `evidence.old`: restore it first.
   const evidenceDirectory = join(resultsDirectory, STAGING);
+  // Restore before the staging removal: a crash in the swap may have left only `evidence.old`.
   restoreEvidence(resultsDirectory);
   rmSync(evidenceDirectory, { recursive: true, force: true });
   const state = deriveState(readEvents(directory));
