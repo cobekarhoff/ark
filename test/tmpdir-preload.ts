@@ -1,5 +1,13 @@
 import { afterAll, beforeEach, setDefaultTimeout } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -26,6 +34,43 @@ let testsStarted = 0;
 beforeEach(() => {
   testsStarted += 1;
 });
+// ARK-610: a removal that fails never fails the bun test process. EFAULT and EBUSY (a transient race on the Linux CI
+// runner) get 3 retries, 4 calls in all, with no back-off; ENOENT means the root is gone. Any other code, or a failure
+// that outlasts the retries, prints one stderr line with the root and the code, leaves the root (scripts/temp-cleaner.sh
+// removes it once its owner is dead) and goes on, so the exit status stays that of the tests.
+// Opt-in, read here only: ARK_PRELOAD_RM_FAULTS=<N|all> makes the first N (or every) rmSync call of the bun-test-* root
+// throw EFAULT; ARK_PRELOAD_RM_LOG=<file> gets one line with the root before every rmSync call of either root.
+const retriedCodes = new Set(["EFAULT", "EBUSY"]);
+const faultLimit =
+  process.env.ARK_PRELOAD_RM_FAULTS === "all"
+    ? Infinity
+    : Number(process.env.ARK_PRELOAD_RM_FAULTS ?? 0);
+let faultsThrown = 0;
+function removeRoot(root: string): void {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      if (process.env.ARK_PRELOAD_RM_LOG)
+        appendFileSync(process.env.ARK_PRELOAD_RM_LOG, `${root}\n`);
+      if (root === tempRoot && faultsThrown < faultLimit) {
+        faultsThrown += 1;
+        throw Object.assign(
+          new Error(`EFAULT: bad address in system call argument, rm '${root}'`),
+          {
+            code: "EFAULT",
+          },
+        );
+      }
+      rmSync(root, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code ?? String(error);
+      if (code === "ENOENT") return;
+      if (retriedCodes.has(code) && attempt < 3) continue;
+      console.error(`ark preload: could not remove ${root}: ${code}`);
+      return;
+    }
+  }
+}
 function removeAfterLastRepeat(root: string): () => void {
   let repeatsDone = 0;
   let startedBefore = 0;
@@ -33,7 +78,7 @@ function removeAfterLastRepeat(root: string): () => void {
     repeatsDone += 1;
     const idle = testsStarted === startedBefore;
     startedBefore = testsStarted;
-    if (idle || repeatsDone >= repeatCount) rmSync(root, { recursive: true, force: true });
+    if (idle || repeatsDone >= repeatCount) removeRoot(root);
   };
 }
 const tempRoot = writeOwnerFile(mkdtempSync(join(realpathSync(tmpdir()), "bun-test-")));
