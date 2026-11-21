@@ -31,7 +31,8 @@ const homeLagAddedLimitMilliseconds = 150;
 // Scaled (6 times the floor): `homeRunCount`, `openRunCount` and `ticketCount`. At the floor one pass adds about 20 ms of lag to the
 // control, at 4 times the floor 136 to 209 ms, at 6 times 260 to 630 ms (results/ARK-T751-scale.md of the run folder). The run count
 // is the lever that moved the lag; 4 times the bytes of events and plans alone moved it by about 50 ms, so those stay at the floor.
-// The cause is not named here (ARK-613 forbids a guess before the profile). The test fails at base in 3 of 3 separate processes.
+// The profile of ARK-613 names the cause: one `fs.watch()` costs 5 to 8 ms of main-thread time and the reader made one per run
+// folder; hub/watch-worker.ts owns them now. The test failed at base in 3 of 3 separate processes.
 const homeRunCount = 1620;
 const eventsPerRun = 38;
 const planBytes = 8_100;
