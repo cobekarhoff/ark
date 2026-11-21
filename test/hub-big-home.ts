@@ -448,14 +448,17 @@ let built: string | undefined;
 
 /**
  * The large project for the hub's first read, written once per test file into a scratch folder and read only after that.
- * `removeBigProject` deletes it. It is the first 800 runs and 1,500 tickets of the model of ARK-T751: the full 1,620 runs and
- * 3,030 tickets read for 13 s at host load 19 on 10 cores (above the 10 s poll bound of ARK-T662), 800 and 1,500 read for
- * 4 s there, and the read grows faster than the size (400 runs and 600 tickets: 1.1 s; 100 and 200: 0.2 s).
+ * `removeBigProject` deletes it. It is the first 500 runs and 750 tickets of the model of ARK-T751, sized for a first read of 2 to 4
+ * times the 250 ms bound of `readyOrLoading` on an idle host, so a loaded host stays far under the 10 s poll bound of ARK-T662.
+ * Read times of the first answer through the hub (host load 21 to 25 on 10 cores, 3 runs each): 500 runs and 750 tickets 1.4 to
+ * 1.7 s (about 0.6 s idle); 400 and 600 1.0 to 1.3 s; 300 and 450 0.7 to 0.8 s; 200 and 300 0.35 to 0.46 s; 100 and 200 no
+ * hold at all (the first answer was not 503). The read grows faster than the size: 800 and 1,500 took 3.9 s there, and the full
+ * 1,620 runs and 3,030 tickets 13 s at host load 19, which is why this is not the home of ARK-T751.
  */
 function bigProjectDirectory(): string {
   if (!built) {
     built = mkdtempSync(join(tmpdir(), "ark-big-project-"));
-    writeBigProject(built, runModels().slice(0, 800), ticketModels().slice(0, 1500));
+    writeBigProject(built, runModels().slice(0, 500), ticketModels().slice(0, 750));
   }
   return built;
 }
