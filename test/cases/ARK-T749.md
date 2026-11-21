@@ -23,7 +23,7 @@ Authoring gate:
 ## Preconditions
 
 - Fixture A of ARK-T748 (reuse case `FAKE-T1` with a passing test `test/existing.test.ts` at base, own commit of Markdown only). The suite shape may differ from ARK-T748 (this case needs no zero-test quick run), as long as the full run of step 3 writes `results/evidence/FAKE-T1/{base,head}/result.json`; the test asserts both files before the open of step 3, as ARK-T373 does.
-- The test records the remote branch tip with `git ls-remote origin` before each open.
+- The test records the remote branch tip once, after the first open, and compares it after the refused open (it must not move) and after the refresh of step 3 (it must contain HEAD).
 
 ## Steps
 

@@ -23,7 +23,7 @@ Authoring gate:
 ## Preconditions
 
 - Fixture A of ARK-T748 (feature run, `test_cases` one `reuse` entry, own commit of `docs/guide.md` and `skills/demo/SKILL.md`, `generated` lists `docs/reference/cli.md`), with one change per row below. Each row is a fresh run.
-- Rows 1 to 6 add the named path to the own commit; rows 7 to 10 change only `plan.yml`; rows 11 to 14 change the named item; row 15 adds one own commit to repo two of ARK-T748 fixture F.
+- Rows 1 to 6 add a second own commit that adds the named path (row 6 renames `src/old.ts` to `docs/old.md`), and the own Markdown commit stays; rows 7 to 10 change only `plan.yml`; rows 11 to 14 change the named item; row 15 adds one own commit to repo two of ARK-T748 fixture F.
 - Q is the text ``the last test at this head is quick, not a gate: run `ark test <run>` ``, with the row's run id.
 
 | Row | One change from the accepted head                                                                                                                                        | Refusal (first line of stderr)             |
@@ -40,7 +40,7 @@ Authoring gate:
 | 10  | the plan case action is `""` (old plan shape)                                                                                                                            | Q                                          |
 | 11  | a check of `ark.yml` exits 1 (the quick run records `passed: false`)                                                                                                     | `the last test run did not pass`           |
 | 12  | the suite has no `base_files`; the base also holds `test/other.test.ts` with a test `FAKE-T2 other` that no AC's `verified_by` names, and it fails through a switch file | `the last test run did not pass`           |
-| 13  | the ticket has a second AC with `method: manual` and no `manual ok`                                                                                                      | `manual criterion without ok: <the AC id>` |
+| 13  | the ticket has a second AC with `method: demonstration` and `manual: true`, and no `manual ok`                                                                           | `manual criterion without ok: <the AC id>` |
 | 14  | `plan.yml` is removed after the quick run                                                                                                                                | Q                                          |
 | 15  | ARK-T748 fixture F (two repos, a worktree in each) with one own commit of `src/b.ts` in repo two; the quick run passes in both                                           | Q                                          |
 
