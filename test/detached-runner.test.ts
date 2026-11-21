@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   watch,
   writeFileSync,
@@ -919,6 +920,46 @@ describe("ark test evidence of the last full run", () => {
     expect(after["/AC8/notes.md"]).toBe("ac8\n");
     expect(Object.keys(after)).toContain("/DET-T1/head/command.log");
     expect(Object.keys(after)).toContain("/DET-T1/base/result.json");
+  });
+
+  test("ARK-T757 the next ark test puts back the evidence a crashed swap parked in evidence.old, and drops an aside folder that a finished swap left", async () => {
+    const fixture = evidenceFixture(false);
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    putEvidence(fixture, {
+      "AC3.md": "# AC3\n",
+      "AC8/notes.md": "ac8\n",
+      "DET-T1/cause.md": "root cause\n",
+    });
+    const before = treeOf(evidenceDirectoryOf(fixture));
+    const evidence = evidenceDirectoryOf(fixture);
+    const aside = `${evidence}.old`;
+
+    renameSync(evidence, aside);
+    commitFiles(fixture.mirrorOf("."), { "test/fast.test.ts": fastTest("quick") });
+    const quick = await arkDone(fixture, "test", fixture.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(treeOf(evidence)).toEqual(before);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+
+    renameSync(evidence, aside);
+    commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+    const full = await arkDone(fixture, "test", fixture.runId);
+    expect(full.code, full.err + full.out).toBe(0);
+    const after = treeOf(evidence);
+    expect(after["/AC3.md"]).toBe("# AC3\n");
+    expect(after["/AC8/notes.md"]).toBe("ac8\n");
+    expect(after["/DET-T1/cause.md"]).toBe("root cause\n");
+    expect(after["/DET-T1/head/result.json"]).not.toBe(before["/DET-T1/head/result.json"]);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+
+    mkdirSync(aside);
+    writeFileSync(join(aside, "stale.md"), "stale\n");
+    commitFiles(fixture.mirrorOf("."), { "src/third.txt": "third\n" });
+    const last = await arkDone(fixture, "test", fixture.runId);
+    expect(last.code, last.err + last.out).toBe(0);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+    expect(treeOf(evidence)["/AC8/notes.md"]).toBe("ac8\n");
   });
 
   // The fault is a real file system permission on a kept folder: root ignores it, so the case needs a non-root user.
