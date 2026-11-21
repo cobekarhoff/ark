@@ -470,8 +470,9 @@ run is the gate; it records `mode: quick` and a `duration` in test.completed, a 
 for each AC, and it prints `mode: quick (not a gate: run ark test <run> before the MR)`. That line
 is not the verdict for a run with no code file: `ark merge-request open` accepts its passing quick
 run (see `ark merge-request open`). A plain `ark test` records `mode: full`, and an event with no
-`mode` reads as full. `ark merge-request open` and `ark run close <run> handed_off` refuse unless
-the last test at the current head is full, and name `ark test <run>`. `ark test` starts a detached
+`mode` reads as full. `ark run close <run> handed_off` refuses unless the last test at the head is
+full. `ark merge-request open` refuses unless it is full or a passing quick test of a run with no
+code file (see `merge-request open`). Both name `ark test <run>`. `ark test` starts a detached
 runner process and prints what the runner prints, so a lost connection does not stop the tests: the
 runner takes the host lock itself, holds it until it ends, and writes `results/runner.json` (pid,
 mode, state, exit code), `results/runner.out` and `results/runner.err` in the run folder. A signal
