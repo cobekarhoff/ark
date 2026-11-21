@@ -877,10 +877,11 @@ none` it prints `merge requests: none (local only)` in place of the MR lines, th
 commits beyond its base, in merge order, also after `ark run close <run> handed_off`. Without a run,
 it lists every open run. When gitleaks or osv-scanner is not on PATH it prints a line `scanner:
 <tool> is not installed: brew install <tool>` for each, after the role lines, and still exits 0:
-`ark merge-request open` and `ark run close <run> handed_off` refuse with the same lines. It also
-reads the host file `host.yml` of ARK_HOME: a bad file prints `host file error: <path>: <message>`
-and changes no exit code. --project limits the config check to one project, like ARK_PROJECT, and
-with a run it looks for the run in that project only.
+`ark merge-request open` and `ark run close <run> handed_off` refuse with the same lines. Without a
+run, it also reads the host file `host.yml` of ARK_HOME, as it runs the config check; with a run, it
+does neither. A bad file prints `host file error: <path>: <message>` and changes no exit code.
+--project limits the config check to one project, like ARK_PROJECT, and with a run it looks for the
+run in that project only.
 
 The list adds the age of the newest event of each open run after the step, as `Nm`, `Nh` or `Nd`
 (largest whole unit; hours up to 47), and ends the line with ` stale` when that age is over 24
