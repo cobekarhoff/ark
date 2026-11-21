@@ -24,7 +24,7 @@ Gate answers:
 
 - One temp `ARK_HOME` with two projects, `lock-one` and `lock-two`, each with one run. Neither `ark.yml` sets `test_budget_cores`, `test_min_free_memory_percent` or `test_max_swap_gb`. The suite of each run sets `cores: 2`; its command appends `start <run>` and `end <run>` to the shared suite log and blocks between them while the `hold` file exists, until the case writes `release`.
 - Healthy fake host and the CPU seam of the preload at 0, so only cores can hold.
-- The case writes `ARK_HOME/host.yml` for each row and removes it at the end.
+- Each row writes `ARK_HOME/host.yml` with only `test_budget_cores` set (2, then 4). The case puts the file back to `test_budget_cores: 6` (the budget of the fixture) when a row ends; no row removes it.
 
 ## Steps
 

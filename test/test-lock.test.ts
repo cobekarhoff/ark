@@ -1533,6 +1533,7 @@ describe("ark test host.yml that is missing, empty or bad", () => {
       const out = await child.stdout;
       expect(await child.process.exited, out).toBe(0);
       expect(out).not.toContain("host.yml");
+      expect(await new Response(child.process.stderr).text()).not.toContain("host.yml");
       const defaultBudget = String(Math.max(1, Math.floor(0.6 * cpus().length)));
       expect(new Set(recorded().map((suiteRun) => suiteRun.cores))).toEqual(
         new Set([defaultBudget]),

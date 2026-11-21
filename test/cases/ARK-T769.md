@@ -17,7 +17,7 @@ Gate answers:
 
 1. Protects the source of the memory limits of `ark test`: the host file, not the project and not the defaults when the file sets them.
 2. Fails when `executeTest` still passes the defaults or a project value, or reads only one of the two memory keys of the host file.
-3. ARK-T187 owns the hold itself (inclusive limits, one line, recovery, an unreadable reading) at the defaults with no host file; it does not set a host file. ARK-T771 owns the same limits for `ark chief state`, a separate reader.
+3. ARK-T187 owns the hold itself (inclusive limits, one line, recovery, an unreadable reading) at the defaults 20 and 8; its `host.yml` sets only `test_budget_cores: 6`, so it sets no memory limit. ARK-T771 owns the same limits for `ark chief state`, a separate reader.
 4. No new seam: the reading is the fake host of `test/tmpdir-preload.ts` (`ARK_FAKE_HOST`, written by `setFakeHost` of `test/helpers.ts`), which reaches macOS only, as for ARK-T187. The case skips off macOS.
 
 ## Preconditions
@@ -25,7 +25,7 @@ Gate answers:
 - Temp `ARK_HOME` with a project whose `ark.yml` sets none of `test_budget_cores`, `test_min_free_memory_percent` and `test_max_swap_gb`, and a run with one cheap suite whose command writes a marker (the `ark test memory admission` fixture of `test/test-lock.test.ts`).
 - No other suite runs in the temp store.
 - The fake host reading is written with `setFakeHost` before each row. The CPU seam of the preload stays at 0, so only memory can hold.
-- Each row writes `ARK_HOME/host.yml` itself and removes it at the end.
+- Each row writes `ARK_HOME/host.yml` itself, with `test_budget_cores: 6` (the budget of the fixture) beside the key its step names. The row puts the file back to `test_budget_cores: 6` alone when it ends; no row removes the file.
 
 ## Steps
 

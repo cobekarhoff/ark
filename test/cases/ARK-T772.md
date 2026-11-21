@@ -21,14 +21,14 @@ Gate answers:
 
 1. Protects the config contract of the host keys: where each key may live, the checks of its value and the defaults.
 2. Fails when the ark.yml keys stay in `ProjectConfig` or reach the unknown-key path first, when the host reader takes an unknown key or `Number()` of any value, when a check uses `<=` for the minimum, when the reader lets the `SyntaxError` of `Bun.YAML.parse` escape unwrapped (the error then names no file: `Bun.YAML.parse("test_budget_cores: [")` throws `SyntaxError YAML Parse error: Unexpected token`), or when a missing or empty file is an error.
-3. ARK-T389 owns the unknown keys of ark.yml and their nearest key; the three host keys are not unknown keys but a refusal of its own that names `host.yml`. ARK-T773 owns the readers that print a bad host file and keep working. ARK-T187 owns the memory defaults 20 and 8 with no host file; ARK-T155 step 6 owns the formula of the default budget at fixed core counts.
+3. ARK-T389 owns the unknown keys of ark.yml and their nearest key; the three host keys are not unknown keys but a refusal of its own that names `host.yml`. ARK-T773 owns the readers that print a bad host file and keep working. ARK-T187 owns the memory defaults 20 and 8 (its `host.yml` sets no memory key); ARK-T155 step 6 owns the formula of the default budget at fixed core counts.
 4. No seam: `ark status` and `ark test` run as real processes against a temp `ARK_HOME`; the budget shows in the `<cores>` placeholder of the suite command.
 
 ## Preconditions
 
 - Temp `ARK_HOME` with a valid project (no host key in its `ark.yml`) and a run at the building phase whose one suite has no `cores` and a command that writes its `<cores>` argument and a marker to files.
-- The fake host reading of the preload (`ARK_FAKE_HOST`) is healthy with 0 GB swap for the rows that run a suite, so the at-minimum swap ceiling of 0 does not hold; the CPU seam of the preload stays at 0. The rows that run a suite skip off macOS, as ARK-T187 does; the refusal rows run on every host.
-- The case writes `ARK_HOME/host.yml` for each row and removes it at the end.
+- The fake host reading of the preload (`ARK_FAKE_HOST`) is set by the step 5 row to 50 percent free and 0 GB swap, so the at-minimum swap ceiling of 0 does not hold. The step 6 rows run a suite on the healthy host of the test file (50 percent free, 2 GB swap), which the defaults 20 and 8 do not hold. The CPU seam of the preload stays at 0. The rows that run a suite skip off macOS, as ARK-T187 does; the refusal rows run on every host.
+- Each row writes `ARK_HOME/host.yml` itself (the step 1 rows write `ark.yml` and leave `host.yml` as it is) and puts it back to `test_budget_cores: 6` (the budget of the fixture) when it ends; no row removes the file except the step 6 row of no file, which deletes it first.
 
 ## Steps
 

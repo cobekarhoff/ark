@@ -17,14 +17,14 @@ Gate answers:
 
 1. Protects the source of the run-start hold limits and their equality across projects.
 2. Fails when `chiefState` still passes the defaults or a project's value to `holdReasons`: step 1 would hold on `free 15% is below the 20% floor`, and step 2 would name 20 and 8 in place of 16 and 9.
-3. ARK-T188 owns the Host section, the order of the reasons and the default limits with no host file; ARK-T365 and ARK-T366 own the CPU reason. None sets a host file or compares two projects. ARK-T769 owns the same keys for `ark test`, a separate reader.
+3. ARK-T188 owns the Host section, the order of the reasons and the default limits (its `host.yml` sets no memory key); ARK-T365 and ARK-T366 own the CPU reason. None sets a memory limit in a host file or compares two projects. ARK-T769 owns the same keys for `ark test`, a separate reader.
 4. No new seam: the fake host of `test/tmpdir-preload.ts` (`ARK_FAKE_HOST`, macOS only, the case skips off macOS), `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD` as in ARK-T365, through the real `ark chief state --project <name>`.
 
 ## Preconditions
 
 - One temp `ARK_HOME` with two projects, `lock-one` and `lock-two` (the fixture of `test/test-lock.test.ts`); neither `ark.yml` sets any of the three host keys. No test ticket, no live Orca.
-- `ARK_FAKE_CPU_PERCENT=10` and `ARK_FAKE_LOAD=2`, so CPU never adds a reason; free disk as in ARK-T365.
-- The case writes `ARK_HOME/host.yml` for each row and removes it at the end.
+- `ARK_FAKE_CPU_PERCENT=10` and `ARK_FAKE_LOAD=2` (the `seam(10, 2)` of the `ark chief state host` describe), so CPU never adds a reason; free disk as in ARK-T365.
+- Each row writes `ARK_HOME/host.yml` with `test_budget_cores: 6` (the budget of the fixture) beside the two keys its step names. The case puts the file back to `test_budget_cores: 6` alone at the end; no row removes it.
 
 ## Steps
 
