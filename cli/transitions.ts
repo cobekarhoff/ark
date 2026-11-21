@@ -11,7 +11,7 @@ import {
   outcomes,
 } from "./lifecycle.ts";
 import { loadPlan, planHash } from "./plan.ts";
-import { hasTestCriterion } from "./ticket.ts";
+import { runCriteria } from "./ticket.ts";
 
 /** The event that moves a run out of a waiting phase, named in refusals; undefined for the other phases. */
 function missingEvent(state: RunState): string | undefined {
@@ -106,15 +106,22 @@ export function assertAllowed(
     case "step.started":
       if (state.steps.find((step) => step.id === data.step)?.status === "running")
         throw new ArkError(`step.started refused: step ${data.step} is already running`);
-      if (
-        state.kind === "bug" &&
-        data.role === "implementer" &&
-        !state.red_test &&
-        hasTestCriterion(runDirectory)
-      )
-        throw new ArkError(
-          "step.started refused: bug run: record a failing ark test of the ACs before the fix",
+      if (state.kind === "bug" && data.role === "implementer") {
+        const testCriteria = runCriteria(runDirectory).filter(
+          (criterion) => criterion.method === "test",
         );
+        if (
+          testCriteria.length > 0 &&
+          testCriteria.every((criterion) => state.guards.includes(criterion.id))
+        )
+          throw new ArkError(
+            "step.started refused: bug run: every AC is a guard; mark the AC that shows the bug",
+          );
+        if (testCriteria.length > 0 && !state.red_test)
+          throw new ArkError(
+            "step.started refused: bug run: record a failing ark test of the ACs before the fix",
+          );
+      }
       if (
         state.phase === "merge_requests_open" &&
         data.role === "implementer" &&
