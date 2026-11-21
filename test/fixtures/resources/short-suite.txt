@@ -1,6 +1,12 @@
 import { test } from "bun:test";
-// Ends almost at once, after about 0.2 s of CPU.
+// Ends almost at once, after 0.3 s of CPU. The loop counts CPU time (process.cpuUsage(), user plus system, in
+// microseconds), never wall time: a loaded host gives the process less CPU per second, so a wall-time loop could
+// end with almost none. The 10 s wall bound only keeps a starved host from hanging the suite.
 test("FAKE-1-AC1 burns", () => {
-  const end = performance.now() + 200;
-  while (performance.now() < end);
+  const start = process.cpuUsage();
+  const wallEnd = performance.now() + 10_000;
+  while (performance.now() < wallEnd) {
+    const used = process.cpuUsage(start);
+    if (used.user + used.system >= 300_000) break;
+  }
 });

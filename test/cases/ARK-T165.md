@@ -5,8 +5,9 @@ level: integration
 technique: equivalence classes (run building, run awaiting criteria in another project, closed run)
 priority: medium
 risk: status lists only one project, drops the phase or current step, or lists a closed run
-status: active
-changed_by: 2026-11-09-ARK-340-1
+status: retired
+retired_reason: "folded into ARK-T767, which extends this fixture with --project, ARK_PROJECT and a project with no open run and keeps every expected result of this case"
+changed_by: 2026-11-21-ARK-622-1
 ---
 
 ## Objective
