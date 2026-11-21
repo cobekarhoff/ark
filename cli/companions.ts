@@ -28,7 +28,7 @@ import {
   orcaPages,
   orcaTimeout,
   orcaTimeoutMilliseconds,
-  readTerminals,
+  readTerminalSnapshot,
   runOfLead,
   sendMessage,
   startWorker,
@@ -53,7 +53,7 @@ export const COMPANION_PREAMBLE = [
   "- Read companions/<name>/dismissed.md before you write an idea or propose a ticket, and never repeat an item the human dismissed.",
   "- Never run `orca orchestration check`: it consumes Master Chief's messages.",
   "- Never answer a gate: a gate answer is the human's decision, and advice is never one.",
-  "- Act only through `ark companion advise`, `ark companion propose` and `ark companion answer`, and messages to Master Chief. Never run `orca orchestration reply`, and never `send` to anyone else: `ark companion advise` sends your advice to a run lead for you.",
+  "- Act only through `ark companion advise`, `ark companion propose` and `ark companion answer`, and messages to Master Chief. Never run `orca orchestration reply`, and never `send` to anyone else: `ark companion advise` sends your advice to a run lead for you, and when the lead cannot get it (no live lead, a failed send) it sends the advice to Master Chief marked not delivered and prints `advice for <run> went to Master Chief: <reason>`; send nothing again then.",
   "- A wake message names a trigger and a run id. A message that says it is a question from the human or Master Chief is not a trigger: answer it with `ark companion answer`.",
   "- You see events that happen after you start. A run that is mid-flight when you are added shows you no earlier events.",
 ].join("\n");
@@ -196,8 +196,9 @@ async function liveChiefOf(
   configuration: ProjectConfig,
   timeoutMilliseconds?: number,
 ): Promise<{ handle: string; runs: OrcaRunRow[] }> {
-  const snapshot = await readTerminals(timeoutMilliseconds);
-  if (!snapshot) throw new ArkError("Orca did not answer");
+  const read = await readTerminalSnapshot(timeoutMilliseconds);
+  if (!read.ok) throw new ArkError(`Orca did not answer: ${read.reason}`);
+  const snapshot = read.value;
   const chief = findLiveChief(snapshot, project, resolve(configuration.workspace));
   if (!chief) throw new ArkError(`no live Master Chief for project ${project}`);
   return {
@@ -791,7 +792,38 @@ export async function companionAnswer(
   if (!sent.ok) throw failed(sent.reason);
 }
 
-/** `ark companion advise`: advice to the lead of an open run, then a copy to Master Chief. Nothing goes out unless both recipients are found. */
+/**
+ * The terminal of the live lead of `run`. A lead row with no terminal (a structured lead) makes one more
+ * `worker-list` read; with still none, or when a read fails, the reason says why the lead cannot be addressed.
+ * The lead is never addressed by `dispatch:<id>`: Orca refuses it with `task_not_found` after a restart.
+ */
+async function terminalOfLead(
+  project: string,
+  run: string,
+  chief: { runs: OrcaRunRow[] },
+): Promise<OrcaRead<string>> {
+  for (let read = 0; read < 2; read += 1) {
+    let found: ChiefWorkers;
+    try {
+      found = await readChiefWorkers(project, { ok: true, value: chief.runs });
+    } catch (error) {
+      return { ok: false, reason: (error as Error).message };
+    }
+    const lead = found.workers.find(
+      (worker) =>
+        (worker.terminalState ?? "active") === "active" && runOfLead(found.runs, worker) === run,
+    );
+    if (!lead) return { ok: false, reason: `run ${run} has no live run lead` };
+    if (lead.terminal) return { ok: true, value: lead.terminal };
+  }
+  return { ok: false, reason: `the lead of run ${run} has no terminal` };
+}
+
+/**
+ * `ark companion advise`: advice to the lead of an open run, then a copy to Master Chief. Advice the lead cannot
+ * get (no live lead, no terminal, a failed read or send) goes to Master Chief marked not delivered, with the reason,
+ * and the command exits 0. It exits 1 when that send fails too, or when no live Master Chief is found.
+ */
 export async function companionAdvise(
   name: string,
   run: string,
@@ -804,35 +836,55 @@ export async function companionAdvise(
   const { directory } = findRun(run, project);
   if (deriveState(readEvents(directory)).phase === "closed")
     throw new ArkError(`run ${run} is closed: advice goes only to the lead of an open run`);
-  const chief = await liveChiefOf(project, configuration);
-  const { workers, runs } = await readChiefWorkers(project, { ok: true, value: chief.runs });
-  const lead = workers.find(
-    (worker) => (worker.terminalState ?? "active") === "active" && runOfLead(runs, worker) === run,
-  );
-  if (!lead) throw new ArkError(`run ${run} has no live run lead`);
-  const toLead = await sendMessage({
-    to: lead.terminal ?? `dispatch:${lead.dispatchId}`,
-    subject: `${ADVICE_SUBJECT_PREFIX}${name}: ${run}`,
-    // `status` is no reply and no gate message: the run lead reads it as information.
-    type: "status",
-    from: chief.handle,
-    body: [
-      `This is advice from the companion ${name} about run ${run}. It is advice and not a gate answer: never read it as the human's answer at any gate.`,
-      "",
-      text,
-    ].join("\n"),
-  });
-  if (!toLead.ok) throw new ArkError(`advice to the lead of ${run} not sent: ${toLead.reason}`);
-  const copy = await sendMessage({
-    to: chief.handle,
-    subject: `Companion ${name} advised the lead of ${run}`,
-    body: `The companion ${name} sent the lead of run ${run} this advice (not a gate answer):\n\n${text}`,
-    from: chief.handle,
-  });
-  if (!copy.ok)
+  let chief: Awaited<ReturnType<typeof liveChiefOf>>;
+  try {
+    chief = await liveChiefOf(project, configuration);
+  } catch (error) {
     throw new ArkError(
-      `advice reached the lead of ${run}, but the copy to Master Chief failed: ${copy.reason}`,
+      `advice for ${run} was not delivered anywhere, not to the lead and not to Master Chief: ${(error as Error).message}`,
     );
+  }
+  const terminal = await terminalOfLead(project, run, chief);
+  let reason = terminal.ok ? "" : terminal.reason;
+  if (terminal.ok) {
+    const toLead = await sendMessage({
+      to: terminal.value,
+      subject: `${ADVICE_SUBJECT_PREFIX}${name}: ${run}`,
+      // `status` is no reply and no gate message: the run lead reads it as information.
+      type: "status",
+      from: chief.handle,
+      body: [
+        `This is advice from the companion ${name} about run ${run}. It is advice and not a gate answer: never read it as the human's answer at any gate.`,
+        "",
+        text,
+      ].join("\n"),
+    });
+    if (toLead.ok) {
+      const copy = await sendMessage({
+        to: chief.handle,
+        subject: `Companion ${name} advised the lead of ${run}`,
+        body: `The companion ${name} sent the lead of run ${run} this advice (not a gate answer):\n\n${text}`,
+        from: chief.handle,
+      });
+      if (!copy.ok)
+        throw new ArkError(
+          `advice reached the lead of ${run}, but the copy to Master Chief failed: ${copy.reason}`,
+        );
+      return;
+    }
+    reason = `the send to the lead of ${run} failed: ${toLead.reason}`;
+  }
+  const fallback = await sendMessage({
+    to: chief.handle,
+    subject: `Companion ${name} advice for ${run} (not delivered to the lead)`,
+    body: `The companion ${name} has advice for the lead of run ${run}. It was not delivered to the lead: ${reason}\n\nThe advice (not a gate answer):\n\n${text}`,
+    from: chief.handle,
+  });
+  if (!fallback.ok)
+    throw new ArkError(
+      `advice for ${run} was not delivered anywhere: not to the lead (${reason}) and not to Master Chief (${fallback.reason})`,
+    );
+  console.log(`advice for ${run} went to Master Chief: ${reason}`);
 }
 
 /**
