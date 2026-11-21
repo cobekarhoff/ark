@@ -21,7 +21,7 @@ Prove the 503 contract of the run route on a cold hub: while the first read of a
 
 ## Steps
 
-1. Start the hub. As soon as `start()` returns (the port is printed and the page's `/events` stream is open), GET `/api/run/<run>` once and note the status, the body and how long the answer took.
+1. Start the hub. As soon as `start()` returns (the port is printed and the `/events` request is sent, not awaited), GET `/api/run/<run>` once and note the status, the body and how long the answer took. The run route starts the first Ark read itself (`reader.ready()`), so the case does not depend on the `/events` stream being open.
 2. Poll GET `/api/run/<run>` until the status is not 503 (bound 10 s, an event wait with no fixed sleep); note each status.
 3. Read the body of the first answer that is not 503.
 
