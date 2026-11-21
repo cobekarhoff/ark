@@ -145,8 +145,9 @@ function screenshotFlows(ledger: Ledger): { shown: string[]; omitted: number } {
 const escapeTitle = (title: string) =>
   title.replace(/\s+/g, " ").replace(/[\\`*_[\]<>|~#]/g, "\\$&");
 
-/** The Tests line and one Deleted bullet for each deleted test, sorted by file then title; none for an old run. `collapsed` writes one Deleted line with the count in place of the bullets, none when no test was deleted. */
-function testLines({ tests }: Ledger, collapsed = false): string[] {
+/** `Full suite: CI (no code file in this diff)` alone when the ledger says the quick run is the gate (no local count to claim). Else the Tests line and one Deleted bullet for each deleted test, sorted by file then title; none for an old run. `collapsed` writes one Deleted line with the count in place of the bullets, none when no test was deleted. */
+function testLines({ tests, fullSuiteIsCi }: Ledger, collapsed = false): string[] {
+  if (fullSuiteIsCi) return ["- Full suite: CI (no code file in this diff)"];
   if (tests === null) return [];
   const { passed, skipped, baseSkipped, deleted } = tests;
   if (baseSkipped === undefined || deleted === undefined)

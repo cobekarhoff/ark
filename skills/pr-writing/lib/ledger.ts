@@ -130,6 +130,8 @@ export type Ledger = {
     baseSkipped?: number;
     deleted?: { file?: string; name: string }[];
   } | null;
+  /** The last test is a passing quick run. `ark merge-request open` ships on one only for a run with no code file, so the body says the full suite is CI's and shows no local count. Absent otherwise and in an old ledger. */
+  fullSuiteIsCi?: boolean;
   /** The block of the latest findings file; `null` when the file has none, or there is no file. */
   reviewer: ReviewerBlock | null;
   mergeOrder: string[];
@@ -966,6 +968,10 @@ function runLedger(source: {
             ...(Array.isArray(lastTest.data.deleted) ? { deleted: lastTest.data.deleted } : {}),
           }
         : null,
+    // A quick last test passed: only the no-code path ships on it (`noCodeRun`, `ark merge-request open`), so the full suite is CI's.
+    ...(lastTest?.data.mode === "quick" && lastTest.data.passed === true
+      ? { fullSuiteIsCi: true }
+      : {}),
     reviewer,
     mergeOrder: order,
     repos,

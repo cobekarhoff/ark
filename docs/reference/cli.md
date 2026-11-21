@@ -466,85 +466,86 @@ selects no file prints `skipped (no test files are affected)`; any other suite w
 runs the changed own-commit test files, and one with neither runs whole. A full `ark test` never
 reads `changed_command`: it runs the `command` of every suite, and the last full run is the gate; it
 records `mode: quick` and a `duration` in test.completed, a pass reads `not run` for each AC, and it
-prints `mode: quick (not a gate: run ark test <run> before the MR)`. A plain `ark test` records
-`mode: full`, and an event with no `mode` reads as full. `ark merge-request open` and `ark run close
-<run> handed_off` refuse unless the last test at the current head is full, and name `ark test
-<run>`. `ark test` starts a detached runner process and prints what the runner prints, so a lost
-connection does not stop the tests: the runner takes the host lock itself, holds it until it ends,
-and writes `results/runner.json` (pid, mode, state, exit code), `results/runner.out` and
-`results/runner.err` in the run folder. A signal to the `ark test` caller does not stop the suites.
-`--wait` prints what the runner of the run printed, from the start, and exits with its code, whether
-the runner still runs or has ended; with no runner it exits 1. After a lost connection run `ark test
-<run> --wait`, never `ark test` again. A second `ark test` of a run with a live runner of the same
-mode attaches to it; one of another mode (`--quick` against full) exits 1 and names `--wait` and
-`--stop`. A caller whose `--keep-going` differs from the runner's attaches and prints one line to
-stderr that says which behavior the runner has. A runner whose pid is dead or whose start time
-changed is stale: `--wait` prints its output and exits 1, and the next `ark test` starts a new
-runner. `--stop` sends SIGTERM to the runner, which stops every suite process group, records the
-state `stopped` and releases the lock; the command returns when the runner is gone, and an attached
-caller exits 128 plus the signal number. A passed suite result is kept per project and printed
-`reused`: the head result is keyed by the HEAD of every repo, the mode and the suite command (a
-checkout with uncommitted changes reads and stores nothing); the base result by the base commits, a
-hash of the copied test files and the suite command, and with every base suite stored there is no
-checkout, `setup` or compose. A reused result keeps its evidence, its `base_passed` and its flaky
-files; a failed result is never stored; `checks` run on every call. At head, a failed test file runs
-once more through `base_command` with that one file (a failure at base is data and is not retried).
-A pass counts and the file is listed as `flaky` in the output, in `test.completed` (`flaky`, and
-`reused` for the reused suites), in the retro metrics and in the MR body; a second failure fails the
-suite, unless the file is red on main. A file that still fails after its retry and that the run's
-own commits did not touch (first-parent, no merge commits: a file that came in through `ark worktree
-sync` is untouched) runs once through `base_command` at the tip of the target branch (`git fetch
-origin`, then `origin/<target>`, in a throwaway `git clone --shared` made like the base checkout,
-with `setup` and compose). When each test that failed at head also fails there (matched by name),
-the output prints a line that starts with `red on main` and names the file, `test.completed` lists
-it in `red_on_main` (omitted when empty and in a quick run), and the file is not counted as a
-failure: `passed` is true when that is the only failure, so it spends no round, opens no escalation
-gate and does not block `ark merge-request open`. A file that fails twice at head and once on main
-is red on main. A touched file that fails is never run on main and always counts. A suite with no
-`base_command`, a failed test whose report names no file, a repo with no `origin` and a failed `git
-fetch origin` are not retried or not checked on main: the failure counts and the output says `not
-checked on main`. A file that ran at the tip but has a head-failing test that does not fail there
-(it passes, or the file is gone) counts and prints `not red on main`. A test case tagged in a red on
-main file still reads `failing`. A reused suite replays its `red on main` line from the cache, which
-does not hold the main tip. It prints `tests <passed> passed, <skipped> skipped (base <n>),
-<deleted> deleted` and one `deleted <file> <title>` line for each test the base has and the head
-lacks, and records `passed_count`, `skipped`, `base_skipped` and `deleted` (a list of `{ file, name
-}`) in test.completed; the counts cover every test, not only the ones with a test case ID, and the
-MR body shows them. The base side comes from a census: before the base run, on the same base
-checkout and before the head's test files are copied in, a suite with `base_files` runs the run's
-own test files that exist at base, and any other suite runs whole (replayed from the cache when its
-key is stored). Its logs go to `results/census/`, and the base run's own results never feed the
-counts. A full run of `kind: refactor` also times the census, the base commit's own test files,
-beside the head: each suite line prints `head <seconds>s` and `pristine base <seconds>s`,
-test.completed `suites[]` holds `head_s` and `pristine_s`, and `results/resources.json` holds a
-`pristine` entry (`wall_s`) under `suites[<name>]`; a census that failed or did not run leaves the
-figures out, and never changes `base_passed` or the exit code. The base run still copies the head's
-test files onto base. A renamed test counts as deleted. A quick run counts the skipped tests at head
-only and has no `base_skipped` and no `deleted`. This only reports: it never changes the exit code.
-At its end `ark test` runs stage `head` of `ark merge-request check` and, only when it lists a
-problem (an AC string in no tracked file, an MR title problem, a malformed evidence file), prints
-the heading `merge-request check` and one line for each problem, also for a `--quick` or failing
-run, after the lines above and before the failure is thrown. It is information only: it changes
-neither the exit code nor `passed`. A suite in `ark.yml` can give `time_budget_s` (seconds for the
-whole suite, read as the `time` of its report root), `slow_test_s` (seconds for one test, read from
-the `time` of each test case in the report; the behave parser sums the steps) and `on_over` (`warn`,
-the default, or `fail`); with none of them set the output and the result do not change. When one is
-set, a full run prints `time suite <name> <seconds> s` for each suite with its own time, then the
-verdict, made once from the head results after the cache replay and the retry of failed files, from
-the current `ark.yml` (never stored in the cache, never from the base or census runs): `warning
-suite <name> <seconds> s over time_budget_s <n>` for a suite over its budget, and one line for each
-test over `slow_test_s` (longer first, with its file, name and time): `warning slow test <suite> ...
-(no slow_reason)`. A test with no time in the report is never slow, and a reused suite whose stored
-result has no times prints `no suite time and test times in the reused result: not judged` (it names
-only what is missing and is set). With `on_over: fail` the first word of those lines is `failure`
-and the run fails with `suite <name> is over its time limit (on_over: fail)`, `passed: false` and
-exit code 1; the suite row of `test.completed` stays `passed` and has no `failed_files`, so the next
-run re-runs no file for it. A slow test whose test case entry (`test/cases/<id>.md` of the suite's
-repo in the run's worktree) gives `slow_reason` is listed as `slow <suite> ... reason: <text>` and
-never fails the run; a test needs a `slow_reason` in the entry of every case id in its title, a test
-with no case id is never excused, and a retired entry or an empty `slow_reason` gives no reason. A
-quick run runs part of a suite: it lists slow tests as warnings, prints no suite time or budget
-line, and never fails for time.
+prints `mode: quick (not a gate: run ark test <run> before the MR)`. That line is not the verdict
+for a run with no code file: `ark merge-request open` accepts its passing quick run (see `ark
+merge-request open`). A plain `ark test` records `mode: full`, and an event with no `mode` reads as
+full. `ark merge-request open` and `ark run close <run> handed_off` refuse unless the last test at
+the current head is full, and name `ark test <run>`. `ark test` starts a detached runner process and
+prints what the runner prints, so a lost connection does not stop the tests: the runner takes the
+host lock itself, holds it until it ends, and writes `results/runner.json` (pid, mode, state, exit
+code), `results/runner.out` and `results/runner.err` in the run folder. A signal to the `ark test`
+caller does not stop the suites. `--wait` prints what the runner of the run printed, from the start,
+and exits with its code, whether the runner still runs or has ended; with no runner it exits 1.
+After a lost connection run `ark test <run> --wait`, never `ark test` again. A second `ark test` of
+a run with a live runner of the same mode attaches to it; one of another mode (`--quick` against
+full) exits 1 and names `--wait` and `--stop`. A caller whose `--keep-going` differs from the
+runner's attaches and prints one line to stderr that says which behavior the runner has. A runner
+whose pid is dead or whose start time changed is stale: `--wait` prints its output and exits 1, and
+the next `ark test` starts a new runner. `--stop` sends SIGTERM to the runner, which stops every
+suite process group, records the state `stopped` and releases the lock; the command returns when the
+runner is gone, and an attached caller exits 128 plus the signal number. A passed suite result is
+kept per project and printed `reused`: the head result is keyed by the HEAD of every repo, the mode
+and the suite command (a checkout with uncommitted changes reads and stores nothing); the base
+result by the base commits, a hash of the copied test files and the suite command, and with every
+base suite stored there is no checkout, `setup` or compose. A reused result keeps its evidence, its
+`base_passed` and its flaky files; a failed result is never stored; `checks` run on every call. At
+head, a failed test file runs once more through `base_command` with that one file (a failure at base
+is data and is not retried). A pass counts and the file is listed as `flaky` in the output, in
+`test.completed` (`flaky`, and `reused` for the reused suites), in the retro metrics and in the MR
+body; a second failure fails the suite, unless the file is red on main. A file that still fails
+after its retry and that the run's own commits did not touch (first-parent, no merge commits: a file
+that came in through `ark worktree sync` is untouched) runs once through `base_command` at the tip
+of the target branch (`git fetch origin`, then `origin/<target>`, in a throwaway `git clone
+--shared` made like the base checkout, with `setup` and compose). When each test that failed at head
+also fails there (matched by name), the output prints a line that starts with `red on main` and
+names the file, `test.completed` lists it in `red_on_main` (omitted when empty and in a quick run),
+and the file is not counted as a failure: `passed` is true when that is the only failure, so it
+spends no round, opens no escalation gate and does not block `ark merge-request open`. A file that
+fails twice at head and once on main is red on main. A touched file that fails is never run on main
+and always counts. A suite with no `base_command`, a failed test whose report names no file, a repo
+with no `origin` and a failed `git fetch origin` are not retried or not checked on main: the failure
+counts and the output says `not checked on main`. A file that ran at the tip but has a head-failing
+test that does not fail there (it passes, or the file is gone) counts and prints `not red on main`.
+A test case tagged in a red on main file still reads `failing`. A reused suite replays its `red on
+main` line from the cache, which does not hold the main tip. It prints `tests <passed> passed,
+<skipped> skipped (base <n>), <deleted> deleted` and one `deleted <file> <title>` line for each test
+the base has and the head lacks, and records `passed_count`, `skipped`, `base_skipped` and `deleted`
+(a list of `{ file, name }`) in test.completed; the counts cover every test, not only the ones with
+a test case ID, and the MR body shows them. The base side comes from a census: before the base run,
+on the same base checkout and before the head's test files are copied in, a suite with `base_files`
+runs the run's own test files that exist at base, and any other suite runs whole (replayed from the
+cache when its key is stored). Its logs go to `results/census/`, and the base run's own results
+never feed the counts. A full run of `kind: refactor` also times the census, the base commit's own
+test files, beside the head: each suite line prints `head <seconds>s` and `pristine base
+<seconds>s`, test.completed `suites[]` holds `head_s` and `pristine_s`, and `results/resources.json`
+holds a `pristine` entry (`wall_s`) under `suites[<name>]`; a census that failed or did not run
+leaves the figures out, and never changes `base_passed` or the exit code. The base run still copies
+the head's test files onto base. A renamed test counts as deleted. A quick run counts the skipped
+tests at head only and has no `base_skipped` and no `deleted`. This only reports: it never changes
+the exit code. At its end `ark test` runs stage `head` of `ark merge-request check` and, only when
+it lists a problem (an AC string in no tracked file, an MR title problem, a malformed evidence
+file), prints the heading `merge-request check` and one line for each problem, also for a `--quick`
+or failing run, after the lines above and before the failure is thrown. It is information only: it
+changes neither the exit code nor `passed`. A suite in `ark.yml` can give `time_budget_s` (seconds
+for the whole suite, read as the `time` of its report root), `slow_test_s` (seconds for one test,
+read from the `time` of each test case in the report; the behave parser sums the steps) and
+`on_over` (`warn`, the default, or `fail`); with none of them set the output and the result do not
+change. When one is set, a full run prints `time suite <name> <seconds> s` for each suite with its
+own time, then the verdict, made once from the head results after the cache replay and the retry of
+failed files, from the current `ark.yml` (never stored in the cache, never from the base or census
+runs): `warning suite <name> <seconds> s over time_budget_s <n>` for a suite over its budget, and
+one line for each test over `slow_test_s` (longer first, with its file, name and time): `warning
+slow test <suite> ... (no slow_reason)`. A test with no time in the report is never slow, and a
+reused suite whose stored result has no times prints `no suite time and test times in the reused
+result: not judged` (it names only what is missing and is set). With `on_over: fail` the first word
+of those lines is `failure` and the run fails with `suite <name> is over its time limit (on_over:
+fail)`, `passed: false` and exit code 1; the suite row of `test.completed` stays `passed` and has no
+`failed_files`, so the next run re-runs no file for it. A slow test whose test case entry
+(`test/cases/<id>.md` of the suite's repo in the run's worktree) gives `slow_reason` is listed as
+`slow <suite> ... reason: <text>` and never fails the run; a test needs a `slow_reason` in the entry
+of every case id in its title, a test with no case id is never excused, and a retired entry or an
+empty `slow_reason` gives no reason. A quick run runs part of a suite: it lists slow tests as
+warnings, prints no suite time or budget line, and never fails for time.
 ```
 
 ### test-case new
@@ -656,17 +657,29 @@ once and the output says so, a body that did not change is left alone, and a mer
 skipped. Run it again after each post-MR round. It refuses, with exit 1 and before any push, when a
 repo head changed since the last test, and ends the error with `run ark test <run> again`. It also
 refuses, before any push, when a criterion with `manual: true` has no manual ok, and names each one.
-The MR targets `repos.<repo>.base` when ark.yml sets it (`--base <base>` on GitHub, `--target-branch
-<base>` on GitLab), else the branch origin/HEAD names. No command merges. For a project with
-`merge_requests: none` in ark.yml it exits 1 before any command runs and prints `project <project>
-has merge_requests: none: close the run with ark run close <run> handed_off`. It also refuses,
-before any push, when a non-manual AC is not `passing` in the last test (it names each), when a
-string in backticks in an AC text is in no tracked file of a run worktree at HEAD (it names the AC
-and the string; Only a string a file can hold counts: not one with a placeholder (`<`), a `*`,
-`...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string also
-passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty path
-never counts). A string that starts with `not:` is a removed string: it must be in no tracked file
-and name no tracked path, and the refusal names it without the prefix.), for `kind: perf` when
+A quick last test is a gate only for a run with no code file: every `test_cases` entry of plan.yml
+is `reuse` (or there is none) and, in every run worktree, `git diff <base or synced>...HEAD` (three
+dots, the run's own commits) lists only hand-written Markdown, that is a `.md` file (any case)
+outside a test or fixture folder (a folder named `test`, `tests`, `__tests__`, `fixtures`,
+`__fixtures__`, `__snapshots__`, `testdata` or `evals`) that is not a symlink and not in the
+`generated` list of ark.yml. A missing or invalid plan.yml and a failed git diff read as code. The
+quick run must have passed with every check; on that path a criterion that reads `not run` counts as
+passing, `failing` does not, a manual AC still needs its ok, and the test evidence of a `test` AC
+and the `refactor` base rule are skipped, because the full suite is CI's. The body then has the line
+`Full suite: CI (no code file in this diff)` in place of the Tests line. The refresh of an open MR
+applies the same rule at the pushed head. Any other quick last test refuses with `the last test at
+this head is quick, not a gate: run ark test <run>`. `ark run close <run> handed_off` keeps its
+full-test rule. The MR targets `repos.<repo>.base` when ark.yml sets it (`--base <base>` on GitHub,
+`--target-branch <base>` on GitLab), else the branch origin/HEAD names. No command merges. For a
+project with `merge_requests: none` in ark.yml it exits 1 before any command runs and prints
+`project <project> has merge_requests: none: close the run with ark run close <run> handed_off`. It
+also refuses, before any push, when a non-manual AC is not `passing` in the last test (it names
+each), when a string in backticks in an AC text is in no tracked file of a run worktree at HEAD (it
+names the AC and the string; Only a string a file can hold counts: not one with a placeholder (`<`),
+a `*`, `...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string
+also passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty
+path never counts). A string that starts with `not:` is a removed string: it must be in no tracked
+file and name no tracked path, and the refusal names it without the prefix.), for `kind: perf` when
 `results/baseline.md` or `results/compare.md` is missing or empty, and for a `kind: refactor` run
 with a `method: test` AC unless `base_passed` is true. Last, it checks the evidence and refuses,
 before any push and before any event, with `refused: evidence is not complete` and one line for each
@@ -727,15 +740,15 @@ makes), and the shape of each evidence file that exists, except the last line `h
 demonstration file and the `reviewer:` line of an inspection file. `--stage step` adds `evidence
 missing: <AC id> (<method>)` for each non-test AC that the plan step named by `--step <id>` serves,
 or for every non-test AC when no `--step` is given. `--stage final` adds every other refusal of
-open, in its order: no test result, a quick test, a manual criterion without ok, criteria not
-passing, a repo that changed since the last test, the `perf` and `refactor` rules, and every
-evidence problem including the last lines, each on its own line, then the refusal of the security
-scan (a missing scanner, a secret, a high or critical vulnerability) as one message; the scan runs
-gitleaks and osv-scanner, which needs the network. In stage `final` it also prints `warning: manual
-answer older than head: <AC id>` for a manual answer whose recorded head differs from the repo head
-now (a clean `ark worktree sync` merge is not a difference; an answer with no recorded head never
-warns); a warning does not change the exit code. `--summary` is the `--summary` of `ark
-merge-request open`.
+open, in its order: no test result, a quick test (a passing quick test of a run with no code file is
+accepted, as `ark merge-request open` says), a manual criterion without ok, criteria not passing, a
+repo that changed since the last test, the `perf` and `refactor` rules, and every evidence problem
+including the last lines, each on its own line, then the refusal of the security scan (a missing
+scanner, a secret, a high or critical vulnerability) as one message; the scan runs gitleaks and
+osv-scanner, which needs the network. In stage `final` it also prints `warning: manual answer older
+than head: <AC id>` for a manual answer whose recorded head differs from the repo head now (a clean
+`ark worktree sync` merge is not a difference; an answer with no recorded head never warns); a
+warning does not change the exit code. `--summary` is the `--summary` of `ark merge-request open`.
 ```
 
 ### merge-request status
