@@ -57,7 +57,7 @@ The human names a ticket or several. For each one:
    - Whether the backticks of every AC follow this rule. A string in backticks in an AC passes when a tracked file contains it or when it names a tracked file or folder at head, except one with a placeholder, a `*`, `...`, a `:<line>` suffix or the AC's own id, and any string of a manual AC. Put a path or string that the run removes in `not:` (`` `not:docs/old/` ``): it must then be in no tracked file. Put a string that the run rewrites, or that only describes the old state, outside backticks.
    - Which repos it likely touches. Read the workspace to check.
    - What it depends on, and what is unclear or risky.
-3. Run `ark status` and check that no open run already exists for the ticket. Only one run per ticket can be open.
+3. Run `ark status --project <project>` and check that no open run already exists for the ticket. Only one run per ticket can be open.
 4. Run `ark chief state --project <project>`. When its `## Interview` line says `(due)`, offer `/skill:ark-retro interview` first (`skills/ark-retro/SKILL.md`, Part 2).
 
 ## 4. Suggest related tickets
@@ -82,7 +82,7 @@ The queue is a set of Orca Tasks in Master Chief's own Orca Run.
 
 3. Show the human the queue: ticket, dependencies and the order you will start them in.
 
-A ticket is ready when `orca orchestration task-list --ready --json` lists its Task and fewer than `concurrency` runs are open. `ark status` lists the open runs.
+A ticket is ready when `orca orchestration task-list --ready --json` lists its Task and fewer than `concurrency` runs are open. `ark status --project <project>` lists the open runs. `concurrency` in ark.yml counts the open runs of one project; the `ark test` budget (`ark chief state`, section `## ark test budget`) is host-wide.
 
 ## 6. Start a run lead for each ready ticket
 
