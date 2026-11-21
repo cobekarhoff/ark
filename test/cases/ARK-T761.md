@@ -2,7 +2,7 @@
 id: ARK-T761
 title: "ARK-T761 a Playwright test that fails again after its rerun by title stays failed: a title with regex characters inside a describe block is rerun once, a flaky title of the same retry is still flaky, the suite fails with exit 1 and the rerun under load says so; a Playwright suite that fails with no failed test is not rerun"
 level: integration
-technique: equivalence classes (fails twice, fails once, passes; no failed test at all) with special characters in the title ( ( ) . : + / and the describe separator ` › `) and state transition (failed, retried, still failed)
+technique: "equivalence classes (fails twice, fails once, passes; no failed test at all) with special characters in the title ( ( ) . : + / and the describe separator ` › `) and state transition (failed, retried, still failed)"
 priority: high
 risk: "the title is put into `--grep` as it is in the report: a ` › ` describe separator or an unescaped `(`, `)`, `+` or `.` makes the rerun match no test, Playwright exits non-zero with no tests, and the failure stands without a real rerun; or a second failure passes the suite; or a title is retried more than once; or the retry's non-zero exit drops the title that did pass (the outcome-code rule of the file retry, so nothing is flaky), or marks the whole suite passed; or `failed_files` names the flaky title or no title; or the title path skips the load wait and its note; or a Playwright suite that exits non-zero with no failed testcase (a `globalSetup` that throws) gets an empty `--grep` that matches every test, so the whole suite reruns, passes and hides the crash"
 status: active
