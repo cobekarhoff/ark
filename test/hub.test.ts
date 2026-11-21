@@ -65,6 +65,7 @@ import {
 import { installProcessFakes } from "./resources-fixtures.ts";
 import { arkP, entry, scenario, type Scenario } from "./companions-fixtures.ts";
 import { removeFakeCompanionTools, type FakeCompanionTools } from "./fake-companion-tools.ts";
+import { linkBigProject, removeBigProject } from "./hub-big-home.ts";
 import { waitForRepoFacts } from "./hub-facts-wait.ts";
 import {
   installFakeTools,
@@ -91,6 +92,7 @@ beforeAll(() => {
 afterAll(async () => {
   for (const index of indexes) index.close();
   await Promise.all(hubs.map(stopHub));
+  removeBigProject();
   for (const key of Object.keys(process.env))
     if (!(key in savedEnvironment)) delete process.env[key];
   Object.assign(process.env, savedEnvironment);
@@ -210,6 +212,7 @@ test("ARK-T662 every route of the hub but open-in-orca and the three companion r
     title: "Open",
     status: "ready",
   });
+  linkBigProject(process.env.ARK_HOME!);
   installFakeTools({ orca: orcaAnswersFor(run) });
   const { baseUrl } = await start();
 
@@ -250,7 +253,50 @@ test("ARK-T662 every route of the hub but open-in-orca and the three companion r
       const response = await fetch(`${baseUrl}${route}`, { method });
       expect(response.status, `${method} ${route}`).toBe(405);
     }
-});
+}, 120_000);
+
+test("ARK-T776 while the hub's first Ark read of a large home takes longer than 250 ms, GET /api/run/<run> answers 503 `loading` at once, and 200 with the run once the read ends", async () => {
+  isolatedEnvironment();
+  const run = `${today()}-ARK-802-1`;
+  writeRun({
+    project: "p",
+    run,
+    ticket: { id: "ARK-802", title: "Cold" },
+    phase: "building",
+  });
+  linkBigProject(process.env.ARK_HOME!);
+  installFakeTools({ orca: orcaAnswersFor(run) });
+  const { baseUrl } = await start();
+
+  // The first read of the large home outlasts the 250 ms bound of `readyOrLoading`, so the first answer is the loading answer.
+  // A 200 here means the fixture holds no read any more or the hub waits for the whole read: the time tells the two apart.
+  const askedAt = performance.now();
+  const first = await fetch(`${baseUrl}/api/run/${run}`);
+  const firstBody = await first.text();
+  expect(
+    { status: first.status, body: firstBody },
+    `first answer after ${Math.round(performance.now() - askedAt)} ms`,
+  ).toEqual({ status: 503, body: "loading" });
+
+  // Every request is the wait: while the read runs each one answers 503 `loading` within its bound.
+  const deadline = Date.now() + 10_000;
+  let answer = first;
+  let body = firstBody;
+  let answers = 1;
+  while (answer.status === 503 && Date.now() < deadline) {
+    expect(body, `answer ${answers}`).toBe("loading");
+    answer = await fetch(`${baseUrl}/api/run/${run}`);
+    body = await answer.text();
+    answers += 1;
+  }
+  expect(
+    answer.status,
+    `GET /api/run/${run} still answered ${answer.status} ${body} after ${answers} answers in 10 s`,
+  ).toBe(200);
+  const detail = JSON.parse(body) as RunDetail;
+  expect(detail.view.run).toBe(run);
+  expect(detail.view.ticket.id).toBe("ARK-802");
+}, 120_000);
 
 afterEach(removeFakeCompanionTools);
 
@@ -1029,6 +1075,7 @@ test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400 an
     phase: "building",
   });
   const events = readFileSync(join(directory, "events.ndjson"), "utf8");
+  linkBigProject(process.env.ARK_HOME!);
   const state = installFakeTools({
     orca: orcaAnswersFor(run),
     orcaMode: "down",
@@ -1058,7 +1105,7 @@ test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400 an
     : "";
   expect(log).not.toContain("terminal switch");
   expect(readFileSync(join(directory, "events.ndjson"), "utf8")).toBe(events);
-});
+}, 120_000);
 
 test("ARK-284-AC5 each session file maps whole to its step, the run lead or unassigned, and a file outside the run folder is not listed", async () => {
   const { sessions } = isolatedEnvironment();
