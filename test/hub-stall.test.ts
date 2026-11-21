@@ -16,15 +16,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   renameSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { Subprocess } from "bun";
 import { sourceAffects, type Snapshot } from "../hub/types.ts";
 import {
   ompSessionText,
@@ -52,7 +49,7 @@ import {
   type PassHealth,
   type Stage,
 } from "./hub-stall-support.ts";
-import { tempArkHome, tempGitRepo, writeProject } from "./helpers.ts";
+import { tempGitRepo, writeProject } from "./helpers.ts";
 
 setDefaultTimeout(60_000);
 
@@ -76,7 +73,6 @@ const orcaSleepSeconds = 6;
 
 installHooks();
 
-
 const project = "p";
 
 /** Three runs in `building`, so every source has something to read. */
@@ -93,9 +89,7 @@ function threeRuns(): string[] {
   });
 }
 
-
 // ---------------------------------------------------------------- the health route
-
 
 /**
  * Reads the route back to back until `done` holds: the requests are the wait. Every answer must
@@ -123,7 +117,6 @@ async function pollHealth(
     if (done(answer)) return answer;
   }
 }
-
 
 /** `freeze.sh`: stop the hub, hold it, continue it. Resolves when the hub runs again. */
 const freeze = (hub: Hub, seconds: number) =>
@@ -1240,7 +1233,6 @@ function shownOf(snapshot: Snapshot, run: string): Shown {
     waiting: view.waiting,
   };
 }
-
 
 /** What the large orca pass may add to the largest lag of the control phase on the same hub (ARK-606/AC1). */
 const orcaLagAddedLimitMilliseconds = 150;
