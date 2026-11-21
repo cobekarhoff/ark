@@ -13,7 +13,7 @@ You teach Ark one project. You run as Master Chief, in an Orca terminal. You det
 
 Inputs: the workspace path (default: the current directory) and the project name (default: the lowercase directory name of the workspace). Use absolute paths everywhere.
 
-You never write product code. You write only `ark.yml`, in step 7 one OMP setting, and in step 10 the design files that impeccable makes.
+You never write product code. You write only `ark.yml`, in step 8 the hook install in each repo's clone (its `.git` folder and config; no file of the repo), in step 11 the design files that impeccable makes, and in step 13 `verify.md`. Bootstrap edits no file of any repo.
 
 ## Rules
 
@@ -28,7 +28,7 @@ You never write product code. You write only `ark.yml`, in step 7 one OMP settin
 test -f ~/.ark/projects/<project>/ark.yml && cat ~/.ark/projects/<project>/ark.yml
 ```
 
-If the file exists, show it and ask: "`ark.yml` exists for `<project>`. Keep it, replace it, or edit it?" Recommended: keep it, unless the workspace changed. On "keep", run the "Repos" and "UI" parts of step 2 (step 10 needs their result), then jump to step 4 and register what is missing. On "replace" or "edit", continue and write the file in step 8 only after the human's answer.
+If the file exists, show it and ask: "`ark.yml` exists for `<project>`. Keep it, replace it, or edit it?" Recommended: keep it, unless the workspace changed. On "keep", run the "Repos", "UI", "Hooks" and "Parity" parts of step 2 (step 8 needs the hook result, step 11 the UI result; the checks for the comparison come from the existing file), ask only the hook questions of step 3, then jump to step 4 and register what is missing. On "replace" or "edit", continue and write the file in step 9 only after the human's answer.
 
 ## 2. Detect the workspace
 
@@ -66,13 +66,14 @@ Read these files in each repo root. The first match names the stack.
 
 Also read `README.md`, `AGENTS.md`, `CLAUDE.md` and any `Taskfile*`, `Makefile` or `justfile` for the commands the team uses to test.
 
-### Integration and E2E suites
+### Suites
 
-Ark decides an AC from the results of its `verified_by` test cases at every level. For an old-scheme AC with no `verified_by`, only integration and E2E suites count, so list unit suites only if cases use them.
+Ark decides an AC from the results of its `verified_by` test cases at every level. So list one suite for the main tests of each repo, at its level, a unit suite included: the test cases of a first run in any repo need a suite that runs them. An AC with `method: test` still needs at least one integration or e2e case in its `verified_by`, so a unit suite alone does not prove one. When a repo has only unit tests, say so in the final report.
 
 For each repo, find test locations and classify them:
 
-- A directory or file name with `e2e`, `end-to-end`, `integration` or `acceptance` marks the level (`e2e` or `integration`). A top-level `test/` directory with only unit-style files is a unit suite: skip it.
+- A directory or file name with `e2e`, `end-to-end`, `integration` or `acceptance` marks the level (`e2e` or `integration`). Any other test location, such as a top-level `test/` or `tests/` directory of unit-style files, is a `unit` suite.
+- A repo with an integration and an e2e location gets one suite for each location (the Ark repo has `cli` and `playwright`). A repo with no integration or e2e location gets its unit tests as one `unit` suite. A repo with both also gets a `unit` suite when its test command (`scripts.test`, the Taskfile, the Makefile or the README) runs the unit tests.
 - A repo that holds only E2E tests, such as `repos/end-to-end-tests`, is one `e2e` suite.
 - Behave suites have a `features/` directory with `.feature` files.
 
@@ -89,7 +90,7 @@ If the repo's own tooling wraps the runner (for example `uv run pytest` or `pnpm
 
 The pytest parser needs the `ac` marker to reach the report. Check that the suite's `conftest.py` has the `pytest_runtest_setup` hook described at the top of `cli/parsers/pytest.ts`. If it does not, note it for the final summary. The validator adds it on the first run.
 
-Each suite needs a unique `name`, a `level` (`integration` or `e2e`), a `repo` (the repo path, or `.`), a `command` and a `parser`.
+Each suite needs a unique `name`, a `level` (`unit`, `integration` or `e2e`), a `repo` (the repo path, or `.`), a `command` and a `parser`.
 
 A suite may also have a `changed_command`: a quick `ark test` runs it in place of `command`, with `{base}` set to the run's worktree base commit and `{report}` as in `command`, so the quick run runs only the tests a change can reach. A full `ark test` never runs it, and a suite without one runs in full in a quick run. Ask the human before you add one; the choice is the project's. It must contain `{base}` and `{report}`, its report must name the `file` of each test, and it must exit 0 when nothing is affected:
 
@@ -138,6 +139,58 @@ Check that the command parses: `docker compose -f <file> config --quiet` (read-o
 
 A new worktree has no installed dependencies. Look at the lockfile and manifest in each repo for the install command, for example `bun.lock` gives `bun install --frozen-lockfile`, `uv.lock` gives `uv sync --frozen`, and `package-lock.json` gives `npm ci`. `ark worktree create` runs this one command with `sh -c` in every new worktree, so join several with `&&` only when the repos differ. Check that the tool exists with `command -v`. If the project uses Playwright, add `&& bunx playwright install chromium` (or the matching browser) so each worktree has its browser. If the project needs no install step, leave `setup` out.
 
+### Checks
+
+A check is a read-only command that `ark test` runs in a repo's worktree before the suites; `docs/how-to/project-checks.md` ("Add project checks") is the contract. Find the lint, typecheck and format check commands of each repo from:
+
+- the `scripts` of `package.json` (`lint`, `typecheck`, `format:check` and similar),
+- the targets of a `Makefile`, a `Taskfile*` or a `justfile`,
+- the tool sections of `pyproject.toml`: for example `ruff` (`ruff check`, `ruff format --check`) and `mypy`,
+- the commands that `AGENTS.md` or `README.md` names.
+
+Rules:
+
+- Leave out a command that writes files, as `docs/how-to/project-checks.md` requires: `ruff check --fix`, `eslint --fix`, `bun run format`, `ruff format` without `--check`. Use the check mode instead (`ruff format --check`, `format:check`). A script that checks and also writes is left out unless the repo has a read-only variant. The Ark project's own `cli-reference` check writes and then compares; the how-to names it as the one exception, so detection does not reproduce it.
+- Where the repo's task runner has a task for the check (a `lint` task of a `Taskfile`, `make lint`, `just lint`), the command calls that task, so the check and CI run the same thing. Use the task only when it is read-only.
+- A full test suite is a suite, not a check.
+- `name` is unique in the file (prefix it with the repo name in a project with several repos). `repo` is the repo path from the workspace root, as in `suites`; `.` only for the workspace root repo, because `ark.yml` is refused for a `repo` that is not a repo of the workspace.
+- A repo with no read-only check command gets no entry. Say so in the final report.
+
+Ask the human once, in step 3, to confirm the whole list.
+
+### Hooks
+
+A repo can run its checks before a commit or a push through hooks. Read the clone, not a run worktree, and ask nothing. For each repo:
+
+```sh
+git -C <workspace>/<repo> rev-parse --git-common-dir   # the clone's .git; a nested repo can have a .git file
+git -C <workspace>/<repo> config --get core.hooksPath  # prints nothing when it is not set
+```
+
+- **Hook setup:** a `.pre-commit-config.yaml` (pre-commit; read `default_install_hook_types`, which defaults to `pre-commit` alone), an hk config (`hk.pkl`), a lefthook config (`lefthook.yml`), a `.husky/` folder (`husky`), or a hooks folder of the repo such as `.githooks/`, which `core.hooksPath` must name.
+- **Installed:** the `hooks/` folder of the git common dir holds a file without the `.sample` suffix, or `core.hooksPath` names the hooks folder (`husky` sets it itself). A hooks folder with only `.sample` files means not installed.
+- **Task runner:** a `Taskfile*`, `Makefile`, `justfile` or the `package.json` scripts.
+- **CI file:** `.gitlab-ci.yml` or `.github/workflows/*.yml`.
+- **Commands:** the command each hook runs, by hook type (`pre-commit`, `commit-msg`, `pre-push`), and the commands of the CI jobs that lint, type-check, format-check or test.
+
+Mark each hook that would block an Ark commit or push, because run worktrees share the clone's hooks and nothing in Ark passes `--no-verify`:
+
+- a `commit-msg` hook that checks the message format (for example commitizen),
+- a hook that writes files (for example `ruff-check` with `--fix`),
+- a `pre-commit` hook that runs a full test suite,
+- a `pre-push` hook that runs a full test suite or a slow check (`ark merge-request open` pushes the branch).
+
+### Parity
+
+Compare the hook commands, the CI commands and the `checks` you propose, for each repo. Each `checks` entry calls the repo's own task where one exists (see Checks). Write down each gap, for the report in step 12:
+
+- the repo has CI but no `pre-push` hook that runs the checks (no pre-push hook),
+- a CI check that no hook runs,
+- a hook check that CI does not run,
+- a `checks` entry that neither a hook nor CI runs.
+
+Each gap becomes one proposed ticket title for that repo. Bootstrap writes no file of the repo to close a gap.
+
 ### Ticket source
 
 Choose the first rule that matches:
@@ -180,7 +233,7 @@ Leave out `concurrency`, `round_budget` and `escalation_rounds`. Their defaults 
 
 ### UI
 
-A repo has UI code when it has one of these signals: a web framework in `package.json` (`react`, `vue`, `svelte`, `next`, `@angular/core`), HTML templates, a Storybook config (`.storybook/`), or an `ios` or `android` project. Find each UI repo without a question. For each one, record whether `PRODUCT.md` and `DESIGN.md` already exist at its root. Bootstrap writes no `ark.yml` field for this: step 10 uses the result.
+A repo has UI code when it has one of these signals: a web framework in `package.json` (`react`, `vue`, `svelte`, `next`, `@angular/core`), HTML templates, a Storybook config (`.storybook/`), or an `ios` or `android` project. Find each UI repo without a question. For each one, record whether `PRODUCT.md` and `DESIGN.md` already exist at its root. Bootstrap writes no `ark.yml` field for this: step 11 uses the result.
 
 ### Merge requests
 
@@ -188,7 +241,7 @@ Default: no key, which means `open`. Write `merge_requests: none` only when the 
 
 ## 3. Ask only what you could not detect
 
-Make a list of the unknowns: the base of each `repos` candidate from step 2, ticket source, whether the project must not push (`merge_requests: none`; ask it once, recommended answer: no), roles, an ambiguous suite level, or a missing suite command. For each unknown, one at a time:
+Make a list of the unknowns: the base of each `repos` candidate from step 2, ticket source, whether the project must not push (`merge_requests: none`; ask it once, recommended answer: no), roles, an ambiguous suite level, a missing suite command, the checks list (once), the hook install of each repo (once for each repo), and each hook that would block an Ark commit. For each unknown, one at a time:
 
 1. Ask the question with a recommended answer.
 2. Wait for the human.
@@ -197,6 +250,10 @@ Make a list of the unknowns: the base of each `repos` candidate from step 2, tic
 Example: "I found Jira in `.mcp.json` and a GitLab remote. Which ticket source should Ark use? Recommended: `jira`, because the agents' Jira tools are configured and the GitLab remote only hosts code."
 
 For each `repos` candidate, ask: "`<repo>` is on `<current branch>` but origin/HEAD names `<target branch>`. Which branch should runs start from, sync with and open MRs against? Recommended: `<current branch>`, because the clone's checked-out branch is where the team works, unless it is a feature branch. Then recommend `<target branch>`." An answer is the `base` for that repo. A repo not asked about gets no `repos` entry, and its base stays the clone's HEAD with the origin/HEAD target.
+
+Checks question, once, for the whole list from the Checks part of step 2: "I found these checks: `<name>` (`<repo>`): `<command>`, ... Which should `ark test` run before the suites? Recommended: all of them, because each is read-only and the repo's CI or hooks run it." Skip it when step 2 found no check.
+
+Hook questions, for each repo whose Hooks part found a hook setup that is not installed. First the install, once: "`<repo>` has `<hook setup>` but its clone has no hook installed. Install it with `<install command>`? Recommended: yes, because run worktrees share the clone's hooks, so the repo's own checks run on each worker commit." Then, one question for each hook that the Hooks part marked as blocking, named with the reason: "`<hook>` of `<repo>` `<what it does>`, and an installed hook runs on every Ark commit and push. Install it anyway? Recommended: no, because `<the commit-msg format check rejects Ark's commit messages | the hook rewrites files in a worker's commit | the full suite runs on every commit | the full suite or slow check runs before every push>`." A hook manager installs by hook type, not by hook: "no" means the type that holds the hook is skipped (for example `commit-msg` for commitizen). When the blocking hook shares a type with other hooks, say so in the question. Bootstrap never edits the hook config.
 
 If nothing is unknown, ask nothing and go on.
 
@@ -284,7 +341,26 @@ Claude Code workers and Codex workers do not read OMP's setting. For those harne
 - Workspace skills live in `<workspace>/.claude/skills`. Ark writes them into each worktree's `skills.customDirectories`, so OMP workers load them. For Claude Code and Codex workers, pass the `SKILL.md` paths in the step prompt.
 ```
 
-## 8. Write `ark.yml`
+## 8. Install the hooks
+
+Run this step for each repo whose Hooks part (step 2) found a hook setup that is not installed and whose install the human accepted in step 3. Skip a repo with no hook setup, with the hooks installed, or with a "no". Work in the clone, `<workspace>/<repo>`.
+
+Run worktrees share the clone's hooks (`git rev-parse --git-common-dir` is the same folder, and `core.hooksPath` is read from the shared config), so an installed hook runs on every commit of a worker and on every push of `ark merge-request open`. That is why step 3 named each hook that would block an Ark commit or push (a `commit-msg` format check, a hook that writes files, a `pre-commit` hook that runs a full suite, a `pre-push` hook that runs a full suite or a slow check). Install such a hook only on the human's answer. Install by the repo's own method:
+
+| Hook setup                | Install                                                                                                                                                              |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.pre-commit-config.yaml` | `pre-commit install --hook-type <type>` for each type in `default_install_hook_types` (`pre-commit` alone when the key is missing), except a type the human declined |
+| hk config                 | `hk install`                                                                                                                                                         |
+| lefthook config           | `lefthook install`                                                                                                                                                   |
+| `.husky/` (`husky`)       | the repo's `prepare` script, run with its package manager (`husky` sets `core.hooksPath` itself)                                                                     |
+| hooks folder              | `git -C <workspace>/<repo> config core.hooksPath <folder>`, for example `.githooks/`                                                                                 |
+
+- Check the tool with `command -v`. A tool that is not on PATH stops the install of that repo: name the command that installs the tool (for example `pipx install pre-commit` or `brew install lefthook`) in the report. Bootstrap does not fail.
+- Never overwrite an existing hook file or a `core.hooksPath` that is already set without the human's answer.
+- The install changes the clone's `.git` folder or config, never a file of the repo.
+- Check the result: the git common dir's `hooks/` folder holds the hook files, or `git config --get core.hooksPath` prints the folder. Write each repo's result (installed, skipped or declined, tool missing) down for step 12.
+
+## 9. Write `ark.yml`
 
 Write `~/.ark/projects/<project>/ark.yml` in the contract schema. Create the directory first (`mkdir -p ~/.ark/projects/<project>/tickets`). Never write over an existing file unless the human answered "replace" or "edit" in step 1.
 
@@ -293,13 +369,14 @@ Write no `test_budget_cores`, `test_min_free_memory_percent` or `test_max_swap_g
 ```yaml
 workspace: <absolute workspace path>
 ticket_source: <local | github | jira>
+setup: <install command from the Setup command part of step 2; omit when the project needs no install step>
 repos: # only for repos where step 3 got a base; key is the repo path, exactly
   repos/app: { base: release/9.1.0 }
 merge_requests: none # only when the human says the project must not push; omit otherwise
 compose: <compose command> # omit when the project has no compose file
 suites:
   - name: <unique name>
-    level: <integration | e2e>
+    level: <unit | integration | e2e>
     repo: <repo path, or .>
     command: <command with {report}>
     parser: <bun | pytest | behave>
@@ -308,6 +385,10 @@ suites:
     time_budget_s: <seconds the whole suite may take; a positive number; omit for no limit; ask the human>
     slow_test_s: <seconds one test may take; a positive number; omit for no limit; ask the human>
     on_over: <warn | fail; omit for warn; fail makes a full ark test fail when a limit is exceeded; ask the human>
+checks: # the list the human confirmed in step 3; omit when there is none
+  - name: <unique name, for example lint>
+    repo: <repo path from the workspace root, or .>
+    command: <read-only command; the repo's own task where one exists>
 roles:
   implementer: { harness: <harness>, model: <model> }
   validator: { harness: <harness>, model: <model> }
@@ -324,12 +405,13 @@ Rules for the file:
 - `workspace` is an existing absolute directory.
 - `suites` has at least one entry, and each `name` is unique. A `changed_command` holds `{base}` and `{report}`.
 - `time_budget_s` and `slow_test_s` are positive numbers, and `on_over` is `warn` or `fail`. Set them only when the human asked for a limit.
+- Each `checks` entry has a unique `name`, a `repo` that is a repo of the workspace and a command that writes no file.
 - Put `concurrency`, `round_budget` and `escalation_rounds` in only when the human asked for non-default values.
 - Keep the file valid YAML with 2-space indentation and no tabs.
 
 Show the human the written file.
 
-## 9. Validate
+## 10. Validate
 
 `ark` loads `ark.yml` for every command, so a plain command checks the file:
 
@@ -340,25 +422,27 @@ ARK_PROJECT=<project> ark status
 - Exit 0: the file passes the config check. Report "`ark.yml` is valid". A `scanner:` line does not change the exit code: report it apart from the file.
 - Exit 1 with `config error: <project>: <message>`: the message names the field. Fix that field, run the command again, and tell the human what you fixed. Stop after two failed fixes and show the human the error.
 
-## 10. Design context
+## 11. Design context
 
 `impeccable` works best when a UI repo has `PRODUCT.md` (who the product is for) and `DESIGN.md` (the visual system). The Designer reads them through `impeccable context`. Load the `impeccable` skill, then offer the files below for each UI repo from step 2 (and, on a "yes" in step 3, for the planned UI). Ask the human once for each repo, with a recommended answer of yes.
 
-- Never write over `PRODUCT.md` or `DESIGN.md`. For a file that already exists, skip its command and list the file as skipped in step 11.
+- Never write over `PRODUCT.md` or `DESIGN.md`. For a file that already exists, skip its command and list the file as skipped in step 12.
 - Existing UI code, no `PRODUCT.md`: run impeccable `init` in the repo. It interviews the human by itself and makes `PRODUCT.md`.
 - Existing UI code, no `DESIGN.md`: run impeccable `document`. It makes `DESIGN.md` from the code.
 - Planned UI with no code (a "yes" in step 3): run impeccable `init` only, for `PRODUCT.md` in the workspace root. `DESIGN.md` comes later, from the first Designer run.
-- No UI and a "no" in step 3: make no design file. Go to step 11.
-- If the human declines a file, skip it and list it as declined in step 11.
+- No UI and a "no" in step 3: make no design file. Go to step 12.
+- If the human declines a file, skip it and list it as declined in step 12.
 
-Write the made, skipped and declined files down for step 11. Do not commit them.
+Write the made, skipped and declined files down for step 12. Do not commit them.
 
-## 11. Report
+## 12. Report
 
 Tell the human, in one short list:
 
 - The project name and the path of `ark.yml`.
 - What you detected: repos, suites with level and parser, compose command, ticket source.
+- The setup command, and the checks (`<name>` in `<repo>`: `<command>`), or that a repo has none.
+- The hooks of each repo: installed, skipped, declined, or not installed because the tool is missing (with the install command).
 - What the human answered.
 - What you registered in Orca, and what was already registered.
 - The nesting depth result.
@@ -373,13 +457,20 @@ Tell the human, in one short list:
   Commit and merge the made files. Run worktrees start from the base branch, so an
   uncommitted file is not in a run's worktree.
   ```
-- Anything left for the human (a missing `ac` marker hook, a missing `description`, a skipped repo).
+- Proposed tickets, one title for each gap from the Parity part of step 2 and for each repo (omit the line when there is no gap):
+  ```text
+  Proposed tickets
+  - <repo>: Add a pre-push hook that runs the lint check that CI runs
+  - <repo>: Run the typecheck that CI runs in a hook
+  - <repo>: Run the format check that a hook runs in CI
+  ```
+- Anything left for the human (a missing `ac` marker hook, a missing `description`, a skipped repo, a hook tool that is not installed).
 
 The first ticket, `/skill:ark-chief` with a ticket ID, is the E2E check of the whole setup.
 
-## 12. Write `verify.md`
+## 13. Write `verify.md`
 
-`verify.md` tells the validator how to check the real app live, because fixture tests can pass while the live app breaks. Write `$ARK_HOME/projects/<project>/verify.md` (for the `ark` project: `~/.ark/projects/ark/verify.md`). Run this step before you print the step 11 report, and add the line `verify.md: <path>, <written, kept or declined>` to it.
+`verify.md` tells the validator how to check the real app live, because fixture tests can pass while the live app breaks. Write `$ARK_HOME/projects/<project>/verify.md` (for the `ark` project: `~/.ark/projects/ark/verify.md`). Run this step before you print the step 12 report, and add the line `verify.md: <path>, <written, kept or declined>` to it.
 
 - When the file exists, ask whether to keep, replace or edit it. Never overwrite it without the answer.
 - Detect before you ask, from the README, `package.json` scripts, the compose file, CLI help and the docs. Ask only what you could not detect, as in step 3: one question at a time, each with a recommended answer. A project with no running app (a library) gets a CLI-only `verify.md`, or none, when the human declines.
