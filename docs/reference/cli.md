@@ -495,8 +495,8 @@ every call. At head, a failed test file runs once more through `base_command` wi
 failure at base is data and is not retried). A Playwright suite (`playwright test` in its
 `base_command`) writes no file in its report, so there each failed test runs once more by its title,
 all the failed titles in one process through `--grep` in place of `{files}`, and the report name of
-the title is listed where a file would be. Before each retry, of a file or of titles, the runner
-waits until the 1-minute load average is below `test_budget_cores`, for at most
+the title is listed where a file would be. Once per suite, before its first retry (of a file or of
+titles), the runner waits until the 1-minute load average is below `test_budget_cores`, for at most
 `ARK_RETRY_LOAD_WAIT_S` seconds (180 by default); when the wait ends it runs the retry anyway and
 prints a line with `reran under load`. A pass counts and the file (or title) is listed as `flaky` in
 the output, in `test.completed` (`flaky`, and `reused` for the reused suites), in the retro metrics
