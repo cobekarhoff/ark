@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readTerminalSnapshot } from "../cli/orca.ts";
 import { readTicket } from "../cli/ticket.ts";
 import { runDirectoryOf, writeRun } from "./hub-fixtures.ts";
 import { writeFakeCommand, writeTicket } from "./helpers.ts";
@@ -36,7 +37,9 @@ import {
   scenario,
   sectionOf,
   startedData,
+  setEnvironment,
   useCompanionTestEnvironment,
+  withProductionLimits,
 } from "./companions-fixtures.ts";
 
 // A sync or a chief state starts the fake orca (a bun process) several times: allow for it.
@@ -1044,4 +1047,60 @@ test("ARK-T747 the ark process of the test helper sees ARK_ORCA_TIMEOUT_MS 60000
   // Cut before the 12 s answer, by the 10 s limit and not by a shorter one.
   expect(fake.hungDone()).toEqual([]);
   expect(elapsedMilliseconds).toBeGreaterThanOrEqual(9_500);
+});
+
+// ------------------------------------------------------------------ ARK-642
+
+/** The `terminal list` pause of the two cases: past the 2 s reader limit, inside the 10 s Orca limit. */
+const slowTerminalListMilliseconds = 3_000;
+
+/** The verbs that the fake finished after its pause, as `<group> <verb>`. */
+const pausedVerbs = (fake: FakeCompanionTools): string[] =>
+  fake.hungDone().map((call) => call.slice(0, 2).join(" "));
+
+test("ARK-T781 readTerminalSnapshot returns the terminals and runs when the fake orca answers terminal list after 3 s and run-list at once and no Orca or reader limit is set", async () => {
+  const { fake } = adviceProject();
+  fake.configure({ hangVerbs: ["terminal list"], hangMilliseconds: slowTerminalListMilliseconds });
+  const restore = setEnvironment({
+    ARK_ORCA_TIMEOUT_MS: undefined,
+    ARK_READER_TIMEOUT_MS: undefined,
+  });
+  try {
+    const read = await readTerminalSnapshot();
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value.terminals.map((terminal) => terminal.handle)).toEqual(["term_chief"]);
+    expect(read.value.runs.map((run) => run.id)).toEqual(["run_chief"]);
+    // The pause ran to its end: the read waited for the answer.
+    expect(pausedVerbs(fake)).toEqual(["terminal list"]);
+  } finally {
+    restore();
+  }
+});
+
+test("ARK-T781 ark companion advise delivers the advice to the live lead and a copy to Master Chief when the fake orca answers terminal list after 3 s and no Orca or reader limit is set", () => {
+  const { fake } = adviceProject();
+  fake.configure({ hangVerbs: ["terminal list"], hangMilliseconds: slowTerminalListMilliseconds });
+  withProductionLimits(() => {
+    const result = arkP("companion", "advise", "cortana", leadRun, adviceText);
+    expect(result.err).toBe("");
+    expect(result.code).toBe(0);
+    expect(fake.sent().map((message) => message.to)).toEqual(["term_lead1", "term_chief"]);
+    expect(pausedVerbs(fake)).toEqual(["terminal list"]);
+  });
+});
+
+test("ARK-T782 with ARK_ORCA_TIMEOUT_MS=1000, readTerminalSnapshot fails with a reason that names terminal list before the fake orca answers its 3 s terminal list, so the one Orca limit governs both reads", async () => {
+  const { fake } = adviceProject();
+  fake.configure({ hangVerbs: ["terminal list"], hangMilliseconds: slowTerminalListMilliseconds });
+  // The reader limit is pinned high: only the Orca limit can cut the call.
+  const restore = setEnvironment({ ARK_ORCA_TIMEOUT_MS: "1000", ARK_READER_TIMEOUT_MS: "30000" });
+  try {
+    const read = await readTerminalSnapshot();
+    expect(read).toEqual({ ok: false, reason: "terminal list failed" });
+    // Cut before the 3 s answer: the fake never reached the end of its pause.
+    expect(pausedVerbs(fake)).toEqual([]);
+  } finally {
+    restore();
+  }
 });

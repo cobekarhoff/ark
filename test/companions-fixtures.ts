@@ -100,6 +100,42 @@ export const isoNow = (): string => new Date(now()).toISOString();
 /** `ark <args> --project p`. */
 export const arkP = (...args: string[]) => ark(...args, "--project", project);
 
+/**
+ * Sets variables in `process.env` (`undefined` deletes one) and returns the function that puts each
+ * saved value back. Call it before `ark` or a read of the test process and restore in `finally`.
+ */
+export function setEnvironment(values: Record<string, string | undefined>): () => void {
+  const saved = Object.keys(values).map((name) => [name, process.env[name]] as const);
+  for (const [name, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+  return () => {
+    for (const [name, value] of saved) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+}
+
+/** The limits of production, as a `setEnvironment` argument: an empty ARK_ORCA_TIMEOUT_MS, which `orcaTimeout` reads as unset (10 s), and the 2 s reader limit of `exec`. The helper of `ark` would otherwise give 60 s and 30 s. */
+const productionLimits = { ARK_ORCA_TIMEOUT_MS: "", ARK_READER_TIMEOUT_MS: "2000" };
+
+/**
+ * Runs `body` with the limits of production: an empty ARK_ORCA_TIMEOUT_MS, which `orcaTimeout` reads
+ * as unset (an Orca read gets 10 s, the wake bounds each one at 3 s) and which the helper's 60 s
+ * default does not replace, and ARK_READER_TIMEOUT_MS 2000, the limit of `exec` for any other reader
+ * (the test helper sets 30 s). `terminal list` follows the Orca limit, not the reader limit.
+ */
+export function withProductionLimits(body: () => void): void {
+  const restore = setEnvironment(productionLimits);
+  try {
+    body();
+  } finally {
+    restore();
+  }
+}
+
 /** The run id of ticket ARK-`number`. */
 export const runId = (number: number): string => `2026-11-14-ARK-${number}-1`;
 
