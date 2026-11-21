@@ -196,25 +196,27 @@ or removes a worktree: a non-manual criterion not `passing` in the last test, a 
 with no ok, a repo head changed since the last test, a counted AC string in no tracked file or a
 `not:` string still in one, a `kind: perf` run with a missing result file, a `kind: refactor` run
 with a `method: test` AC whose base did not pass, and missing, malformed or stale evidence
-(`evidence missing: <AC id> (<method>)`, `evidence malformed: <AC id>: <reason>`, `test evidence
-missing: <AC id> <test case id> (<base|head>)`, `test evidence stale: <AC id> <test case id>`), and
-the security scan (a secret, a high or critical vulnerability, a scanner that fails, or gitleaks or
-osv-scanner not installed, also for `merge_requests: none`: the refusals are those of `ark
-merge-request open`). Only a string a file can hold counts: not one with a placeholder (`<`), a `*`,
-`...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string also
-passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty path
-never counts). A string that starts with `not:` is a removed string: it must be in no tracked file
-and name no tracked path, and the refusal names it without the prefix. For handed_off it keeps each
-branch with commits beyond its base (the base is in `worktree.created`) and prints `kept <repo>
-<branch>: handed off, <n> commit(s) ahead of <base>` for each; it deletes a branch with no commit
-beyond its base. An aborted run keeps a branch with commits the same way and prints `kept <repo>
-<branch>: aborted, <n> commit(s) ahead of <base>`; an aborted branch with no commit beyond its base
-is deleted. After the close it releases the settled Orca workers of the run (Orca Run `Ark run
-<run>`) and prints one line for each; it prints `<dispatch id> still active, not released` for an
-active one, and one `orca: workers not released: <reason>` line when Orca fails, and the close still
-exits 0. `ark run close --sweep [--project <name>]` does the same release for every closed run of
-the project (ARK_PROJECT when --project is not given), records no event, and prints nothing for a
-run with nothing to report. --sweep takes no run argument.
+(`evidence missing: <AC id> (<method>): expected results/evidence/<AC id>.md`, with `; found
+results/evidence/<ticket id>/<AC id>.md: move it to results/evidence/<AC id>.md` added when that
+file exists, `evidence malformed: <AC id>: <reason>`, `test evidence missing: <AC id> <test case id>
+(<base|head>)`, `test evidence stale: <AC id> <test case id>`), and the security scan (a secret, a
+high or critical vulnerability, a scanner that fails, or gitleaks or osv-scanner not installed, also
+for `merge_requests: none`: the refusals are those of `ark merge-request open`). Only a string a
+file can hold counts: not one with a placeholder (`<`), a `*`, `...`, a `:<line>` suffix or the id
+of its own AC, and no string of a manual AC. A string also passes when it names a tracked file or
+folder at HEAD (one trailing `/` is dropped; an empty path never counts). A string that starts with
+`not:` is a removed string: it must be in no tracked file and name no tracked path, and the refusal
+names it without the prefix. For handed_off it keeps each branch with commits beyond its base (the
+base is in `worktree.created`) and prints `kept <repo> <branch>: handed off, <n> commit(s) ahead of
+<base>` for each; it deletes a branch with no commit beyond its base. An aborted run keeps a branch
+with commits the same way and prints `kept <repo> <branch>: aborted, <n> commit(s) ahead of <base>`;
+an aborted branch with no commit beyond its base is deleted. After the close it releases the settled
+Orca workers of the run (Orca Run `Ark run <run>`) and prints one line for each; it prints
+`<dispatch id> still active, not released` for an active one, and one `orca: workers not released:
+<reason>` line when Orca fails, and the close still exits 0. `ark run close --sweep [--project
+<name>]` does the same release for every closed run of the project (ARK_PROJECT when --project is
+not given), records no event, and prints nothing for a run with nothing to report. --sweep takes no
+run argument.
 
 Where the project has `ticket_source: local`, it then sets the first `status:` line of the run's
 ticket file (`ticket_file` of `run.started`) to `done` for merged and to `ready` for aborted and
@@ -713,29 +715,31 @@ for `kind: perf` when `results/baseline.md` or `results/compare.md` is missing o
 evidence and refuses, before any push and before any event, with `refused: evidence is not complete`
 and one line for each AC or case that fails. A non-test AC needs one file `results/evidence/<AC
 id>.md` in the run folder (`<AC id>` is the local id such as `AC6`; an old `manual: true` AC reads
-as `demonstration`). The line is `evidence missing: <AC id> (<method>)` for a missing file and
-`evidence malformed: <AC id>: <reason>` for a file without a section of its method, naming it.
-`demonstration`: the sections What the human did, What the human saw, Before and After (each with a
-screenshot path, checked for shape, not for existence), and the last line `human: ok`, which `ark
-gate record <run> manual <AC id> ok` writes. `inspection`: the sections Files (each
-`path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or `reviewer: fail`.
-`analysis`: the sections Command, Output, Threshold and Result, each given for Base and for Head.
-For an AC with `method: test`, each case in its `verified_by` needs `results/evidence/<test case
-id>/base/` and `head/` (`test evidence missing: <AC id> <test case id> (<base|head>)`), and the
-commit SHA in the `head` `result.json` must be the current head of a repo of the run (`test evidence
-stale: <AC id> <test case id>`). An AC with no `verified_by` needs no test evidence. Then it runs
-the security scan, before any push or event, and on every call, also the refresh of an open MR:
-gitleaks (`--redact`) on the commits that the run branch added (`--first-parent --remerge-diff
-<base>..HEAD`, so a commit merged in from the target is not scanned but a conflict resolution a
-merge added is; a base that is not in the object store scans the whole first-parent history of
-HEAD), and osv-scanner on each lockfile of the head, with its licences. It refuses with `refused:
-security scan found <n> problems` and one line for each finding, `secret: <rule> in <file>:<line>
-(commit <8 characters>)` or `vulnerability: <id> <SEVERITY>, <package> <version>, <lockfile>`, for a
-secret and for a high or critical vulnerability, also one that the base already has, and never
-prints a secret value. A finding that `security.accepted` of ark.yml lists (`id` and `reason`; `id`
-is the vulnerability id, one of its aliases, or the gitleaks fingerprint
-`<commit>:<file>:<rule>:<line>`) does not block. A `.gitleaks.toml`, `.gitleaksignore` or
-`gitleaks:allow` in the run branch has no effect: gitleaks scans a clone of the branch with no
+as `demonstration`). The line is `evidence missing: <AC id> (<method>): expected
+results/evidence/<AC id>.md` for a missing file, with `; found results/evidence/<ticket id>/<AC
+id>.md: move it to results/evidence/<AC id>.md` added when that ticket-prefixed file exists (the
+check moves nothing), and `evidence malformed: <AC id>: <reason>` for a file without a section of
+its method, naming it. `demonstration`: the sections What the human did, What the human saw, Before
+and After (each with a screenshot path, checked for shape, not for existence), and the last line
+`human: ok`, which `ark gate record <run> manual <AC id> ok` writes. `inspection`: the sections
+Files (each `path:start-end`), Checked against and Verdict, with the line `reviewer: pass` or
+`reviewer: fail`. `analysis`: the sections Command, Output, Threshold and Result, each given for
+Base and for Head. For an AC with `method: test`, each case in its `verified_by` needs
+`results/evidence/<test case id>/base/` and `head/` (`test evidence missing: <AC id> <test case id>
+(<base|head>)`), and the commit SHA in the `head` `result.json` must be the current head of a repo
+of the run (`test evidence stale: <AC id> <test case id>`). An AC with no `verified_by` needs no
+test evidence. Then it runs the security scan, before any push or event, and on every call, also the
+refresh of an open MR: gitleaks (`--redact`) on the commits that the run branch added
+(`--first-parent --remerge-diff <base>..HEAD`, so a commit merged in from the target is not scanned
+but a conflict resolution a merge added is; a base that is not in the object store scans the whole
+first-parent history of HEAD), and osv-scanner on each lockfile of the head, with its licences. It
+refuses with `refused: security scan found <n> problems` and one line for each finding, `secret:
+<rule> in <file>:<line> (commit <8 characters>)` or `vulnerability: <id> <SEVERITY>, <package>
+<version>, <lockfile>`, for a secret and for a high or critical vulnerability, also one that the
+base already has, and never prints a secret value. A finding that `security.accepted` of ark.yml
+lists (`id` and `reason`; `id` is the vulnerability id, one of its aliases, or the gitleaks
+fingerprint `<commit>:<file>:<rule>:<line>`) does not block. A `.gitleaks.toml`, `.gitleaksignore`
+or `gitleaks:allow` in the run branch has no effect: gitleaks scans a clone of the branch with no
 working tree, the `.gitleaks.toml` of the base applies, and a relative `extend.path` in it is not
 supported; `security.accepted` is the way to accept a finding. A scanner that exits with an
 unexpected code, prints a report that cannot be read or cannot reach the network (osv-scanner needs
@@ -767,17 +771,20 @@ needs only the current head: each backticked AC string against the tracked files
 (`ticket has no summary: pass --summary`, or the title of 73 characters or more that `--summary`
 makes), and the shape of each evidence file that exists, except the last line `human: ok` of a
 demonstration file and the `reviewer:` line of an inspection file. `--stage step` adds `evidence
-missing: <AC id> (<method>)` for each non-test AC that the plan step named by `--step <id>` serves,
-or for every non-test AC when no `--step` is given. `--stage final` adds every other refusal of
-open, in its order: no test result, a quick test (a passing quick test of a run with no code file is
-accepted, as `ark merge-request open` says), a manual criterion without ok, criteria not passing, a
-repo that changed since the last test, the `perf` and `refactor` rules, and every evidence problem
-including the last lines, each on its own line, then the refusal of the security scan (a missing
-scanner, a secret, a high or critical vulnerability) as one message; the scan runs gitleaks and
-osv-scanner, which needs the network. In stage `final` it also prints `warning: manual answer older
-than head: <AC id>` for a manual answer whose recorded head differs from the repo head now (a clean
-`ark worktree sync` merge is not a difference; an answer with no recorded head never warns); a
-warning does not change the exit code. `--summary` is the `--summary` of `ark merge-request open`.
+missing: <AC id> (<method>): expected results/evidence/<AC id>.md` for each non-test AC that the
+plan step named by `--step <id>` serves, or for every non-test AC when no `--step` is given; when
+`results/evidence/<ticket id>/<AC id>.md` is a file, the line adds `; found results/evidence/<ticket
+id>/<AC id>.md: move it to results/evidence/<AC id>.md` (the check moves nothing). `--stage final`
+adds every other refusal of open, in its order: no test result, a quick test (a passing quick test
+of a run with no code file is accepted, as `ark merge-request open` says), a manual criterion
+without ok, criteria not passing, a repo that changed since the last test, the `perf` and `refactor`
+rules, and every evidence problem including the last lines, each on its own line, then the refusal
+of the security scan (a missing scanner, a secret, a high or critical vulnerability) as one message;
+the scan runs gitleaks and osv-scanner, which needs the network. In stage `final` it also prints
+`warning: manual answer older than head: <AC id>` for a manual answer whose recorded head differs
+from the repo head now (a clean `ark worktree sync` merge is not a difference; an answer with no
+recorded head never warns); a warning does not change the exit code. `--summary` is the `--summary`
+of `ark merge-request open`.
 ```
 
 ### merge-request status
