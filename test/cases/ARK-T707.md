@@ -6,7 +6,7 @@ technique: decision table on the marker (absent, hand-set, dead pid, live pid wi
 priority: high
 risk: a person or a script sets `ARK_TEST_BUDGET=held` by hand (or inherits it from a run that ended) and starts a whole-suite `bun test` that takes no cores while `ark test` runs hold the budget (host load 77 to 107, a different timeout in every ARK-527 Playwright run); or a marker that names a live pid with no ticket skips the wait; or the new check rejects the marker value a real held run writes, so a run that carries it waits on its own holder; or a whole-suite run started from a single-file run starts at once on cores that run never held
 status: active
-changed_by: 2026-11-19-ARK-569-1
+changed_by: 2026-11-21-ARK-623-1
 ---
 
 ## Objective
@@ -17,7 +17,7 @@ Decision for the file run (`bun test test/a.test.ts`, which holds no cores): it 
 
 ## Preconditions
 
-- The fixture of ARK-T683 and ARK-T684: temp `ARK_HOME`, project `demo` with `test_budget_cores: 3`, scratch repo with the preload and marker-writing test files, `ARK_FAKE_HOST`, `ARK_FAKE_LOAD_ONE=0`. The environment of each `bun test` the case starts is built, never inherited.
+- The fixture of ARK-T683 and ARK-T684: temp `ARK_HOME` whose `host.yml` sets `test_budget_cores: 3`, project `demo`, scratch repo with the preload and marker-writing test files, `ARK_FAKE_HOST`, `ARK_FAKE_LOAD_ONE=0`. The environment of each `bun test` the case starts is built, never inherited.
 - The format of the marker value is not copied from the source: a probe test file writes `process.env.ARK_TEST_BUDGET` into a file, and the case reads it back from a real held run (step 1).
 - Holder: a real child that holds 3 of 3 cores until the case writes to its standard input.
 - The case starts every process itself and stops it by pid.

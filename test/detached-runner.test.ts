@@ -21,6 +21,7 @@ import {
   tempArkHome,
   writeEvidenceFile,
   workspaceWithRepos,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -289,15 +290,16 @@ function makeFixture(options: {
     suites: options.suites(directory),
     checks: options.checks?.(directory) ?? [],
   } as Fixture;
-  fixture.rewriteProject = () =>
+  fixture.rewriteProject = () => {
+    if (options.budgetCores !== undefined) writeHost({ test_budget_cores: options.budgetCores });
     writeProject("demo", {
       workspace,
       ticket_source: "local",
       suites: fixture.suites,
-      ...(options.budgetCores === undefined ? {} : { test_budget_cores: options.budgetCores }),
       checks: fixture.checks,
       roles,
     });
+  };
   fixture.mirrorOf = (repo, runDirectory = fixture.runDirectory) =>
     join(runDirectory, "workspace", repo);
   fixture.startRun = (ticketId) => {

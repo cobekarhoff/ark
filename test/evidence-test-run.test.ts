@@ -17,6 +17,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -104,11 +105,10 @@ function startBuildingRun(options: {
   mirror: string;
 } {
   const arkHome = tempArkHome();
+  writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
   writeProject("demo", {
     workspace: options.workspace,
     ticket_source: "local",
-    test_min_free_memory_percent: 0,
-    test_max_swap_gb: 1000,
     suites: options.suites,
     roles,
   });

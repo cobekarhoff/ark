@@ -20,6 +20,7 @@ import {
   tempArkHome,
   tempGitRepo,
   writeEvidenceFile,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -173,11 +174,10 @@ function startRun(options: {
       git(repoPath(repo), "remote", "set-head", "origin", "main");
     }
   }
+  writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
   writeProject("demo", {
     workspace: options.workspace,
     ticket_source: "local",
-    test_min_free_memory_percent: 0,
-    test_max_swap_gb: 1000,
     ...(options.setup === undefined ? {} : { setup: options.setup }),
     ...(options.checks === undefined ? {} : { checks: options.checks }),
     ...(options.generated === undefined ? {} : { generated: options.generated }),
@@ -1213,12 +1213,11 @@ describe("ark test changed_command", () => {
       suites: [stubSuite(markers, "unit", ["a.test.ts"])],
     });
     const valid = stubSuite(markers, "unit", ["a.test.ts"]);
+    writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
     const withSuite = (suite: Record<string, unknown>) =>
       writeProject("demo", {
         workspace,
         ticket_source: "local",
-        test_min_free_memory_percent: 0,
-        test_max_swap_gb: 1000,
         suites: [suite],
         roles,
       });

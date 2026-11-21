@@ -16,7 +16,7 @@ Prove that a Playwright test that fails again on its one rerun by title stays fa
 ## Preconditions
 
 - The fixture of ARK-T760: a temp `ARK_HOME`, git repo and run, suite `pw` running this repo's Playwright 1.64.1 by the absolute path `<repo>/node_modules/.bin/playwright` with its JUnit reporter, `command` and `base_command` as in ARK-T760 (`base_command` ends in `{files}`), the side prefix that writes one `invocations` line for each head start only and exports `PW_SIDE`, a counter file for each test that counts head starts, specs in the fixture folder outside the git repo with no case id in a title, and the real report shape (no `file` attribute).
-- `ark.yml` of the fixture has `test_budget_cores: 3`.
+- `host.yml` of the fixture's ARK_HOME has `test_budget_cores: 3`.
 - Specs:
   - `broken.pw.ts`: `test.describe("group (retry) 9", () => { test("keeps failing: a.b + c/d", …) })` fails on every head start. Its report name is the describe title and the test title joined by `›`, and it holds `(`, `)`, `.`, `:`, `+` and `/`.
   - `mixed.pw.ts`: `test("flaky (once) 1.5: x+y/z", …)` fails on its first head start and passes after it; `test("stable sibling", …)` always passes.
