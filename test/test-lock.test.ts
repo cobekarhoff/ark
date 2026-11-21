@@ -8,9 +8,11 @@ import {
   expect,
   setDefaultTimeout,
   setSystemTime,
+  spyOn,
   test,
 } from "bun:test";
 import type { FSWatcher } from "node:fs";
+import * as nodeFs from "node:fs";
 import {
   existsSync,
   mkdirSync,
@@ -362,6 +364,32 @@ function waitFor(condition: () => boolean): Promise<void> {
   return promise;
 }
 
+/**
+ * Resolves when every marker in `names` exists in `home`, checked every 25 ms with no fs.watch (a lost event must not hang the wait).
+ * Rejects after `limitMs` with the missing markers and the files of `home`. The timer is cleared on both ends.
+ */
+function waitForMarkers(home: string, names: string[], limitMs: number): Promise<void> {
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const deadline = performance.now() + limitMs;
+  const check = () => {
+    const missing = names.filter((name) => !existsSync(join(home, name)));
+    if (missing.length === 0) {
+      clearInterval(timer);
+      resolve();
+    } else if (performance.now() >= deadline) {
+      clearInterval(timer);
+      reject(
+        new Error(
+          `no ${missing.join(", ")} within ${limitMs} ms; files in the scenario home: ${readdirSync(home).join(", ")}`,
+        ),
+      );
+    }
+  };
+  const timer = setInterval(check, 25);
+  check();
+  return promise;
+}
+
 const logLines = () => readLog().split("\n").filter(Boolean);
 const countOf = (text: string, needle: string) => text.split(needle).length - 1;
 const started = (run: string) => () => logLines().includes(`start ${run}`);
@@ -683,6 +711,7 @@ budget.close();`;
         ...pauses: string[]
       ) => void;
       waitFor: (...names: string[]) => Promise<void>;
+      waitForWithin: (limitMs: number, ...names: string[]) => Promise<void>;
       has: (name: string) => boolean;
       go: (name: string, point: string) => void;
       stop: (name: string) => void;
@@ -706,6 +735,8 @@ budget.close();`;
         }),
       );
     };
+    // Per call, not per test: a child that is slow to start must show the marker within 20 s.
+    const waitFor = (...names: string[]) => waitForMarkers(home, names, 20_000);
     try {
       await steps({
         home,
@@ -716,17 +747,8 @@ budget.close();`;
             { cores, settings: { mode, minimumFreeMemoryPercent: 0, maximumSwapGigabytes: 1000 } },
             pauses,
           ),
-        waitFor: (...names) => {
-          const { promise, resolve } = Promise.withResolvers<void>();
-          const check = () => {
-            if (!names.every(has)) return;
-            watcher.close();
-            resolve();
-          };
-          const watcher = watch(home, check);
-          check();
-          return promise;
-        },
+        waitFor,
+        waitForWithin: (limitMs, ...names) => waitForMarkers(home, names, limitMs),
         has,
         go: (name, point) => writeFileSync(join(home, `${name}-go-${point}`), ""),
         stop: (name) => {
@@ -897,6 +919,55 @@ await budget.take(6).catch(() => {});`;
       }
     });
   });
+
+  // ARK-618: the scenario waits poll the marker files and give up with a named error long before the 90 s test timeout.
+  const defaultWaitLimitMs = 20_000;
+  const defaultWaitTestTimeoutMs = 25_000;
+
+  test(
+    "ARK-T774 a scenario wait for a marker that never appears gives up at its 20 s default limit, before the test timeout, and its error names the missing marker and lists the files in the scenario home",
+    async () => {
+      await scenario(async ({ home, waitFor }) => {
+        writeFileSync(join(home, "present-running"), "");
+        const started = performance.now();
+        const error = await waitFor("ghost-running").then(
+          () => undefined,
+          (rejection: unknown) => rejection as Error,
+        );
+        const elapsedMs = performance.now() - started;
+        expect(error).toBeInstanceOf(Error);
+        expect(elapsedMs).toBeGreaterThanOrEqual(defaultWaitLimitMs);
+        expect(error!.message).toContain("ghost-running");
+        expect(error!.message).toContain("present-running");
+      });
+    },
+    defaultWaitTestTimeoutMs,
+  );
+
+  const lostEventTestTimeoutMs = 5_000;
+  // Restored in afterEach, not in a finally: a test that times out never runs its finally, and the stub would break every later test that uses watch.
+  let lostWatch: { mockRestore(): void } | undefined;
+  afterEach(() => {
+    lostWatch?.mockRestore();
+    lostWatch = undefined;
+  });
+
+  test(
+    "ARK-T775 a scenario wait sees a marker file created while the fs.watch of the scenario home delivers no event, within a 1 s limit",
+    async () => {
+      // A watcher whose listener never runs: only a poll of the home can end the wait.
+      lostWatch = spyOn(nodeFs, "watch").mockImplementation(
+        () => ({ close() {}, on() {} }) as unknown as FSWatcher,
+      );
+      await scenario(async ({ home, waitForWithin }) => {
+        const wait = waitForWithin(1000, "late-running");
+        expect(Bun.peek.status(wait)).toBe("pending");
+        writeFileSync(join(home, "late-running"), "");
+        await wait;
+      });
+    },
+    lostEventTestTimeoutMs,
+  );
 });
 
 const onMac = process.platform === "darwin"; // the fake host reading of test/tmpdir-preload.ts reaches macOS only

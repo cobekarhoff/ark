@@ -19,6 +19,7 @@ Expected: A request that fits starts at once; one that does not waits; it starts
 
 - Temp `ARK_HOME` whose `host.yml` sets `test_budget_cores: 6` (no project `ark.yml` sets it), and a suite whose command writes its argument line to a file (`cmd --n=<cores>`); the real ticket store and the real `ark test` / `readTestLock` code paths.
 - Live holder processes are real child processes that block on a file the case removes; no sleep: the case awaits admission by an event or a file.
+- The scenarios of step 7 and step 8 wait for their marker files with a bounded poll (every 25 ms, at most 20 s for each wait); a wait that ends at its limit fails with the missing marker named (ARK-T774).
 
 ## Steps
 
