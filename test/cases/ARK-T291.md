@@ -6,7 +6,7 @@ technique: real child process with a known memory load, boundary of the wait (0 
 priority: high
 risk: the sampler reads the runner instead of the suite group (a peak near zero), loses the short-lived children, reports a wait greater than 0 with no other test or loses the wait when queued, writes no value or a wrong one for a cached or quick suite, or a rerun of `ark test` removes the hub's `agents` and `gaps` keys
 status: active
-changed_by: 2026-11-12-ARK-418-1
+changed_by: 2026-11-21-ARK-630-1
 ---
 
 ## Objective
@@ -15,7 +15,8 @@ changed_by: 2026-11-12-ARK-418-1
 
 ## Preconditions
 
-- A fixture repo and `ARK_HOME` with an open run and a `test_command` suite in `ark.yml` that allocates about 200 MB (touches every page), keeps it for 3 s, spawns a child that also holds 30 MB, then exits 0. A second suite exits at once (shorter than one sample interval) after burning CPU for 0.2 s.
+- A fixture repo and `ARK_HOME` with an open run and a `test_command` suite in `ark.yml` that allocates about 200 MB (touches every page), keeps it for 3 s, spawns a child that also holds 30 MB, then exits 0. A second suite exits at once (shorter than one sample interval) after burning CPU for 0.3 s.
+- The short suite fixture (`test/fixtures/resources/short-suite.txt`) burns 0.3 s of `process.cpuUsage()` CPU, not wall time, so a loaded host cannot give it less than the 0.1 s floor.
 - A fixture with a base side (full run, not `--quick`).
 - `results/resources.json` already holds a hub-written `agents` key and one `gaps` entry (from ARK-T292).
 - The `ark test` lock folder of the fixture has no other ticket for step 1 and a started ticket of another run (holding all the CPU budget) for step 3.

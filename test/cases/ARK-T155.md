@@ -6,7 +6,7 @@ technique: state transition (waiting, running, ended) with boundary values on co
 priority: high
 risk: A later small suite overtakes an older large one, a request above the budget waits forever, an ended pid keeps its cores, the budget default or placeholder is wrong, a ticket taken for a foreign owner pid (the coordinator of a `bun test --parallel`) is removed when the helper that took it exits, or a second take for the same owner adds a second ticket
 status: active
-changed_by: 2026-11-15-ARK-513-1
+changed_by: 2026-11-21-ARK-618-1
 ---
 
 ## Objective
@@ -19,6 +19,7 @@ Expected: A request that fits starts at once; one that does not waits; it starts
 
 - Temp `ARK_HOME` with `ark.yml` that sets `test_budget_cores: 6` and a suite whose command writes its argument line to a file (`cmd --n=<cores>`); the real ticket store and the real `ark test` / `readTestLock` code paths.
 - Live holder processes are real child processes that block on a file the case removes; no sleep: the case awaits admission by an event or a file.
+- The scenarios of step 7 and step 8 wait for their marker files with a bounded poll (every 25 ms, at most 20 s for each wait); a wait that ends at its limit fails with the missing marker named (ARK-T774).
 
 ## Steps
 
