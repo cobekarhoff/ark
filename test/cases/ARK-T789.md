@@ -17,7 +17,7 @@ Prove that every `evidence missing` line of an `analysis`, `inspection` or `demo
 
 - Check fixture: `syncedRun("feature", { verified: true, criteria, plan })` of `test/sync-base.test.ts` with a new criteria list (not `stageCriteria` of ARK-T379): ticket `FAKE-1`, `FAKE-1-AC1` (`method: analysis`), `FAKE-1-AC2` (`method: inspection`), `FAKE-1-AC3` (`method: demonstration`), `FAKE-1-AC4` (`method: test`, `verified_by: [FAKE-T1]`); the plan has an implementer step and a validator step `check` that serves all four; no evidence file at all; no `results/evidence/FAKE-1/` folder. The fake host of `test/fixtures/merge-request` is first on `PATH` and `ARK_HOME` is that of the fixture before each command.
 - Finish fixture: the `ValidatorRun` fixture of `test/finish-validator-stage.test.ts` (ticket `ARK-900`, `analysisAlone()`): a validator step `val-1` that serves `allIds` (`AC1` to `AC4`, of which only `AC3` has `method: analysis`, the only method that `finish` reports, `evidenceDue`) with no later step that could write the file, a clean worktree, and no `AC3.md`.
-- Before each command the test records the bytes of `events.ndjson` (check: also the file names and sizes of the whole run folder and the worktree; finish: the lines of `events.ndjson` and the names and sizes under `results/evidence/`).
+- Before each `check` command the test records the bytes of `events.ndjson` and the file names and sizes of the whole run folder and the worktree. Before each `finish` it records the trimmed lines of `events.ndjson` and the names and sizes under `results/evidence/`.
 
 ## Steps
 
