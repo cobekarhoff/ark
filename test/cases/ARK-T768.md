@@ -15,7 +15,7 @@ Prove that one pass of `scripts/auto-merger.sh --once` with `ARK_PROJECT` set to
 
 ## Preconditions
 
-- The fixture of ARK-T295 (`runCleanPullRequestScenario` in `test/chief-scripts.test.ts`), with the project name and the run id as parameters: a `demo` run `2026-11-02-ARK-900-1` in `merge_requests_open` with PR `app` #11 (CLEAN) and `core` #12 (DIRTY), `retro.md` and a ready ticket file.
+- The seed `seedMergeRequestRun` in `test/chief-scripts.test.ts`, which takes the project name, the run id, the ticket id and the pull requests as parameters (ARK-T295 still uses it through `runCleanPullRequestScenario`, with `demo` and `2026-11-02-ARK-900-1`): a `demo` run `2026-11-02-ARK-900-1` in `merge_requests_open` with PR `app` #11 (CLEAN) and `core` #12 (DIRTY), `retro.md` and a ready ticket file.
 - A second project `other` with a valid `ark.yml` and one run `2026-11-02-ARK-901-1` in `merge_requests_open` with PR `app` #21 (CLEAN), `retro.md` and a ready ticket file, so the pass has work and the case cannot pass on an empty pass. The two run ids differ: with one id in both projects, `ark merge-request status --project other` finds the `other` run for the `demo` line too, and the case passes at base.
 - The fake `gh` that logs every call; the fake `orca`; real `ark` on PATH.
 
