@@ -1,4 +1,3 @@
-import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { now } from "../cli/clock.ts";
 import { hubConfig } from "./config.ts";
@@ -90,8 +89,6 @@ const repoFactsIntervalMilliseconds = allIntervalMilliseconds || 3000;
 const conversationIntervalMilliseconds = allIntervalMilliseconds || 15_000;
 
 const usageTimeoutMilliseconds = 30_000;
-/** Folder watchers made between two yields to the event loop. */
-const watchBatch = 16;
 
 /** Harness and model of `roles.<role>` in the project's `ark.yml`, or null when unset or unreadable. */
 function roleConfig(
@@ -217,7 +214,9 @@ export function createSnapshotReader() {
   const closedWorkers = new Map<string, RunWorkers>();
   /** Settles at the first publish (early or full) of the running read, or when that read ends without one. */
   let conversationFirst: Promise<void> | undefined;
-  const watchers = new Map<string, FSWatcher>();
+  /** hub/watch-worker.ts, started at the first sync; one `synced` answer per message, in order. */
+  let watchWorker: Worker | undefined;
+  const syncAnswers: (() => void)[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   let stopped = false;
   let running = false; // at least one /events client: loops, Ark timer and watchers run
@@ -651,7 +650,7 @@ export function createSnapshotReader() {
         return value;
       });
       if (!running) return;
-      await syncWatchers();
+      await syncWatchers(arkReader.watchPaths());
       // A gate that this read saw wakes the Plannotator read at once, not at its next tick.
       const open = gateOpen();
       if (armed && open && !gateWasOpen) void readers.plannotator();
@@ -808,34 +807,34 @@ export function createSnapshotReader() {
 
   /** Re-reads Ark's files soon after a watched folder changed; the 2 s timer is the fallback. */
   let arkSoon: ReturnType<typeof setTimeout> | undefined;
-  /** Yields after every few `watch` calls: the first pass on 250 run folders held the loop for 270 ms (ARK-533). A pause during a yield ends it. */
-  async function syncWatchers(): Promise<void> {
-    const started = generation;
-    const wanted = new Set(arkReader.watchPaths());
-    for (const [path, watcher] of watchers) {
-      if (wanted.has(path)) continue;
-      watcher.close();
-      watchers.delete(path);
+  /**
+   * Sends the folders to watch to hub/watch-worker.ts and waits for its answer. The worker is the only thread that calls `watch()`
+   * (ARK-613). A worker that fails or closes is dropped, its waiters released, and the next sync starts a new one: the 2 s timer
+   * covers the folders in between.
+   */
+  function syncWatchers(paths: string[]): Promise<void> {
+    if (!watchWorker) {
+      const worker = new Worker(new URL("./watch-worker.ts", import.meta.url));
+      const gone = () => {
+        if (watchWorker !== worker) return;
+        watchWorker = undefined;
+        for (const answer of syncAnswers.splice(0)) answer();
+      };
+      worker.onmessage = (event) => {
+        if (event.data === "synced") syncAnswers.shift()?.();
+        else if (running) {
+          clearTimeout(arkSoon);
+          arkSoon = setTimeout(() => void readers.ark(), 50);
+        }
+      };
+      worker.onerror = gone;
+      worker.addEventListener("close", gone);
+      watchWorker = worker;
     }
-    let created = 0;
-    for (const path of wanted) {
-      if (watchers.has(path)) continue;
-      if (created++ % watchBatch === watchBatch - 1) {
-        await new Promise((resolve) => setImmediate(resolve));
-        if (generation !== started) return;
-      }
-      try {
-        watchers.set(
-          path,
-          watch(path, () => {
-            clearTimeout(arkSoon);
-            arkSoon = setTimeout(() => void readers.ark(), 50);
-          }),
-        );
-      } catch {
-        // No watcher for this folder: the 2 s timer still sees its changes.
-      }
-    }
+    return new Promise((resolve) => {
+      syncAnswers.push(resolve);
+      watchWorker!.postMessage(paths);
+    });
   }
 
   /** One timer of 100 ms while a page is connected: how late it fires is the event loop lag. */
@@ -914,8 +913,7 @@ export function createSnapshotReader() {
     for (const timer of timers) clearTimeout(timer);
     timers.clear();
     clearTimeout(arkSoon);
-    for (const watcher of watchers.values()) watcher.close();
-    watchers.clear();
+    if (watchWorker) void syncWatchers([]);
     try {
       resourcesReader.flush();
     } catch {
@@ -956,6 +954,10 @@ export function createSnapshotReader() {
     stop(): void {
       stopped = true;
       pause();
+      const worker = watchWorker;
+      watchWorker = undefined;
+      worker?.terminate();
+      for (const answer of syncAnswers.splice(0)) answer();
       usage.close();
     },
     /** The serialized snapshot: what `/api/snapshot` sends and what a new `/events` client gets first. */
