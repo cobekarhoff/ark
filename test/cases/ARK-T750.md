@@ -2,7 +2,7 @@
 id: ARK-T750
 title: ARK-T750 merge-request open still refuses a quick last test when the own diff of any repo holds a code file, the plan adds, updates or retires a case, a check or the quick suite failed, a manual AC has no ok, or plan.yml is missing, with one refusal text per row
 level: integration
-technique: equivalence classes and decision table: one row for each reason a quick result is not enough, each row the accepted head of ARK-T748 with one change
+technique: "equivalence classes and decision table: one row for each reason a quick result is not enough, each row the accepted head of ARK-T748 with one change"
 priority: high
 risk: "the no-code rule accepts a quick result for a diff that holds code: a `.ts`, a script, `package.json`, a Markdown fixture under `test/`, a generated `docs/reference/cli.md`, a `.ts` renamed to `.md` (`git diff --name-only` lists only the new path), or a second repo with a `.ts` (only the first repo read); or it reads a plan `add`, `update`, `retire` or old-shape empty action as reuse; or the no-code path skips the `passed` or the manual-ok rule along with the criteria rule; or a missing `plan.yml` throws a stack trace instead of a refusal"
 status: active
