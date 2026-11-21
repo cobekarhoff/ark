@@ -17,7 +17,7 @@ Prove that before a failed bun test file runs again alone, `ark test` waits unti
 
 - The fixture of ARK-T164 (`test/detached-runner.test.ts`: `makeFixture`, `bunSuite`, `countedFile`), with a real `ark` process. The fixture's `ark.yml` has `test_budget_cores: 3`. Admission ignores the 1-minute load in every config (ARK-T710), so only the retry reads it.
 - One suite `loaded` (parser `bun`, a `base_command` with `{files}`) with two files:
-  - `flaky`: fails on its first head start and passes after it. On each head start it appends to its counter the text of the load file as it reads it at that start.
+  - `flaky`: fails on its first head start and passes after it. On each head start it also appends the text of the load file, as it reads it at that start, to a separate file `load-seen` (its counter holds only the side).
   - `stable`: always passes.
 - The load comes from the production reader of `cli/host.ts` through `ARK_FAKE_LOAD_ONE`, set in the environment of the `ark test` process. The number form is used, or `file:<load file>` (read on every reading) where the case changes the load during the run. The preload's `ARK_FAKE_LOAD_ONE=0` is overridden for each row. There is no new hook.
 - A fresh fixture for each row.

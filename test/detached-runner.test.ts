@@ -1635,9 +1635,14 @@ describe("ark test retry waits for the host load", () => {
     const { fixture } = loadedFixture("2.9");
     fixture.environment.ARK_FAKE_LOAD_ONE = "50";
     fixture.environment.ARK_RETRY_LOAD_WAIT_S = "1";
-    const result = await arkDone(fixture, "test", fixture.runId);
+    const spawned = spawnArk(fixture, ["test", fixture.runId]);
+    await spawned.outputHas("retry waits for load");
+    const waitLineAt = Date.now();
+    const result = await spawned.finished();
 
     expect(result.code, result.err).toBe(0);
+    // a 1 s wait ends well before 60 s; the default wait of 180 s does not
+    expect(Date.now() - waitLineAt).toBeLessThan(60_000);
     expect(headStarts(fixture, "flaky")).toBe(2);
     const waited = result.out.indexOf("retry waits for load");
     const reran = result.out.search(/suite {6}loaded head {2}reran under load/);
