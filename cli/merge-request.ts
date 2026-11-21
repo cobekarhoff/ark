@@ -379,17 +379,28 @@ const dataFolders = [
  * ARK-604: a run with no code file may open its MR on a passing quick test, because CI runs the whole suite on every push.
  * True when the plan has only `reuse` test cases (none, or all) and, in every run worktree, `git diff <base or synced>...HEAD`
  * (three dots: the run's own commits, not what a sync brought in) lists only hand-written Markdown: a path ending `.md` (any
- * case), outside a test or fixture folder (`dataFolders`), not in the `generated` list of ark.yml, a plain file on both sides (no symlink). A repo
- * with no run worktree, or with no own commit, lists no file. A missing or invalid plan.yml and a failed git diff read as code.
+ * case), outside a test or fixture folder (`dataFolders`), a plain file on both sides (no symlink). ARK-625: a path in the
+ * `generated` list of ark.yml counts too when a check of `testChecks` (the last quick test) passed, runs in the repo of the
+ * worktree and has a command that contains the command of that `generated` entry: the quick test regenerated the file and
+ * compared it. With no such check the path is code. A repo with no run worktree, or with no own commit, lists no file. A
+ * missing or invalid plan.yml and a failed git diff read as code.
  */
-export function noCodeRun(directory: string, state: RunState, config: ProjectConfig): boolean {
+export function noCodeRun(
+  directory: string,
+  state: RunState,
+  config: ProjectConfig,
+  testChecks: { name: string; passed: boolean }[],
+): boolean {
   try {
     if (!loadPlan(directory, state.ticket.id).test_cases.every(({ action }) => action === "reuse"))
       return false;
   } catch {
     return false;
   }
-  const generated = new Set((config.generated ?? []).map(({ path }) => path));
+  const passedChecks = config.checks.filter(({ name }) =>
+    testChecks.some((testCheck) => testCheck.name === name && testCheck.passed),
+  );
+  // A generated path is no-code only when a passed check of the quick test ran its command in this repo.
   const plain = new Set(["000000", "100644", "100755"]);
   return state.worktrees.every((worktree) => {
     const base = worktree.synced ?? worktree.base;
@@ -412,7 +423,13 @@ export function noCodeRun(directory: string, state: RunState, config: ProjectCon
           .split("/")
           .slice(0, -1)
           .some((folder) => dataFolders.includes(folder)) ||
-        generated.has(path)
+        (config.generated ?? [])
+          .filter((entry) => entry.path === path)
+          .some((entry) =>
+            passedChecks.every(
+              (check) => check.repo !== worktree.repo || !check.command.includes(entry.command),
+            ),
+          )
       )
         return false;
     }
@@ -493,7 +510,7 @@ export function checkStage(
   if (final) {
     if (lastTest === undefined) problems.push("no test result yet: run `ark test` first");
     else if (lastTest.data.mode === "quick") {
-      quickNoCode = noCodeRun(directory, state, config);
+      quickNoCode = noCodeRun(directory, state, config, lastTest.data.checks ?? []);
       if (!quickNoCode)
         problems.push(`the last test at this head is quick, not a gate: run \`ark test ${runId}\``);
     }
