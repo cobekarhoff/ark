@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +18,7 @@ import { buildLedger } from "../skills/pr-writing/lib/ledger.ts";
 import { lintBody } from "../skills/pr-writing/lib/lint.ts";
 import { repoGraph } from "../cli/plan.ts";
 import {
+  acceptCriteriaFile,
   ark,
   recordEvaluation,
   tempArkHome,
@@ -609,10 +611,17 @@ test("ARK-T635 ARK-155-AC2 merge order refuses a dependency cycle between repos"
 });
 
 // One real repo with a real suite, run through plan check, worktree create and ark test.
-function testedRun() {
+// `guard` makes it a bug run with two criteria: AC1 and a guard AC2 whose test fails while `switchFile` exists.
+// The guard run stops before the first ark test, so the test can run it with the switch on and off.
+function testedRun(guard?: { switchFile: string }) {
   tempArkHome();
+  const criterionIds = guard ? ["ARK-900/AC1", "ARK-900/AC2"] : ["ARK-900-AC1"];
   const workspace = tempGitRepo({
-    "ac.test.ts": `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
+    "ac.test.ts": guard
+      ? `import { existsSync } from "node:fs";\nimport { expect, test } from "bun:test";\n` +
+        `test("FAKE-T1 works", () => {});\n` +
+        `test("FAKE-T2 holds", () => { expect(existsSync(${JSON.stringify(guard.switchFile)})).toBe(false); });\n`
+      : `import { test } from "bun:test"; test("ARK-900-AC1 works", () => {});\n`,
   });
   const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
   mkdirSync(bare, { recursive: true });
@@ -639,48 +648,66 @@ function testedRun() {
       reviewer: { harness: "codex", model: "gpt-codex" },
     },
   });
-  const ticket = writeTicket("demo", "ARK-900", [{ id: "ARK-900-AC1", text: "It works" }]);
+  const ticket = writeTicket(
+    "demo",
+    "ARK-900",
+    guard ? [] : [{ id: "ARK-900-AC1", text: "It works" }],
+    "Ticket ARK-900",
+    guard ? "bug" : undefined,
+  );
   const runId = ark("run", "start", ticket, "--project", "demo").out.trim();
   const runDirectory = join(process.env.ARK_HOME as string, "projects", "demo", "runs", runId);
   recordEvaluation(runDirectory);
+  if (guard) {
+    const accepted = acceptCriteriaFile(runId, runDirectory, [
+      { id: "AC1", verified_by: ["FAKE-T1"] },
+      { id: "AC2", verified_by: ["FAKE-T2"], guard: true },
+    ]);
+    if (accepted.code !== 0) throw new Error(`criteria accept failed: ${accepted.err}`);
+  }
+  const step = (id: string, role: string, needs: string[]) => ({
+    id,
+    role,
+    repo: ".",
+    harness: role === "implementer" ? "claude" : "codex",
+    model: role === "implementer" ? "claude-sonnet" : "gpt-codex",
+    needs,
+    criteria: criterionIds,
+  });
   writeFileSync(
     join(runDirectory, "plan.yml"),
     JSON.stringify({
       design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
       summary: {
         why: "Fixture.",
-        changes: [{ criterion: "ARK-900-AC1", where: "tests", now: "None.", fix: "A test." }],
+        changes: criterionIds.map((criterion) => ({
+          criterion,
+          where: "tests",
+          now: "None.",
+          fix: "A test.",
+        })),
       },
-      steps: [
-        {
-          id: "build",
-          role: "implementer",
-          repo: ".",
-          harness: "claude",
-          model: "claude-sonnet",
-          needs: [],
-          criteria: ["ARK-900-AC1"],
-        },
-      ],
-      test_cases: [
-        {
-          id: "proves-ARK-900-AC1",
-          criterion: "ARK-900-AC1",
-          level: "e2e",
-          given: [],
-          when: ["run it"],
-          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
-          then: ["it works"],
-          expected: "it works",
-        },
-      ],
+      // A bug run's first step is a validator step that serves every criterion.
+      steps: guard
+        ? [step("tests", "validator", []), step("build", "implementer", ["tests"])]
+        : [step("build", "implementer", [])],
+      test_cases: criterionIds.map((criterion, index) => ({
+        id: guard ? `FAKE-T${index + 1}` : `proves-${criterion}`,
+        ...(guard ? { action: "add" } : { criterion }),
+        level: "e2e",
+        given: [],
+        when: ["run it"],
+        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+        then: ["it works"],
+        expected: "it works",
+      })),
     }),
   );
   for (const args of [
     ["plan", "check", runId],
     ["gate", "record", runId, "plan", "approve"],
     ["worktree", "create", runId, "."],
-    ["test", runId],
+    ...(guard ? [] : [["test", runId]]),
   ]) {
     const result = ark(...args);
     if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.out}${result.err}`);
@@ -689,7 +716,7 @@ function testedRun() {
 }
 
 test(
-  "ARK-T246 ARK-155-AC6 merge-request open refuses a head that changed since the test, with the run id in the next command, then opens after a passing ark test",
+  "ARK-T246 merge-request open refuses a head that changed since the test, with the run id in the next command, then opens after a passing ark test",
   () => {
     const { runId, runDirectory, bare, worktree } = testedRun();
     const tested = git(worktree, "rev-parse", "HEAD");
@@ -1184,6 +1211,75 @@ test(
     expect(third.code, third.err).toBe(0);
     expect(edited()).toHaveLength(1);
     expect(created()).toHaveLength(1);
+  },
+  { timeout: 120_000 },
+);
+
+test(
+  "ARK-T765 a guard AC that reads failing is refused by the final ark test and by merge-request open, and once it passes the posted and the refreshed body list it apart",
+  () => {
+    const switchFile = join(mkdtempSync(join(tmpdir(), "ark-guard-switch-")), "guard-fails");
+    writeFileSync(switchFile, "");
+    const { runId, runDirectory, worktree } = testedRun({ switchFile });
+    const lastTest = () =>
+      readFileSync(join(runDirectory, "events.ndjson"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .findLast((event) => event.type === "test.completed").data;
+
+    // The guard fails: the final test refuses, and open refuses before any host call.
+    commit(worktree, "feature");
+    const red = ark("test", runId);
+    expect(red.code).toBe(1);
+    expect(red.err).toContain("tests did not prove every criterion");
+    expect(red.err).toContain("ARK-900/AC2 is failing");
+    expect(lastTest()).toMatchObject({
+      passed: false,
+      criteria: { "ARK-900/AC1": "passing", "ARK-900/AC2": "failing" },
+    });
+    const refused = ark("merge-request", "open", runId);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("criteria not passing in the last test run");
+    expect(refused.err).toContain("ARK-900/AC2 (failing)");
+    expect(calls()).toHaveLength(0);
+    expect(JSON.parse(readFileSync(join(runDirectory, "state.json"), "utf8")).phase).not.toBe(
+      "merge_requests_open",
+    );
+
+    // The guard passes: the body lists it on a line of its own, on create and again after a new head.
+    rmSync(switchFile);
+    commit(worktree, "fix");
+    expect(ark("test", runId).code).toBe(0);
+    const opened = ark("merge-request", "open", runId);
+    expect(opened.code, opened.err).toBe(0);
+    const [createCall] = created();
+    // The heading is `## ...` at tier 1 and up and `**...**` at tier 0; the section ends at the next heading or the end marker.
+    const section = (body: string) =>
+      (body.split(/^(?:## |\*\*)Acceptance criteria\*{0,2}$/m)[1] ?? "")
+        .split(/^(?:## |\*\*[^*]+\*\*$|<!-- pr-writing:end)/m)[0]
+        .trim()
+        .split("\n");
+    const expectGuardApart = (body: string) => {
+      const lines = section(body);
+      expect(lines.length).toBeGreaterThan(1);
+      expect(lines).toContain("- [x] AC1 tested");
+      expect(lines.filter((line) => line.includes("AC1"))).toHaveLength(1);
+      const guardLines = lines.filter((line) => line.includes("AC2"));
+      expect(guardLines).toHaveLength(1);
+      expect(guardLines[0]).toContain("guard");
+      expect(guardLines[0]).toContain("[x]");
+      expect(guardLines[0]).not.toContain("AC1");
+    };
+    expectGuardApart(createCall.body!);
+
+    commit(worktree, "refresh");
+    expect(ark("test", runId).code).toBe(0);
+    const refreshed = ark("merge-request", "open", runId);
+    expect(refreshed.code, refreshed.err).toBe(0);
+    expect(created()).toHaveLength(1);
+    expect(edited()).toHaveLength(1);
+    expectGuardApart(edited()[0].body!);
   },
   { timeout: 120_000 },
 );

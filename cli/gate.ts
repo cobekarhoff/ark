@@ -6,6 +6,7 @@ import { writeCriteriaFile } from "./criteria.ts";
 import {
   evidenceFile,
   evidenceProblem,
+  assertGuardsAllowed,
   frontmatter,
   manualCriteria,
   parseCriteria,
@@ -27,6 +28,7 @@ function acceptCriteria(runDirectory: string, criteriaFile?: string): void {
   if (criteriaFile !== undefined) writeCriteriaFile(runDirectory, ticketFile, criteriaFile);
   const fields = frontmatter(readFileSync(ticketFile, "utf8")).fields ?? {};
   const parsed = parseCriteria(fields, ticketFile);
+  assertGuardsAllowed(parsed, deriveState(readEvents(runDirectory)).kind, ticketFile);
   const ids = parsed.map((criterion) => criterion.id);
   if (ids.length === 0) {
     throw new ArkError(
@@ -43,7 +45,11 @@ function acceptCriteria(runDirectory: string, criteriaFile?: string): void {
     );
   }
   copyFileSync(ticketFile, join(runDirectory, "ticket.md"));
-  appendEvent(runDirectory, "criteria.updated", { criteria: ids });
+  const guards = parsed.filter((criterion) => criterion.guard).map((criterion) => criterion.id);
+  appendEvent(runDirectory, "criteria.updated", {
+    criteria: ids,
+    ...(guards.length > 0 && { guards }),
+  });
 }
 
 export function gateRecord(
