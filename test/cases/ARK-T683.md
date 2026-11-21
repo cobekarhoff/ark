@@ -6,18 +6,18 @@ technique: state transition (budget full, released, one file still running) with
 priority: high
 risk: A bare `bun test` or `bun test test --parallel=3` starts its files while `ark test` runs hold the budget (host load 20 to 63, timing failures in other runs); or the wait fires once per file in a `--parallel` run, takes one ticket per file, frees the ticket when any worker other than the one that still runs a file ends, or never shows its line; or a validator's `bun test` inside a run worktree finds no project and skips the wait; or a held inner run that does not reach a state the row waits for (a marker that never comes, a worker that never ends, a waiting line that never shows, a child that never exits after the release, an output pipe that stays open after the child exits; each as on the Linux CI runner) leaves the row hung to the 90 s test timeout, with a failure at a later line that names no cause, instead of a named failure of the wait
 status: active
-changed_by: 2026-11-20-ARK-586-1
+changed_by: 2026-11-21-ARK-623-1
 ---
 
 ## Objective
 
-Prove a `bun test` of the whole suite (no path argument, or a directory argument) started outside `ark test` takes its cores from `test_budget_cores` through the real ticket store, runs no test file until the cores are free, and keeps the ticket until its last file ends.
+Prove a `bun test` of the whole suite (no path argument, or a directory argument) started outside `ark test` takes its cores from `test_budget_cores` of the host file `host.yml` through the real ticket store, runs no test file until the cores are free, and keeps the ticket until its last file ends.
 
 Expected: with the budget full, no file runs and one waiting line shows; after the holder ends, the run holds one ticket while a file is still running, and the ticket is gone after the run exits.
 
 ## Preconditions
 
-- Temp `ARK_HOME` with project `demo` whose `ark.yml` sets `test_budget_cores: 3` and `workspace` to a scratch git repo.
+- Temp `ARK_HOME` whose `host.yml` sets `test_budget_cores: 3`, with project `demo` whose `ark.yml` sets `workspace` to a scratch git repo and no host key.
 - The scratch repo has the repo's `bunfig.toml` preload and four test files under `test/` (a fake suite): `a`, `b` and `c` each open the write end of a named pipe `alive-<name>` and keep it open (the case opened the read ends before the run; the descriptor closes when the file's worker exits), then append `process.pid` to a marker file `ran-<name>` and their working folder to the shared log `runs.log`; `gate` does the same with `alive-gate`, opens a named pipe (`gate`) for reading, appends its `process.pid` and working folder to `started-gate`, blocks reading the pipe until end-of-file, then appends its `process.pid` to `ran-gate`. The case holds a read-write descriptor of the `gate` pipe from the start and closes it to release the gate: a reader that opens a pipe before any writer stays blocked on macOS when a writer opens and closes first, so the case never opens a short-lived writer. The `ARK_FAKE_HOST` and PATH shims come from the outer preload, so memory admission does not hold the run. A worker's exit is the end-of-file of its `alive-*` pipes: no poll, no sleep.
 - The environment of every `bun test` child the case starts is built, not inherited: the environment of the case minus the `ark test` marker (the name `run()` in `cli/test-run.ts` sets), `BUN_TEST_WORKER_ID`, `JEST_WORKER_ID`, `ARK_PROJECT` and `ARK_HOME`; then `ARK_HOME` is the temp folder, and `ARK_PROJECT` is set only in the row that says so. Reason: the case itself may run under `ark test` (the marker would make the child never wait) or under an outer `bun test --parallel` (the worker variables would make a serial child read the command line of its parent). The built environment keeps `ARK_FAKE_CPU_PERCENT=0` (the CPU is never above the limit), so the only wait is the one on cores and the one waiting line is not a CPU line on a busy host (the CPU wait is ARK-T695).
 - The holder is a real child process: `openTestBudget("holder", 3, ...)` and `await budget.take(<cores>)` from `cli/test-lock.ts`, then it blocks reading its standard input until the case writes to it (the release). Its ticket pid is live.

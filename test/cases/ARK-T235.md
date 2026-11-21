@@ -2,16 +2,16 @@
 id: ARK-T235
 title: "ARK-T235 a fake run in a demo fixture starts and finishes while host free memory and swap are past the default limits"
 level: integration
-technique: "equivalence classes (fixture without the keys vs with them) at a host reading below the default floor and above the default swap ceiling"
+technique: "equivalence classes (fixture without the host file limits vs with them) at a host reading below the default floor and above the default swap ceiling"
 priority: high
 risk: "A demo fixture leaves the memory floor or swap ceiling at its default, so a fake `ark test` waits on a host under 20 percent free, the suite ends on its timeout, and the runner lives on; or the test passes although the floor is never read"
 status: active
-changed_by: 2026-11-20-ARK-586-1
+changed_by: 2026-11-21-ARK-623-1
 ---
 
 ## Objective
 
-Prove the demo project that the fixture writers of `test/test-run.test.ts`, `test/evidence-test-run.test.ts` and `test/test-selection.test.ts` write makes a fake run skip the memory wait, with the host reading below the default floor and the swap above the default ceiling.
+Prove the demo fixture that the fixture writers of `test/test-run.test.ts`, `test/evidence-test-run.test.ts` and `test/test-selection.test.ts` write (the demo project and the host file `host.yml` of its temp `ARK_HOME`) makes a fake run skip the memory wait, with the host reading below the default floor and the swap above the default ceiling.
 
 ## Preconditions
 
@@ -21,7 +21,7 @@ Prove the demo project that the fixture writers of `test/test-run.test.ts`, `tes
 
 ## Steps
 
-1. Control: write the demo project with the same fixture shape but without `test_min_free_memory_percent` and `test_max_swap_gb`. Run `ark test FAKE-1` in the background; wait over three poll intervals; read its output and the marker; stop the runner.
+1. Control: write the demo project with the same fixture shape but with no `host.yml` in the temp `ARK_HOME`. Run `ark test FAKE-1` in the background; wait over three poll intervals; read its output and the marker; stop the runner.
 2. Write the demo project with each of the three suites' fixture writers (the writer of each suite is called, not a copy of it). Run `ark test FAKE-1` to its end.
 3. Repeat step 2 for the second `writeProject("demo", …)` of `test/test-run.test.ts` (the multi-repo test).
 
@@ -30,7 +30,7 @@ Prove the demo project that the fixture writers of `test/test-run.test.ts`, `tes
 - Step 1: the output names the memory wait and the marker is absent: the fake reading holds a run with the default limits, so the test of steps 2 and 3 can fail.
 - Step 2: no memory-wait line, the suite starts at once, the run finishes, exit 0, the marker is written, for each of the three writers.
 - Step 3: same as step 2.
-- The fixture holds `test_min_free_memory_percent: 0` and `test_max_swap_gb: 1000` in `ark.yml` of the demo project.
+- The fixture writes `test_min_free_memory_percent: 0` and `test_max_swap_gb: 1000` in `host.yml` of the temp `ARK_HOME`; the `ark.yml` of the demo project holds none of the three host keys.
 
 ## Screenshot checkpoints
 
