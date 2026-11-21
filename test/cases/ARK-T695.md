@@ -6,7 +6,7 @@ technique: "equivalence classes (a suite running or not; CPU above the limit or 
 priority: high
 risk: "A whole-suite `bun test` run by hand on a busy host starts its files into CPU use of 95 percent because `holdTestBudget` does not reach the CPU hold; or it still reads the 1-minute load, so a host at 5 percent CPU and a load of 30 holds it; or, with nothing running, its owner ticket does not take the idle exception and it waits for ever; or the CPU wait is printed for every file of a `--parallel` run; or a run inside `ark test` or a file run waits on the CPU as well, and so deadlocks on its own reading"
 status: active
-changed_by: 2026-11-20-ARK-586-1
+changed_by: 2026-11-21-ARK-623-1
 ---
 
 ## Objective
@@ -22,7 +22,7 @@ Gate answers:
 
 ## Preconditions
 
-- The fixture and the built environment of ARK-T683: temp `ARK_HOME`, project `demo` with `test_budget_cores: 3`, scratch git repo with the repo's `bunfig.toml` preload and marker-writing test files `a`, `b` and `c`, and no marker of `ark test`. The built environment keeps or sets `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD_ONE` (numbers) as the step says.
+- The fixture and the built environment of ARK-T683: temp `ARK_HOME` whose `host.yml` sets `test_budget_cores: 3`, project `demo`, scratch git repo with the repo's `bunfig.toml` preload and marker-writing test files `a`, `b` and `c`, and no marker of `ark test`. The built environment keeps or sets `ARK_FAKE_CPU_PERCENT` and `ARK_FAKE_LOAD_ONE` (numbers) as the step says.
 - Fresh state per scenario. Each scenario below (steps 1, 2, 3, 4 and 5) starts from its own temp `ARK_HOME`, scratch repo, marker directory and holder, with no `ran-*` marker and no earlier result: an earlier scenario cannot supply a marker or a cached result (ARK-T163).
 - A holder as in ARK-T683, but it holds 1 of the 3 cores, so the cores of `--parallel=2` still fit and only the CPU hold can wait.
 - No sleeps: events only (the ticket file, an output line, a marker file, exit).

@@ -21,6 +21,7 @@ import {
   setFakeHost,
   tempArkHome,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -102,9 +103,6 @@ function makeRun(
   const base = {
     workspace,
     ticket_source: "local",
-    test_min_free_memory_percent: 0,
-    test_max_swap_gb: 1000,
-    test_budget_cores: 4,
     checks: checksOf(markers),
     suites: suitesOf(markers).map((suite) => ({
       ...suite,
@@ -113,6 +111,7 @@ function makeRun(
     })),
     roles,
   };
+  writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000, test_budget_cores: 4 });
   writeProject("demo", base);
   const ticket = writeTicket("demo", "FAKE-1", [
     { id: "FAKE-1-AC1", text: "criterion FAKE-1-AC1" },
@@ -377,7 +376,7 @@ describe("ARK-T709", () => {
 
   macOnly("ARK-T709 still holds on memory when no suite runs, at CPU 99 percent", async () => {
     const fixture = markedRun();
-    fixture.configure({ test_min_free_memory_percent: 20, test_max_swap_gb: 8 });
+    writeHost({ test_min_free_memory_percent: 20, test_max_swap_gb: 8, test_budget_cores: 4 });
     setFakeHost({ freePercent: 15, swapGigabytes: 2 }); // under the 20 percent floor
     const run = startTest(fixture.runId, hot);
     try {
