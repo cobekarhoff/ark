@@ -338,22 +338,61 @@ function addMissing(run: SideRun, other: SideRun, evidenceDirectory: string): vo
 
 /** Where a run writes evidence until it ends. */
 const STAGING = "evidence.next";
+/** Where a full run parks the old `results/evidence` while the staging folder moves in. */
+const ASIDE = "evidence.old";
+
+/** A crash between the two renames of `publishEvidence` leaves `evidence` missing and its old content aside: put it back. */
+function restoreEvidence(resultsDirectory: string): void {
+  const aside = join(resultsDirectory, ASIDE);
+  if (!existsSync(aside)) return;
+  const evidence = join(resultsDirectory, "evidence");
+  if (existsSync(evidence)) rmSync(aside, { recursive: true, force: true });
+  else renameSync(aside, evidence);
+}
 
 /**
- * A full run replaces `results/evidence` with its staging folder as a whole, so a case that no longer exists loses its
- * folder; files of the old folder that are not folders (the manual evidence files) stay. A quick run discards its staging.
+ * ARK-614: a full run owns only `<case>/base` and `<case>/head` of `results/evidence` (the second level of a folder named
+ * `base` or `head`, whatever the folder is) and keeps every other file and folder: manual evidence files, a worker's
+ * `cause.md` or `profile/`, a folder of a case that no longer exists (it loses its `base` and `head` only; a folder with
+ * nothing left goes). The kept entries are copied into the staging folder, which already holds this run's results,
+ * then the old folder moves aside and the staging folder moves in; a failure puts the old folder back and leaves
+ * nothing behind. A quick run discards its staging.
+ * ponytail: the kept entries are copied, not moved, so a large worker file is written twice and a file a worker adds during the copy is lost.
  */
 function publishEvidence(resultsDirectory: string, full: boolean): void {
   const staging = join(resultsDirectory, STAGING);
   const evidence = join(resultsDirectory, "evidence");
-  if (full) {
+  const aside = join(resultsDirectory, ASIDE);
+  if (!full) return rmSync(staging, { recursive: true, force: true });
+  const keep = (from: string, to: string) =>
+    cpSync(from, to, { recursive: true, verbatimSymlinks: true });
+  try {
     mkdirSync(staging, { recursive: true });
     if (existsSync(evidence))
-      for (const entry of readdirSync(evidence, { withFileTypes: true }))
-        if (!entry.isDirectory()) cpSync(join(evidence, entry.name), join(staging, entry.name));
-    rmSync(evidence, { recursive: true, force: true });
-    renameSync(staging, evidence);
-  } else rmSync(staging, { recursive: true, force: true });
+      for (const entry of readdirSync(evidence, { withFileTypes: true })) {
+        if (!entry.isDirectory()) {
+          keep(join(evidence, entry.name), join(staging, entry.name));
+          continue;
+        }
+        for (const child of readdirSync(join(evidence, entry.name))) {
+          if (child === "base" || child === "head") continue;
+          mkdirSync(join(staging, entry.name), { recursive: true });
+          keep(join(evidence, entry.name, child), join(staging, entry.name, child));
+        }
+      }
+    if (!existsSync(evidence)) return renameSync(staging, evidence);
+    renameSync(evidence, aside);
+    try {
+      renameSync(staging, evidence);
+    } catch (error) {
+      renameSync(aside, evidence);
+      throw error;
+    }
+    rmSync(aside, { recursive: true, force: true });
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function writeResults(run: SideRun, evidenceDirectory: string): void {
@@ -1160,6 +1199,7 @@ async function executeTest(
   // ARK-422: every run writes to a staging folder; only a full run replaces `results/evidence` with it (see below).
   // A stopped run leaves its staging folder behind: remove it first.
   const evidenceDirectory = join(resultsDirectory, STAGING);
+  restoreEvidence(resultsDirectory);
   rmSync(evidenceDirectory, { recursive: true, force: true });
   const state = deriveState(readEvents(directory));
   const criteria = state.criteria.map((criterion) => criterion.id);
