@@ -794,7 +794,7 @@ describe("ark test evidence of the last full run", () => {
     expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
   });
 
-  test("ARK-T269 after a stopped full ark test the next full run removes the evidence folders of renamed cases and writes the new ones", async () => {
+  test("ARK-T269 after a stopped full ark test the next full run removes the evidence of renamed cases and writes the new ones", async () => {
     const fixture = evidenceFixture(true);
     writeFileSync(join(fixture.directory, "pass"), "");
     const first = await arkDone(fixture, "test", fixture.runId);
@@ -956,6 +956,7 @@ describe("ark test evidence of the last full run", () => {
       expect(after["/AC8/notes.md"]).toBe("ac8\n");
       expect(after["/DET-T1/cause.md"]).toBe("root cause\n");
       expect(Object.keys(after)).toContain("/DET-T1/head/command.log");
+      expect(after["/DET-T1/head/result.json"]).not.toBe(before["/DET-T1/head/result.json"]);
       expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
     },
   );
