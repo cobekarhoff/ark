@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -412,6 +413,237 @@ test.each([
     expect(host!).toMatch(/^\/tmp\/ark-fake-host-/);
     expect(existsSync(root!)).toBe(false);
     expect(existsSync(host!)).toBe(false);
+  },
+  { timeout: 60_000 },
+);
+
+// --- ARK-610: a failed removal of a preload root never fails the bun test process ---
+
+// The fixture records the two roots it runs under, so the case finds them after the process ends.
+const recordsRootsAndPasses = (outcome: "pass" | "fail") => `
+import { expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+test("fixture", () => {
+  writeFileSync(process.env.ROOT_RECORD!, [process.env.TMPDIR, process.env.ARK_FAKE_HOST].join("|"));
+  expect(1).toBe(${outcome === "pass" ? 1 : 2});
+});
+`;
+
+// A preload the case owns, passed to the inner run as `--preload`, so it also reaches a base that has no opt-in fault.
+// It replaces `rmSync` of node:fs: a call on the live root named by FAULT_ROOT_VARIABLE is logged to FAULT_LOG and, for
+// the first FAULT_COUNT calls ("all" = every call), throws an error with code FAULT_CODE; every other call is the real one.
+const faultingRemovalPreload = `
+import { mock } from "bun:test";
+import * as fs from "node:fs";
+const real = { ...fs };
+const limit = process.env.FAULT_COUNT === "all" ? Infinity : Number(process.env.FAULT_COUNT);
+let faulted = 0;
+mock.module("node:fs", () => ({
+  ...real,
+  rmSync(path: string, options: unknown) {
+    if (path === process.env[process.env.FAULT_ROOT_VARIABLE!]) {
+      real.appendFileSync(process.env.FAULT_LOG!, path + "\\n");
+      if (faulted < limit) {
+        faulted += 1;
+        throw Object.assign(new Error(process.env.FAULT_MESSAGE + ", rm '" + path + "'"), {
+          code: process.env.FAULT_CODE,
+          syscall: "rm",
+          path,
+        });
+      }
+    }
+    return real.rmSync(path, options as never);
+  },
+}));
+`;
+
+const errorMessages = {
+  EFAULT: "EFAULT: bad address in system call argument",
+  EBUSY: "EBUSY: resource busy or locked",
+  EACCES: "EACCES: permission denied",
+  ENOENT: "ENOENT: no such file or directory",
+};
+
+type RemovalFault =
+  // the preload's own opt-in fault (ARK_PRELOAD_RM_FAULTS), on the bun-test-* root
+  | { route: "preload"; count: number | "all" }
+  // the test-side `--preload` above, on the root that `rootVariable` names
+  | {
+      route: "test-side";
+      code: keyof typeof errorMessages;
+      rootVariable: "TMPDIR" | "ARK_FAKE_HOST";
+      count: number | "all";
+    };
+
+// Runs one inner `bun test` and reads its exit, both streams, the two roots and the calls made on each root.
+// The fault variables go only into the inner environment, never into this process.
+async function runWithFailingRemoval(outcome: "pass" | "fail", fault: RemovalFault) {
+  const folder = scratchDirectory();
+  const record = join(folder, "roots.txt");
+  const callLog = join(folder, "calls.log");
+  const extraArguments: string[] = [];
+  const extraEnvironment: Record<string, string> = { ROOT_RECORD: record };
+  if (fault.route === "preload") {
+    extraEnvironment.ARK_PRELOAD_RM_FAULTS = String(fault.count);
+    extraEnvironment.ARK_PRELOAD_RM_LOG = callLog;
+  } else {
+    const hook = join(folder, "efault.ts");
+    writeFileSync(hook, faultingRemovalPreload);
+    extraArguments.push("--preload", hook);
+    Object.assign(extraEnvironment, {
+      FAULT_ROOT_VARIABLE: fault.rootVariable,
+      FAULT_CODE: fault.code,
+      FAULT_MESSAGE: errorMessages[fault.code],
+      FAULT_COUNT: String(fault.count),
+      FAULT_LOG: callLog,
+    });
+  }
+  const fixturePath = writeFixture(`removal-${outcome}`, recordsRootsAndPasses(outcome));
+  const child = spawnBunTest(fixturePath, scratchDirectory(), extraArguments, extraEnvironment);
+  const stdout = await new Response(child.stdout).text();
+  const stderr = await new Response(child.stderr).text();
+  const exitCode = await child.exited;
+  const [root, host] = readFileSync(record, "utf8").split("|") as [string, string];
+  const calls = existsSync(callLog)
+    ? readFileSync(callLog, "utf8").split("\n").filter(Boolean)
+    : [];
+  const linesNaming = (text: string, path: string) =>
+    text.split("\n").filter((line) => line.includes(path));
+  return {
+    exitCode,
+    stdout,
+    stderr,
+    output: stdout + stderr,
+    root,
+    host,
+    callsOn: (path: string) => calls.filter((line) => line === path).length,
+    stderrLinesNaming: (path: string) => linesNaming(stderr, path),
+    stdoutLinesNaming: (path: string) => linesNaming(stdout, path),
+    // A row can leave a root behind: /tmp/ark-fake-host-* lies outside the scratch TMPDIR.
+    removeRoots: () => {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(host, { recursive: true, force: true });
+    },
+  };
+}
+
+test.each([
+  { label: "the preload's own fault", fault: { route: "preload", count: 2 } as RemovalFault },
+  {
+    label: "a test-side fault",
+    fault: { route: "test-side", code: "EFAULT", rootVariable: "TMPDIR", count: 2 } as RemovalFault,
+  },
+])(
+  "ARK-T744 a nested bun test whose first 2 rmSync calls of its bun-test-* root throw EFAULT still exits 0, prints no error and leaves no root ($label)",
+  async ({ fault }) => {
+    const run = await runWithFailingRemoval("pass", fault);
+    try {
+      expect(run.exitCode, run.output).toBe(0);
+      expect(run.output).toContain(" 1 pass");
+      expect(run.output).toContain(" 0 fail");
+      expect(run.output).not.toContain("EFAULT");
+      expect(run.output).not.toContain("error:");
+      expect(run.stderrLinesNaming(run.root)).toEqual([]);
+      expect(existsSync(run.root)).toBe(false);
+      expect(existsSync(run.host)).toBe(false);
+      // Two faulted calls, then the call that removed the root.
+      expect(run.callsOn(run.root)).toBe(3);
+    } finally {
+      run.removeRoots();
+    }
+  },
+  { timeout: 60_000 },
+);
+
+const everyCall = (code: keyof typeof errorMessages, rootVariable: "TMPDIR" | "ARK_FAKE_HOST") =>
+  ({ route: "test-side", code, rootVariable, count: "all" }) as RemovalFault;
+
+test.each([
+  {
+    label: "every call faults, passing test",
+    outcome: "pass" as const,
+    fault: { route: "preload", count: "all" } as RemovalFault,
+    exitCode: 0,
+    summary: " 1 pass",
+    faultedRoot: "root" as const,
+    code: "EFAULT",
+    calls: 4,
+  },
+  {
+    label: "every call faults, failing test",
+    outcome: "fail" as const,
+    fault: { route: "preload", count: "all" } as RemovalFault,
+    exitCode: 1,
+    summary: " 1 fail",
+    faultedRoot: "root" as const,
+    code: "EFAULT",
+    calls: 4,
+  },
+  {
+    label: "EBUSY is retried",
+    outcome: "pass" as const,
+    fault: everyCall("EBUSY", "TMPDIR"),
+    exitCode: 0,
+    summary: " 1 pass",
+    faultedRoot: "root" as const,
+    code: "EBUSY",
+    calls: 4,
+  },
+  {
+    label: "EACCES is not retried",
+    outcome: "pass" as const,
+    fault: everyCall("EACCES", "TMPDIR"),
+    exitCode: 0,
+    summary: " 1 pass",
+    faultedRoot: "root" as const,
+    code: "EACCES",
+    calls: 1,
+  },
+  {
+    label: "ENOENT counts as removed",
+    outcome: "pass" as const,
+    fault: everyCall("ENOENT", "TMPDIR"),
+    exitCode: 0,
+    summary: " 1 pass",
+    faultedRoot: "root" as const,
+    code: null,
+    calls: 1,
+  },
+  {
+    label: "the fake host root takes the same path",
+    outcome: "pass" as const,
+    fault: everyCall("EFAULT", "ARK_FAKE_HOST"),
+    exitCode: 0,
+    summary: " 1 pass",
+    faultedRoot: "host" as const,
+    code: "EFAULT",
+    calls: 4,
+  },
+])(
+  "ARK-T745 when the removal of a preload root always fails, bun test keeps the exit status of its tests, prints one line with the root and the code, leaves the root and calls rmSync at most 4 times ($label)",
+  async ({ outcome, fault, exitCode, summary, faultedRoot, code, calls }) => {
+    const run = await runWithFailingRemoval(outcome, fault);
+    try {
+      expect(run.exitCode, run.output).toBe(exitCode);
+      expect(run.output).toContain(summary);
+      const faulted = run[faultedRoot];
+      const other = faultedRoot === "root" ? run.host : run.root;
+      expect(run.callsOn(faulted)).toBe(calls);
+      const lines = run.stderrLinesNaming(faulted);
+      if (code === null) {
+        expect(lines).toEqual([]);
+      } else {
+        expect(lines, run.stderr).toHaveLength(1);
+        expect(lines[0]).toContain(code);
+        expect(existsSync(faulted)).toBe(true);
+      }
+      expect(run.stdoutLinesNaming(faulted)).toEqual([]);
+      // The other root has no fault: it is removed and no line names it.
+      expect(existsSync(other)).toBe(false);
+      expect(run.stderrLinesNaming(other)).toEqual([]);
+    } finally {
+      run.removeRoots();
+    }
   },
   { timeout: 60_000 },
 );
