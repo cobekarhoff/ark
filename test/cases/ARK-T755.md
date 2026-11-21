@@ -18,6 +18,7 @@ Expected: When `results/evidence/` holds a folder with none of `base`, `head` an
 ## Preconditions
 
 - A real run folder built with `makeRun` of `test/pr-writing.test.ts` (the builder ARK-T363 uses), with no `plan.yml`, so the body filters no entry by the plan (`ledger.planCases` is undefined).
+- The ticket has a criterion `AC3` with no `verified_by` (as `suiteRun` sets up for ARK-T363), so the ledger reads `results/evidence/AC3.md` for it.
 - `results/evidence/` holds:
   - `ARK-T1/` with `head/result.json` (passed, with a head sha), `base/result.json` (failed), `head/command.log`, and `cause.md` beside them;
   - `ARK-T9/` with only `cause.md` and `profile/p.cpuprofile` (an orphan case folder a full run stripped);

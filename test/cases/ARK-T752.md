@@ -23,7 +23,7 @@ Expected: When a full `ark test` publishes its evidence, the system shall keep e
   - a top-level file `AC3.md`;
   - a folder `AC8/` with `notes.md` (no `base`, `head` or `census` in it);
   - in `ARK-T1/`: `cause.md` and `profile/p.cpuprofile`;
-  - stale run-owned files no run of this suite writes: `ARK-T1/head/old.log`, `ARK-T1/base/old.log`, and `ARK-T1/census/result.json` (the fixture has no census, so a stale census folder shows plainly);
+  - stale run-owned files no run of this suite writes: `ARK-T1/head/old.log`, `ARK-T1/base/old.log`, and `ARK-T1/census/result.json` (the fixture's census run writes to `results/census/evidence.next`, never to `results/evidence`, so a census folder there is hand-written and shows plainly);
   - `ARK-T1/head/result.json` overwritten with a stale marker (`"sha": "stale"`).
 
 ## Steps
