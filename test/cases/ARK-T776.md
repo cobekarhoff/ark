@@ -16,8 +16,8 @@ Prove the 503 contract of the run route on a cold hub: while the first read of a
 ## Preconditions
 
 - A real hub (`startHub` of `test/helpers.ts` through `start()` of `test/hub.test.ts`) on a temp `ARK_HOME` from `isolatedEnvironment()`, with the fake tools of `installFakeTools({ orca: orcaAnswersFor(run) })`.
-- The Ark home holds project `p` with one open run `<today>-ARK-<n>-1` (`writeRun`) and the large project of `test/hub-home-lag.test.ts` (1,620 run folders in the real shape, written by the same builder, not a copy of it), written once per test file and shared read only with ARK-T662. No change under `hub/`, no env var or fake that delays the read: the hold is the size of the home.
-- The validator records once, on an idle host, how long the first read of this home takes (the time from the printed port to the first 200 of the run route), and keeps the home large enough that this is at least 4 times 250 ms.
+- The Ark home holds project `p` with one open run `<today>-ARK-<n>-1` (`writeRun`) and the large project of `test/hub-home-lag.test.ts` (its first 800 run folders and 1,500 tickets in the real shape, written by the same builder, not a copy of it; the full 1,620 runs and 3,030 tickets read for 13 s at host load 19, above the 10 s poll bound of ARK-T662), written once per test file and shared read only with ARK-T662. No change under `hub/`, no env var or fake that delays the read: the hold is the size of the home.
+- The home is large enough that its first read lasts well over 250 ms: the builder's doc comment records 4 s for 800 runs and 1,500 tickets at host load 19 on 10 cores (1.1 s for 400 and 600, 0.2 s for 100 and 200). The first 503 `loading` of the test fails when the hold is gone.
 
 ## Steps
 
