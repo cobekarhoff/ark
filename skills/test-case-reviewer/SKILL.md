@@ -34,8 +34,18 @@ Also check the structure. Each case has an objective, preconditions, steps, expe
 A sentence of a case is each sentence in its objective, preconditions, steps, expected results, `risk` and `Expected:` EARS statement. The technique, level, priority and checkpoints are checked by the structure paragraph above.
 
 - **First review of a case:** check every sentence of the case once against the rules above and list every false one in this review. Do not stop at the first finding.
-- **Later review of the same case:** reject only for a sentence that the last change made false, or for a listed sentence that is still false. The last change is what changed after the latest earlier findings file of the same pass: in pass 1 what the writer changed, in pass 2 what the diff changed (its `Reviewed head:` line, when that file has one, names the commit). A sentence that the earlier review read and did not list is not a finding now.
-- Find the earlier review in `findings/test-case-review-<n-1>.md` and the files before it, in the same run folder. They are the only record of which sentences were listed: a case of `test_case_source: zephyr` is a draft with no other record. A case is in its first review of a pass only when no earlier findings file of that pass exists in the run folder, or when it was added, or rewritten from scratch, after the latest such file. Every other case is in a later review, whether or not an earlier file names it: a case that an earlier review read and did not list passed that review.
+- **Later review of the same case:** reject only for a sentence that the last change made false, or for a listed sentence that is still false, and only when that sentence names a wrong exit code, count, test title, file path or AC link. The last change is what changed after the latest earlier findings file of the same pass: in pass 1 what the writer changed, in pass 2 what the diff changed (its `Reviewed head:` line, when that file has one, names the commit). A sentence that the earlier review read and did not list is not a finding now.
+- **Notes in a later review:** List every other false or too-wide sentence of a later review under `## Notes (P2)`. A note does not change the verdict. The writer fixes it before the validator starts, in the same pass as any rejection of that review. When the review approves, no further review follows. In pass 2 the case has no writer: the validator fixes the notes, in the same round as any rejection, or in one fix pass when the review approves, and no further review follows.
+- **What a later review keeps:** Rules 1 to 4 of pass 1 and the structure checks still reject in a later review. A note listed in an earlier file never rejects in a later review, also when the sentence is still false.
+- Find the earlier review in `findings/test-case-review-<n-1>.md` and the files before it, in the same run folder. They are the only record of which sentences were listed: a case of `test_case_source: zephyr` is a draft with no other record. A case is in its first review of a pass only when no earlier findings file of that pass exists in the run folder, or when it was added, or rewritten from scratch, after the latest such file. Every other case is in a later review, whether or not an earlier file names it: a case that an earlier review read and did not list passed that review. The fix pass of notes starts no review.
+
+### A sentence about a command
+
+A sentence about what a command shows (a negative control, a `-t` pattern, a grep count) is true or false by the output of the command. Check it by running the command once, in the same form as the sentence. Quote the command and its output in the finding or note.
+
+- Run only the command of that sentence. A `bun test` command runs one test file (`bun test <file> -t <pattern>`), never the suite and never `--rerun-each` of a suite.
+- The command edits no tracked file. Never stop a process by name (`pkill`, `killall`): stop only a process you started, by its PID.
+- A sentence about a test that does not exist yet (the validator writes it later) cannot be run. The sentence must say the result is a plan. A sentence that states it as a shown output is false: list it.
 
 ## Pass 2: the diff (after the validator step, before the code review)
 
@@ -72,6 +82,14 @@ Each rejection names the case id (or the test file and title in pass 2), the rul
 - ARK-T21: no real risk (rule 1). Evidence: risk says "check the config", names no defect.
 ```
 
+Each note, in a later review, is one list line under the heading `## Notes (P2)`: the case id (or the test file and title in pass 2), the false text copied verbatim as one span in double quotes, and what is false. It does not name a rule. The run lead greps the span in the case file to check the fix, so copy it character for character from one line of the case, never paraphrase or quote it from memory, and take a span that has no `"`, `$`, backtick or backslash (a `'` is fine). Example:
+
+```
+## Notes (P2)
+
+- ARK-T7: "the negative control fails on the empty file" is false: `bun test test/x.test.ts -t 'empty'` prints 0 tests run. Fix the sentence; this does not change the verdict.
+```
+
 End the file with exactly one verdict line:
 
 ```
@@ -84,4 +102,4 @@ or
 Verdict: reject
 ```
 
-Approve nothing without a verdict line. One finding means `Verdict: reject`. Report with `worker_done` and name the findings file in `--report-path`.
+Approve nothing without a verdict line. One finding means `Verdict: reject`. A note under `## Notes (P2)` is not a finding: a review with only notes ends `Verdict: approve`. Report with `worker_done` and name the findings file in `--report-path`.

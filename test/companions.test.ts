@@ -15,7 +15,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readTicket } from "../cli/ticket.ts";
 import { runDirectoryOf, writeRun } from "./hub-fixtures.ts";
-import { writeTicket } from "./helpers.ts";
+import { writeFakeCommand, writeTicket } from "./helpers.ts";
+import type { FakeCompanionTools, FakeLead } from "./fake-companion-tools.ts";
 import {
   advance,
   appendRaw,
@@ -649,12 +650,18 @@ test("ARK-T658 ask for a companion with no live worker refuses, and answer with 
 
 // ------------------------------------------------------------------ ARK-T659
 
-const [leadRun, noLeadRun, closedRun, otherRun] = [runId(911), runId(912), runId(913), runId(914)];
+const [leadRun, noLeadRun, closedRun, otherRun, noTerminalRun] = [
+  runId(911),
+  runId(912),
+  runId(913),
+  runId(914),
+  runId(915),
+];
 
-/** A project with `cortana`, open runs R1 (lead), R2 (no lead) and R4 (another lead), and a closed run R3 whose lead is still listed. */
+/** A project with `cortana`, open runs R1 (lead), R2 (no lead), R4 (another lead) and R5 (its lead is listed only through `leadsOnRead`), and a closed run R3 whose lead is still listed. */
 function adviceProject() {
   const state = scenario([entry("cortana", ["run.merged"])]);
-  for (const run of [leadRun, noLeadRun, otherRun])
+  for (const run of [leadRun, noLeadRun, otherRun, noTerminalRun])
     writeRun({
       project,
       run,
@@ -667,17 +674,21 @@ function adviceProject() {
     ticket: { id: run3Ticket, title: "Closed" },
     phase: "closed",
   });
-  const lead = (run: string, number: number) => ({
-    dispatchId: `ctx_lead${number}`,
-    terminal: `term_lead${number}`,
-    workspace: `host_1::${runDirectoryOf(project, run)}/workspace`,
-  });
   state.fake.configure({
-    leads: [lead(leadRun, 1), lead(closedRun, 3), lead(otherRun, 4)],
+    leads: [leadRow(leadRun, 1), leadRow(closedRun, 3), leadRow(otherRun, 4)],
   });
   return state;
 }
 const run3Ticket = closedRun.slice(11, -2);
+
+/** A `worker-list` row of the lead of `run`. A structured lead of a real Orca has no `terminal`: pass `withTerminal` false. */
+function leadRow(run: string, number: number, withTerminal = true): FakeLead {
+  return {
+    dispatchId: `ctx_lead${number}`,
+    ...(withTerminal ? { terminal: `term_lead${number}` } : {}),
+    workspace: `host_1::${runDirectoryOf(project, run)}/workspace`,
+  };
+}
 
 const adviceText = "Run R1 touches the same file as R3.";
 
@@ -700,30 +711,175 @@ test("ARK-T659 advise sends the run lead one status message marked as advice and
   expect(copy.body).toContain(leadRun);
 });
 
-test("ARK-T659 advise refuses a run with no live lead, a closed run, an unknown run and a name not in ark.yml, and sends nothing", () => {
+/** The `send` attempts of the fake, refused or delivered, as recipients. */
+const sendRecipients = (fake: FakeCompanionTools): string[] =>
+  fake
+    .calls()
+    .filter((call) => call[1] === "send")
+    .map((call) => call[call.indexOf("--to") + 1]);
+
+const workerListReads = (fake: FakeCompanionTools): number =>
+  fake.verbs().filter((verb) => verb === "worker-list").length;
+
+/** Advice that went to Master Chief and nowhere else: exit 0, the fallback line, one message marked not delivered that holds the reason and the text. */
+function expectWentToChief(
+  result: { code: number; out: string; err: string },
+  fake: FakeCompanionTools,
+  run: string,
+  ...reasonFragments: string[]
+): void {
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  const lines = result.out.trim().split("\n");
+  expect(lines).toHaveLength(1);
+  const start = `advice for ${run} went to Master Chief: `;
+  expect(lines[0]).toStartWith(start);
+  const reason = lines[0].slice(start.length);
+  expect(reason).not.toBe("");
+  for (const fragment of reasonFragments) expect(reason).toContain(fragment);
+  const sent = fake.sent();
+  expect(sent).toHaveLength(1);
+  expect(sent[0].to).toBe("term_chief");
+  expect(sent[0].subject).toStartWith(
+    `Companion cortana advice for ${run} (not delivered to the lead)`,
+  );
+  expect(sent[0].body).toContain(reason);
+  expect(sent[0].body).toContain(adviceText);
+  // Every attempt, delivered or refused: the lead is addressed by its terminal, never by dispatch.
+  expect(sendRecipients(fake).filter((to) => to.startsWith("dispatch:"))).toEqual([]);
+}
+
+test("ARK-T659 advise for a run with no live lead sends Master Chief the advice marked not delivered, prints the fallback line and exits 0", () => {
   const { fake } = adviceProject();
-  expectRefusal(arkP("companion", "advise", "cortana", noLeadRun, adviceText), noLeadRun);
+  const result = arkP("companion", "advise", "cortana", noLeadRun, adviceText);
+  expectWentToChief(result, fake, noLeadRun, "no live run lead");
+  expect(sendRecipients(fake)).toEqual(["term_chief"]);
+});
+
+test("ARK-T659 advise refuses a closed run, an unknown run and a name not in ark.yml, and sends nothing", () => {
+  const { fake } = adviceProject();
   // The lead of the closed run is still listed in Orca: the run's phase decides.
   expectRefusal(arkP("companion", "advise", "cortana", closedRun, adviceText), "closed");
   expectRefusal(arkP("companion", "advise", "cortana", runId(999), adviceText), runId(999));
   expectRefusal(arkP("companion", "advise", "ghost", leadRun, adviceText), "ghost");
+  expect(sendRecipients(fake)).toEqual([]);
+});
+
+test("ARK-T659 advise sends Master Chief the advice when the send to the lead fails with task_not_found or times out, or worker-list fails", () => {
+  const { fake } = adviceProject();
+  fake.configure({ failSendTo: ["term_lead1"], failSendError: "task_not_found" });
+  expectWentToChief(
+    arkP("companion", "advise", "cortana", leadRun, adviceText),
+    fake,
+    leadRun,
+    "task_not_found",
+  );
+
+  // Only the send to the lead hangs: the reads and the send to Master Chief answer at once.
+  fake.configure({ failSendTo: [], hangSendTo: ["term_lead1"], hangMilliseconds: 60_000 });
+  fake.clearCalls();
+  const saved = process.env.ARK_ORCA_TIMEOUT_MS;
+  process.env.ARK_ORCA_TIMEOUT_MS = "5000";
+  try {
+    expectWentToChief(
+      arkP("companion", "advise", "cortana", leadRun, adviceText),
+      fake,
+      leadRun,
+      "timed out after",
+    );
+  } finally {
+    if (saved === undefined) delete process.env.ARK_ORCA_TIMEOUT_MS;
+    else process.env.ARK_ORCA_TIMEOUT_MS = saved;
+  }
+
+  fake.configure({
+    hangSendTo: [],
+    leadsOnRead: [{ fail: "worker-list read failed: orca is busy" }],
+  });
+  fake.clearCalls();
+  expectWentToChief(
+    arkP("companion", "advise", "cortana", leadRun, adviceText),
+    fake,
+    leadRun,
+    "orca is busy",
+  );
+});
+
+test("ARK-T659 advise reads worker-list once more for a lead row with no terminal, and never sends to a dispatch", () => {
+  const { fake } = adviceProject();
+  const withoutTerminal = leadRow(noTerminalRun, 5, false);
+
+  // The terminal appears on the second read: the advice goes to the lead, as in the first test.
+  fake.configure({ leadsOnRead: [[withoutTerminal], [leadRow(noTerminalRun, 5)]] });
+  fake.clearCalls();
+  const delivered = arkP("companion", "advise", "cortana", noTerminalRun, adviceText);
+  expect(delivered.err).toBe("");
+  expect(delivered.code).toBe(0);
+  expect(workerListReads(fake)).toBe(2);
+  const sent = fake.sent();
+  expect(sent.map((message) => message.to)).toEqual(["term_lead5", "term_chief"]);
+  expect(sent[0].body).toContain(adviceText);
+  expect(sent[1].subject).toBe(`Companion cortana advised the lead of ${noTerminalRun}`);
+  expect(sendRecipients(fake).filter((to) => to.startsWith("dispatch:"))).toEqual([]);
+
+  // No terminal on either read: Master Chief gets the advice, and no send names the dispatch.
+  fake.configure({ leadsOnRead: [[withoutTerminal], [withoutTerminal]] });
+  fake.clearCalls();
+  const none = arkP("companion", "advise", "cortana", noTerminalRun, adviceText);
+  expectWentToChief(none, fake, noTerminalRun, "no terminal");
+  expect(workerListReads(fake)).toBe(2);
+  expect(sendRecipients(fake)).toEqual(["term_chief"]);
+
+  // The second read fails: the retry is inside the fallback, so the advice still reaches Master Chief.
+  fake.configure({
+    leadsOnRead: [[withoutTerminal], { fail: "worker-list read failed: orca is busy" }],
+  });
+  fake.clearCalls();
+  const failedRead = arkP("companion", "advise", "cortana", noTerminalRun, adviceText);
+  expectWentToChief(failedRead, fake, noTerminalRun, "orca is busy");
+  expect(workerListReads(fake)).toBe(2);
+  expect(sendRecipients(fake)).toEqual(["term_chief"]);
+});
+
+test("ARK-T659 advise exits 1 and names both failures when the send to the lead and the send to Master Chief fail, or no lead is found and the send to Master Chief fails", () => {
+  const { fake } = adviceProject();
+  fake.configure({ failSendTo: ["term_lead1", "term_chief"] });
+  const both = arkP("companion", "advise", "cortana", leadRun, adviceText);
+  expectRefusal(both, "send refused for term_lead1", "send refused for term_chief");
+  expect(fake.sent()).toEqual([]);
+
+  fake.configure({ failSendTo: ["term_chief"] });
+  const noLead = arkP("companion", "advise", "cortana", noLeadRun, adviceText);
+  expectRefusal(noLead, "no live run lead", "send refused for term_chief");
   expect(fake.sent()).toEqual([]);
 });
 
-test("ARK-T659 advise exits 1 with a named line when a send or Orca fails, and sends no copy for advice that did not reach the lead", () => {
+test("ARK-T659 advise exits 1 when only the copy to Master Chief fails, and the lead keeps the advice", () => {
   const { fake } = adviceProject();
-  fake.configure({ failSendTo: ["term_lead1"] });
-  expectRefusal(arkP("companion", "advise", "cortana", leadRun, adviceText), leadRun);
-  expect(fake.sent()).toEqual([]);
-
-  // The lead keeps advice it got when only the copy fails.
   fake.configure({ failSendTo: ["term_chief"] });
   expectRefusal(arkP("companion", "advise", "cortana", leadRun, adviceText), "copy");
   expect(fake.sent().map((message) => message.to)).toEqual(["term_lead1"]);
+});
 
-  fake.configure({ failSendTo: [], failAll: true });
+test("ARK-T659 advise exits 1 and says the advice was not delivered anywhere when no Master Chief is live or Orca is down", () => {
+  const { fake, workspace } = adviceProject();
+  fake.configure({
+    terminals: [{ handle: "term_chief", connected: false, worktreePath: workspace }],
+  });
+  expectRefusal(
+    arkP("companion", "advise", "cortana", leadRun, adviceText),
+    "Master Chief",
+    "not delivered anywhere",
+  );
+  expect(fake.sent()).toEqual([]);
+
+  fake.configure({ failAll: true });
   fake.clearCalls();
-  expectRefusal(arkP("companion", "advise", "cortana", leadRun, adviceText));
+  expectRefusal(
+    arkP("companion", "advise", "cortana", leadRun, adviceText),
+    "orca is not reachable",
+    "not delivered anywhere",
+  );
   expect(fake.sent()).toEqual([]);
 });
 
@@ -814,4 +970,78 @@ test("ARK-T659 a ticket proposed with a source key reads with no warning and no 
   } finally {
     warn.mockRestore();
   }
+});
+
+// ------------------------------------------------------------------ ARK-612
+
+/** The hung `run-list` of the two cases: 12 s, past the 10 s production Orca limit and inside the 60 s limit of the test helper. */
+const slowRunListMilliseconds = 12_000;
+
+test("ARK-T746 an ark process started by the test helper waits up to 60 s for an Orca read, so ark companion advise succeeds when the fake orca answers run-list after 12 s", () => {
+  const { fake } = adviceProject();
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBeUndefined();
+  fake.configure({ hangVerbs: ["run-list"], hangMilliseconds: slowRunListMilliseconds });
+  const result = arkP("companion", "advise", "cortana", leadRun, adviceText);
+  expect(result.err).not.toContain("Orca did not answer");
+  expect(result.err).toBe("");
+  expect(result.code).toBe(0);
+  expect(fake.sent().map((message) => message.to)).toEqual(["term_lead1", "term_chief"]);
+  // The pause ran to its end: the command waited for the answer instead of giving up at 10 s.
+  expect(fake.hungDone().map((call) => call[1])).toEqual(["run-list"]);
+});
+
+test("ARK-T747 the ark process of the test helper sees ARK_ORCA_TIMEOUT_MS 60000 when the test sets none and the test's own value when it sets one, and an ark process with no ARK_ORCA_TIMEOUT_MS started outside the helper still cuts an Orca read at 10 s", () => {
+  const { fake } = adviceProject();
+  // A wrapper first on PATH logs the value the ark process passes to each orca call, then runs the fake.
+  const logFile = join(process.env.FAKE_COMPANION_DIR as string, "orca-timeout.log");
+  writeFakeCommand(
+    "orca",
+    `printf '%s\\n' "\${ARK_ORCA_TIMEOUT_MS-absent}" >> "${logFile}"\nexec "$FAKE_COMPANION_DIR/bin/orca" "$@"`,
+  );
+  const loggedValues = (): string[] =>
+    existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter(Boolean) : [];
+
+  // The test sets none: the helper gives the ark process 60000.
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBeUndefined();
+  expect(arkP("companion", "advise", "cortana", leadRun, adviceText).code).toBe(0);
+  expect(new Set(loggedValues())).toEqual(new Set(["60000"]));
+
+  // The test sets its own value: it wins over the default. 600000 is far above any stall of the host.
+  writeFileSync(logFile, "");
+  process.env.ARK_ORCA_TIMEOUT_MS = "600000";
+  try {
+    expect(arkP("companion", "advise", "cortana", leadRun, adviceText).code).toBe(0);
+  } finally {
+    delete process.env.ARK_ORCA_TIMEOUT_MS;
+  }
+  expect(new Set(loggedValues())).toEqual(new Set(["600000"]));
+
+  // Outside the helper nothing sets the value: ark cuts the hung read at its production 10 s limit.
+  fake.clearCalls();
+  fake.configure({ hangVerbs: ["run-list"], hangMilliseconds: slowRunListMilliseconds });
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name !== "ARK_ORCA_TIMEOUT_MS"),
+  );
+  const started = performance.now();
+  const outside = Bun.spawnSync(
+    [
+      "bun",
+      join(import.meta.dir, "..", "cli", "ark.ts"),
+      "companion",
+      "advise",
+      "cortana",
+      leadRun,
+      adviceText,
+      "--project",
+      project,
+    ],
+    { env: { ...environment, ARK_READER_TIMEOUT_MS: "30000" } },
+  );
+  const elapsedMilliseconds = performance.now() - started;
+  expect(outside.stderr.toString()).toContain("Orca did not answer");
+  expect(outside.exitCode).toBe(1);
+  expect(fake.sent()).toEqual([]);
+  // Cut before the 12 s answer, by the 10 s limit and not by a shorter one.
+  expect(fake.hungDone()).toEqual([]);
+  expect(elapsedMilliseconds).toBeGreaterThanOrEqual(9_500);
 });
