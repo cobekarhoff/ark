@@ -449,54 +449,55 @@ command with `{report}` replaced, then the whole output of the suite, and the la
 the base run does not, because its suite crashed or its test file was deleted at head, gets a failed
 base `result.json`; a case whose suite or test file the base did not run gets the status `not run`,
 with no `sha` and no `command.log`. A criterion whose cases have no result because a suite was
-skipped reads `not run` and does not fail `ark test`. A folder of a case that no longer appears is
-removed. The suite logs stay in `<suite>.log` and `base-<suite>.log`. An AC with a non-empty
-`verified_by` list is decided by its test cases at every level, unit included: passing when each has
-a passing result, failing when one has a failing result, missing when one has no result. An AC with
-no `verified_by` still reads the integration and e2e results tagged with its AC id. A method other
-than `test` shows through the manual gate, as `manual: true` does; its evidence file
-`results/evidence/<AC id>.md` is checked by `ark merge-request open`. Each criterion line ends with
-`via <case> <result>, ...`, `via tag` or `method <method>`, and one `evidence results/evidence/<test
-case id>/{base,head}` line follows for each case. It refuses a bad entry in `test/cases/` and names
-its file. `--quick` runs, at head only and with no base run, each suite that `paths` selects: a
-suite with `changed_command` runs it with `{base}` set to the run's worktree base commit (the tests
-the change can reach; a run with no base runs the whole `command`), records the test files that ran
-in the `files` of its suite row and prints them on its `suite` line, and a changed command that
-selects no file prints `skipped (no test files are affected)`; any other suite with `base_files`
-runs the changed own-commit test files, and one with neither runs whole. A full `ark test` never
-reads `changed_command`: it runs the `command` of every suite, and the last full run is the gate; it
-records `mode: quick` and a `duration` in test.completed, a pass reads `not run` for each AC, and it
-prints `mode: quick (not a gate: run ark test <run> before the MR)`. That line is not the verdict
-for a run with no code file: `ark merge-request open` accepts its passing quick run (see `ark
-merge-request open`). A plain `ark test` records `mode: full`, and an event with no `mode` reads as
-full. `ark run close <run> handed_off` refuses unless the last test at the head is full. `ark
-merge-request open` refuses unless it is full or a passing quick test of a run with no code file
-(see `merge-request open`). Both name `ark test <run>`. `ark test` starts a detached runner process
-and prints what the runner prints, so a lost connection does not stop the tests: the runner takes
-the host lock itself, holds it until it ends, and writes `results/runner.json` (pid, mode, state,
-exit code), `results/runner.out` and `results/runner.err` in the run folder. A signal to the `ark
-test` caller does not stop the suites. `--wait` prints what the runner of the run printed, from the
-start, and exits with its code, whether the runner still runs or has ended; with no runner it exits
-1. After a lost connection run `ark test <run> --wait`, never `ark test` again. A second `ark test`
-of a run with a live runner of the same mode attaches to it; one of another mode (`--quick` against
-full) exits 1 and names `--wait` and `--stop`. A caller whose `--keep-going` differs from the
-runner's attaches and prints one line to stderr that says which behavior the runner has. A runner
-whose pid is dead or whose start time changed is stale: `--wait` prints its output and exits 1, and
-the next `ark test` starts a new runner. `--stop` sends SIGTERM to the runner, which stops every
-suite process group, records the state `stopped` and releases the lock; the command returns when the
-runner is gone, and an attached caller exits 128 plus the signal number. A passed suite result is
-kept per project and printed `reused`: the head result is keyed by the HEAD of every repo, the mode
-and the suite command (a checkout with uncommitted changes reads and stores nothing); the base
-result by the base commits, a hash of the copied test files and the suite command, and with every
-base suite stored there is no checkout, `setup` or compose. A reused result keeps its evidence, its
-`base_passed` and its flaky files; a failed result is never stored; `checks` run on every call. At
-head, a failed test file runs once more through `base_command` with that one file (a failure at base
-is data and is not retried). A pass counts and the file is listed as `flaky` in the output, in
-`test.completed` (`flaky`, and `reused` for the reused suites), in the retro metrics and in the MR
-body; a second failure fails the suite, unless the file is red on main. A file that still fails
-after its retry and that the run's own commits did not touch (first-parent, no merge commits: a file
-that came in through `ark worktree sync` is untouched) runs once through `base_command` at the tip
-of the target branch (`git fetch origin`, then `origin/<target>`, in a throwaway `git clone
+skipped reads `not run` and does not fail `ark test`. A full run owns only `<case>/base` and
+`<case>/head` of `results/evidence` and keeps every other file and folder; a case that no longer
+appears loses its `base` and `head`. The suite logs stay in `<suite>.log` and `base-<suite>.log`. An
+AC with a non-empty `verified_by` list is decided by its test cases at every level, unit included:
+passing when each has a passing result, failing when one has a failing result, missing when one has
+no result. An AC with no `verified_by` still reads the integration and e2e results tagged with its
+AC id. A method other than `test` shows through the manual gate, as `manual: true` does; its
+evidence file `results/evidence/<AC id>.md` is checked by `ark merge-request open`. Each criterion
+line ends with `via <case> <result>, ...`, `via tag` or `method <method>`, and one `evidence
+results/evidence/<test case id>/{base,head}` line follows for each case. It refuses a bad entry in
+`test/cases/` and names its file. `--quick` runs, at head only and with no base run, each suite that
+`paths` selects: a suite with `changed_command` runs it with `{base}` set to the run's worktree base
+commit (the tests the change can reach; a run with no base runs the whole `command`), records the
+test files that ran in the `files` of its suite row and prints them on its `suite` line, and a
+changed command that selects no file prints `skipped (no test files are affected)`; any other suite
+with `base_files` runs the changed own-commit test files, and one with neither runs whole. A full
+`ark test` never reads `changed_command`: it runs the `command` of every suite, and the last full
+run is the gate; it records `mode: quick` and a `duration` in test.completed, a pass reads `not run`
+for each AC, and it prints `mode: quick (not a gate: run ark test <run> before the MR)`. That line
+is not the verdict for a run with no code file: `ark merge-request open` accepts its passing quick
+run (see `ark merge-request open`). A plain `ark test` records `mode: full`, and an event with no
+`mode` reads as full. `ark run close <run> handed_off` refuses unless the last test at the head is
+full. `ark merge-request open` refuses unless it is full or a passing quick test of a run with no
+code file (see `merge-request open`). Both name `ark test <run>`. `ark test` starts a detached
+runner process and prints what the runner prints, so a lost connection does not stop the tests: the
+runner takes the host lock itself, holds it until it ends, and writes `results/runner.json` (pid,
+mode, state, exit code), `results/runner.out` and `results/runner.err` in the run folder. A signal
+to the `ark test` caller does not stop the suites. `--wait` prints what the runner of the run
+printed, from the start, and exits with its code, whether the runner still runs or has ended; with
+no runner it exits 1. After a lost connection run `ark test <run> --wait`, never `ark test` again. A
+second `ark test` of a run with a live runner of the same mode attaches to it; one of another mode
+(`--quick` against full) exits 1 and names `--wait` and `--stop`. A caller whose `--keep-going`
+differs from the runner's attaches and prints one line to stderr that says which behavior the runner
+has. A runner whose pid is dead or whose start time changed is stale: `--wait` prints its output and
+exits 1, and the next `ark test` starts a new runner. `--stop` sends SIGTERM to the runner, which
+stops every suite process group, records the state `stopped` and releases the lock; the command
+returns when the runner is gone, and an attached caller exits 128 plus the signal number. A passed
+suite result is kept per project and printed `reused`: the head result is keyed by the HEAD of every
+repo, the mode and the suite command (a checkout with uncommitted changes reads and stores nothing);
+the base result by the base commits, a hash of the copied test files and the suite command, and with
+every base suite stored there is no checkout, `setup` or compose. A reused result keeps its
+evidence, its `base_passed` and its flaky files; a failed result is never stored; `checks` run on
+every call. At head, a failed test file runs once more through `base_command` with that one file (a
+failure at base is data and is not retried). A pass counts and the file is listed as `flaky` in the
+output, in `test.completed` (`flaky`, and `reused` for the reused suites), in the retro metrics and
+in the MR body; a second failure fails the suite, unless the file is red on main. A file that still
+fails after its retry and that the run's own commits did not touch (first-parent, no merge commits:
+a file that came in through `ark worktree sync` is untouched) runs once through `base_command` at
+the tip of the target branch (`git fetch origin`, then `origin/<target>`, in a throwaway `git clone
 --shared` made like the base checkout, with `setup` and compose). When each test that failed at head
 also fails there (matched by name), the output prints a line that starts with `red on main` and
 names the file, `test.completed` lists it in `red_on_main` (omitted when empty and in a quick run),
@@ -1223,14 +1224,14 @@ $ARK_HOME/projects/<project>/
 
 `results/` holds the output of `ark test`:
 
-| Path                                     | Content                                                                                                                                           |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<suite>.log`, `<suite>.report`          | Output and report of a suite at head. At base the names start with `base-`.                                                                       |
-| `check-<name>.log`                       | Output of a project check.                                                                                                                        |
-| `evidence/<case id>/{base,head,census}/` | The evidence of each test case, with its `result.json`.                                                                                           |
-| `evidence/AC<k>.md`                      | The evidence file of an AC that a person proves with the manual gate.                                                                             |
-| `census/`                                | Output of the census run: the run's own test files at the pristine base, run to list and count their tests and, for a refactor run, to time them. |
-| `runner.json`, `runner.out`              | State and output of the background runner that `ark test` starts.                                                                                 |
+| Path                              | Content                                                                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<suite>.log`, `<suite>.report`   | Output and report of a suite at head. At base the names start with `base-`.                                                                       |
+| `check-<name>.log`                | Output of a project check.                                                                                                                        |
+| `evidence/<case id>/{base,head}/` | The evidence of each test case, with its `result.json`.                                                                                           |
+| `evidence/AC<k>.md`               | The evidence file of an AC that a person proves with the manual gate.                                                                             |
+| `census/`                         | Output of the census run: the run's own test files at the pristine base, run to list and count their tests and, for a refactor run, to time them. |
+| `runner.json`, `runner.out`       | State and output of the background runner that `ark test` starts.                                                                                 |
 
 `workspace/` is a mirror of your workspace. A repo is named by its path relative to the workspace, for example `repos/platform`. A single-repo workspace has one repo, named `.`. For a repo the run touches, `ark worktree create` makes a git worktree on the branch `ark/<ticket id>-<slug>` (slug: the ticket title in lowercase with hyphens, at most 40 characters; the lowest free `-2`, `-3`, ... is added when the name exists locally or on origin) at the same relative path under `workspace/`. Every repo the run does not touch, and every other entry in the workspace root except `.git`, is a symlink to the workspace. `ark run close` removes each worktree and its local branch. It keeps a worktree with uncommitted changes, an unmerged branch of a merged run, and the branch of a handed-off or aborted run that has commits ahead of its base.
 

@@ -758,7 +758,11 @@ function readEvidence(directory: string): EvidenceEntry[] | null {
     return { status: status ?? "missing", sha: sha ?? "" };
   };
   return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        ["base", "head"].some((side) => existsSync(join(root, entry.name, side))),
+    )
     .map((entry) => {
       const base = sideResult(entry.name, "base");
       const head = sideResult(entry.name, "head");

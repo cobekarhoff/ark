@@ -2,11 +2,13 @@ import type { Subprocess } from "bun";
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   watch,
   writeFileSync,
@@ -793,7 +795,7 @@ describe("ark test evidence of the last full run", () => {
     expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
   });
 
-  test("ARK-T269 after a stopped full ark test the next full run removes the evidence folders of renamed cases and writes the new ones", async () => {
+  test("ARK-T269 after a stopped full ark test the next full run removes the evidence of renamed cases and writes the new ones", async () => {
     const fixture = evidenceFixture(true);
     writeFileSync(join(fixture.directory, "pass"), "");
     const first = await arkDone(fixture, "test", fixture.runId);
@@ -824,6 +826,181 @@ describe("ark test evidence of the last full run", () => {
     expect(Object.keys(treeOf(evidenceDirectoryOf(fixture)))).toContain("/DET-T3/head/command.log");
     expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
   });
+
+  // ARK-614: a full run owns only `<case>/base` and `<case>/head`; every other entry a worker put there stays.
+  const putEvidence = (fixture: Fixture, files: Record<string, string>) => {
+    for (const [name, text] of Object.entries(files)) {
+      const path = join(evidenceDirectoryOf(fixture), name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+  };
+  /** The files of `tree` under one folder or file name, so a case compares the part it owns. */
+  const under = (tree: Record<string, string>, prefix: string) =>
+    Object.fromEntries(Object.entries(tree).filter(([path]) => path.startsWith(prefix)));
+  const workerFiles = {
+    "AC3.md": "# AC3 by hand\n",
+    "AC8/notes.md": "ac8 notes\n",
+    "DET-T1/cause.md": "root cause\n",
+    "DET-T1/profile/p.cpuprofile": '{"nodes":[]}',
+    "DET-T1/census/result.json": '{"case":"DET-T1","status":"passed","sha":"worker"}',
+  };
+
+  test("ARK-T752 a full ark test replaces only the base and head folders of a case and keeps every other evidence file and folder", async () => {
+    const fixture = evidenceFixture(false);
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    putEvidence(fixture, {
+      ...workerFiles,
+      "DET-T1/head/old.log": "stale head log\n",
+      "DET-T1/base/old.log": "stale base log\n",
+      "DET-T1/head/result.json": '{"case":"DET-T1","status":"passed","sha":"stale"}',
+    });
+    const before = treeOf(evidenceDirectoryOf(fixture));
+    const kept = (tree: Record<string, string>) =>
+      Object.fromEntries(Object.keys(workerFiles).map((name) => [name, tree[`/${name}`]]));
+    expect(Object.values(kept(before)).every((text) => text !== undefined)).toBe(true);
+
+    const checkRun = (label: string) => {
+      const after = treeOf(evidenceDirectoryOf(fixture));
+      expect(kept(after), label).toEqual(kept(before));
+      for (const side of ["base", "head"])
+        expect(Object.keys(under(after, `/DET-T1/${side}/`)).sort(), `${label} ${side}`).toEqual([
+          `/DET-T1/${side}/command.log`,
+          `/DET-T1/${side}/result.json`,
+        ]);
+      expect(JSON.parse(after["/DET-T1/head/result.json"]).sha, label).not.toBe("stale");
+      expect(evidenceEntriesOf(fixture), label).toEqual(["evidence"]);
+    };
+
+    // A suite that runs, then the same heads again: the suite result is replayed from the cache into the same publish.
+    commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+    const second = await arkDone(fixture, "test", fixture.runId);
+    expect(second.code, second.err + second.out).toBe(0);
+    expect(second.out).not.toMatch(/suite {6}fast \(integration\) {2}passed {2}reused/);
+    checkRun("fresh run");
+
+    putEvidence(fixture, { "DET-T1/head/old.log": "stale again\n" });
+    const cached = await arkDone(fixture, "test", fixture.runId);
+    expect(cached.code, cached.err + cached.out).toBe(0);
+    expect(cached.out).toMatch(/suite {6}fast \(integration\) {2}passed {2}reused/);
+    checkRun("cached run");
+  });
+
+  test("ARK-T753 a full ark test strips base and head from the folder of a case that is gone and keeps its other files", async () => {
+    const fixture = evidenceFixture(false);
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    const orphan = {
+      "DET-T9/base/result.json": '{"case":"DET-T9","status":"failed"}',
+      "DET-T9/head/result.json": '{"case":"DET-T9","status":"passed"}',
+      "DET-T9/head/command.log": "orphan log\n",
+      "DET-T9/cause.md": "orphan cause\n",
+      "DET-T9/logs/repeat.md": "repeat\n",
+    };
+    putEvidence(fixture, {
+      ...orphan,
+      "DET-T1/cause.md": "live cause\n",
+      "AC3.md": "# AC3\n",
+      "AC8/notes.md": "ac8\n",
+    });
+
+    commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+    const second = await arkDone(fixture, "test", fixture.runId);
+    expect(second.code, second.err + second.out).toBe(0);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+
+    const after = treeOf(evidenceDirectoryOf(fixture));
+    expect(under(after, "/DET-T9/")).toEqual({
+      "/DET-T9/cause.md": "orphan cause\n",
+      "/DET-T9/logs/repeat.md": "repeat\n",
+    });
+    expect(after["/DET-T1/cause.md"]).toBe("live cause\n");
+    expect(after["/AC3.md"]).toBe("# AC3\n");
+    expect(after["/AC8/notes.md"]).toBe("ac8\n");
+    expect(Object.keys(after)).toContain("/DET-T1/head/command.log");
+    expect(Object.keys(after)).toContain("/DET-T1/base/result.json");
+  });
+
+  test("ARK-T757 the next ark test puts back the evidence a crashed swap parked in evidence.old, and drops an aside folder that a finished swap left", async () => {
+    const fixture = evidenceFixture(false);
+    const first = await arkDone(fixture, "test", fixture.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    putEvidence(fixture, {
+      "AC3.md": "# AC3\n",
+      "AC8/notes.md": "ac8\n",
+      "DET-T1/cause.md": "root cause\n",
+    });
+    const before = treeOf(evidenceDirectoryOf(fixture));
+    const evidence = evidenceDirectoryOf(fixture);
+    const aside = `${evidence}.old`;
+
+    renameSync(evidence, aside);
+    commitFiles(fixture.mirrorOf("."), { "test/fast.test.ts": fastTest("quick") });
+    const quick = await arkDone(fixture, "test", fixture.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(treeOf(evidence)).toEqual(before);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+
+    renameSync(evidence, aside);
+    commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+    const full = await arkDone(fixture, "test", fixture.runId);
+    expect(full.code, full.err + full.out).toBe(0);
+    const after = treeOf(evidence);
+    expect(after["/AC3.md"]).toBe("# AC3\n");
+    expect(after["/AC8/notes.md"]).toBe("ac8\n");
+    expect(after["/DET-T1/cause.md"]).toBe("root cause\n");
+    expect(after["/DET-T1/head/result.json"]).not.toBe(before["/DET-T1/head/result.json"]);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+
+    mkdirSync(aside);
+    writeFileSync(join(aside, "stale.md"), "stale\n");
+    commitFiles(fixture.mirrorOf("."), { "src/third.txt": "third\n" });
+    const last = await arkDone(fixture, "test", fixture.runId);
+    expect(last.code, last.err + last.out).toBe(0);
+    expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+    expect(treeOf(evidence)["/AC8/notes.md"]).toBe("ac8\n");
+  });
+
+  // The fault is a real file system permission on a kept folder: root ignores it, so the case needs a non-root user.
+  test.skipIf(process.getuid?.() === 0)(
+    "ARK-T754 a full ark test whose evidence publish fails leaves the old evidence whole and no staging or aside folder, and the next full run publishes",
+    async () => {
+      const fixture = evidenceFixture(false);
+      const first = await arkDone(fixture, "test", fixture.runId);
+      expect(first.code, first.err + first.out).toBe(0);
+      putEvidence(fixture, {
+        "AC3.md": "# AC3\n",
+        "AC8/notes.md": "ac8\n",
+        "DET-T1/cause.md": "root cause\n",
+      });
+      const before = treeOf(evidenceDirectoryOf(fixture));
+      const locked = join(evidenceDirectoryOf(fixture), "AC8");
+
+      commitFiles(fixture.mirrorOf("."), { "src/second.txt": "second\n" });
+      chmodSync(locked, 0o000);
+      let failed;
+      try {
+        failed = await arkDone(fixture, "test", fixture.runId);
+      } finally {
+        chmodSync(locked, 0o755);
+      }
+      expect(failed.code, failed.out).not.toBe(0);
+      expect(treeOf(evidenceDirectoryOf(fixture))).toEqual(before);
+      expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+
+      commitFiles(fixture.mirrorOf("."), { "src/third.txt": "third\n" });
+      const next = await arkDone(fixture, "test", fixture.runId);
+      expect(next.code, next.err + next.out).toBe(0);
+      const after = treeOf(evidenceDirectoryOf(fixture));
+      expect(after["/AC3.md"]).toBe("# AC3\n");
+      expect(after["/AC8/notes.md"]).toBe("ac8\n");
+      expect(after["/DET-T1/cause.md"]).toBe("root cause\n");
+      expect(Object.keys(after)).toContain("/DET-T1/head/command.log");
+      expect(after["/DET-T1/head/result.json"]).not.toBe(before["/DET-T1/head/result.json"]);
+      expect(evidenceEntriesOf(fixture)).toEqual(["evidence"]);
+    },
+  );
 });
 
 describe("ark test result cache", () => {
