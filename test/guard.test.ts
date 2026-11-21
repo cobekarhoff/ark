@@ -320,6 +320,17 @@ test("ARK-T764 guard: false is a criterion with no guard, and a file without the
     false,
   ]);
   expect(stateOf(withFalse).guards).toEqual([]);
+
+  // A file with no `guard` key at all writes the old `criteria.updated` shape.
+  const withoutKey = startRun("bug");
+  expect(
+    acceptCriteriaFile(withoutKey.runId, withoutKey.runDirectory, [{ id: "AC1" }, { id: "AC2" }])
+      .code,
+  ).toBe(0);
+  const plain = eventsOf(withoutKey).findLast((event) => event.type === "criteria.updated");
+  expect(plain?.data).not.toHaveProperty("guards");
+  expect(guardLines(read(withoutKey, "ticket.md"))).toEqual([]);
+  expect(stateOf(withoutKey).guards).toEqual([]);
 });
 
 /** One refused accept: exit 1, one `ark: ` line that holds every `mentions`, and nothing written. */
@@ -482,6 +493,7 @@ function expectAmendRefused(
 ): void {
   const ticket = read(run, "ticket.md");
   const log = read(run, "events.ndjson");
+  const state = read(run, "state.json");
   const refused = amend();
   expect(refused.code).toBe(1);
   const lines = refused.err.trim().split("\n");
@@ -490,6 +502,7 @@ function expectAmendRefused(
   for (const mention of mentions) expect(lines[0]).toContain(mention);
   expect(read(run, "ticket.md")).toBe(ticket);
   expect(read(run, "events.ndjson")).toBe(log);
+  expect(read(run, "state.json")).toBe(state);
 }
 
 test("ARK-T766 --guard after the criteria gate adds one guard line to that AC and records criteria.amended with guard true, and the red proof then skips the AC", () => {
@@ -589,6 +602,7 @@ test("ARK-T766 --guard on a guard and --no-guard on a non-guard are refused by n
   const guardRun = amendRun("bug", true);
   expectAmendRefused(guardRun, () => amendGuard(guardRun, "--guard"), ["AC2", "already a guard"]);
   expect(guardLines(read(guardRun, "ticket.md")).map(({ owner }) => owner)).toEqual(["AC2"]);
+  expect(parsedGuards(read(guardRun, "ticket.md")).find(([id]) => id === "AC2")?.[1]).toBe(true);
   expect(stateOf(guardRun).guards).toEqual([canonical(guardRun, "AC2")]);
 });
 
@@ -696,6 +710,7 @@ test("ARK-T766 a text amend and a --verified-by amend of a guard AC keep the gua
   );
   expect(renumbered.code, renumbered.err).toBe(0);
 
+  expect(read(run, "ticket.md")).toContain("reworded two");
   expect(read(run, "ticket.md")).toContain("verified_by: [ARK-T2, ARK-T3]");
   expect(guardLines(read(run, "ticket.md")).map(({ owner }) => owner)).toEqual(["AC2"]);
   expect(parsedGuards(read(run, "ticket.md")).find(([id]) => id === "AC2")?.[1]).toBe(true);

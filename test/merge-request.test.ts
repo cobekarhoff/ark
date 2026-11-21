@@ -716,7 +716,7 @@ function testedRun(guard?: { switchFile: string }) {
 }
 
 test(
-  "ARK-T246 ARK-155-AC6 merge-request open refuses a head that changed since the test, with the run id in the next command, then opens after a passing ark test",
+  "ARK-T246 merge-request open refuses a head that changed since the test, with the run id in the next command, then opens after a passing ark test",
   () => {
     const { runId, runDirectory, bare, worktree } = testedRun();
     const tested = git(worktree, "rev-parse", "HEAD");
@@ -1264,6 +1264,7 @@ test(
       const lines = section(body);
       expect(lines.length).toBeGreaterThan(1);
       expect(lines).toContain("- [x] AC1 tested");
+      expect(lines.filter((line) => line.includes("AC1"))).toHaveLength(1);
       const guardLines = lines.filter((line) => line.includes("AC2"));
       expect(guardLines).toHaveLength(1);
       expect(guardLines[0]).toContain("guard");

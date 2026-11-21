@@ -890,10 +890,12 @@ describe("ark test checks", () => {
       ).toEqual(["build"]);
 
       const plain = redRun(false);
+      const eventsBefore = readEvents(plain.runDirectory).length;
       const refused = ark("run", "step", plain.runId, "build", "start");
       expect(refused.code).toBe(1);
       expect(refused.err).toContain("bug run: record a failing ark test of the ACs before the fix");
       expect(refused.err).not.toContain("every AC is a guard");
+      expect(readEvents(plain.runDirectory)).toHaveLength(eventsBefore);
     });
 
     test("ARK-T665 a refactor run stopped by a failed check runs no base suite and records no base result", () => {
