@@ -21,7 +21,7 @@ Prove the demo fixture that the fixture writers of `test/test-run.test.ts`, `tes
 
 ## Steps
 
-1. Control: write the demo project with the same fixture shape but with no `host.yml` in the temp `ARK_HOME`. Run `ark test FAKE-1` in the background; wait over three poll intervals; read its output and the marker; stop the runner.
+1. Control: write the demo project with the same fixture shape but with a `host.yml` in the temp `ARK_HOME` that holds `{}` (no key, so the three defaults). Run `ark test FAKE-1` in the background; wait over three poll intervals; read its output and the marker; stop the runner.
 2. Write the demo project with each of the three suites' fixture writers (the writer of each suite is called, not a copy of it). Run `ark test FAKE-1` to its end.
 3. Repeat step 2 for the second `writeProject("demo", …)` of `test/test-run.test.ts` (the multi-repo test).
 

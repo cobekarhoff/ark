@@ -16,7 +16,7 @@ Prove the admission of `ark test` (the CPU budget of ARK-390) also holds a suite
 ## Preconditions
 
 - Temp project and temp `ARK_HOME` with a run and one cheap suite whose command writes a marker file. The test lock folder is in the temp `ARK_HOME`; the CPU budget has free cores, and no other suite runs in that store, so the CPU hold never applies (it holds only while another suite runs: ARK-T709) and only memory can hold the suite.
-- No `host.yml` in the temp `ARK_HOME`, and no host key in the project's `ark.yml`: the defaults 20 and 8 apply. The limits a host file sets are owned by ARK-T769.
+- The `host.yml` of the temp `ARK_HOME` sets only `test_budget_cores: 6` (the `startRun` fixture of `test/test-lock.test.ts`), and no host key is in the project's `ark.yml`: the memory defaults 20 and 8 apply. The limits a host file sets are owned by ARK-T769.
 - A fake host reading supplied at the real boundary: the commands or file the real reader parses (macOS `memory_pressure` and `sysctl vm.swapusage` on a temp `PATH`, Linux a temp `/proc/meminfo` path), rewritten by the test while `ark test` runs. No hook in product code is added for the memory test.
 
 ## Steps

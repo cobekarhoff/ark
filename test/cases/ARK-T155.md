@@ -27,7 +27,7 @@ Expected: A request that fits starts at once; one that does not waits; it starts
 3. End A's suite (run A's `ark test` still alive, next suite not yet started): 3 cores are free. W2 (1 core) fits, but W1 is older and needs 6: neither starts.
 4. End B's suite: W1 starts alone (`--n=6`). End W1's suite: W2 starts (`--n=1`). Release is per suite, not at the end of the run's whole `ark test`.
 5. Request with no cores in the suite: it takes the whole budget and runs alone (the ARK-343 one-at-a-time behaviour). Request above the budget (8 cores, budget 6): it clamps to 6 and starts when idle (`--n=6`).
-6. With no `test_budget_cores` in `host.yml` (no file, or a file that sets only another key), on a host the case fixes at 10 cores, then at 1 core: the default budget.
+6. With no `host.yml` in the temp `ARK_HOME`, on a host the case fixes at 10 cores, then at 1 core: the default budget.
 7. Real processes run the lock-free admission under paused interleavings (publication, started write, stale unlink) and never hold more cores than the budget together: an older ticket published after a newer one already runs waits; two tickets that both passed the admission check end with the later one revoking; an older started ticket waits for a newer one that missed it.
 8. Two real processes see the same ticket of an ended pid. The first is paused right before it removes it; the second removes it. The first's removal finds it gone and no live ticket is deleted; only one of them runs.
 9. A real owner process O that the case starts (a `sleep` that the case ends with a kill by its PID). Two real helper processes, children of the case and not of O, take tickets for the owner pid of O: helper H1 takes twice, helper H2 takes once, and each ends on its own before the next one starts. Read the store once after both have ended, then end O and read again.
@@ -40,7 +40,7 @@ Not repeated here: chief-state holder/waiter data (ARK-T61), dead-holder recover
 - Step 3: nothing starts; running cores = 3 (head-of-line blocking, the 1-core request does not overtake).
 - Step 4: W1 starts first, alone, with `--n=6`; then W2 with `--n=1`; running cores <= budget at every observed state.
 - Step 5: whole-budget request has cores equal to the budget and runs alone; the 8-core request shows 6 and starts.
-- Step 6: budget 6 at 10 cores and 1 at 1 core (`max(1, floor(0.6 x cores))`), for no file and for a file without the key.
+- Step 6: budget 6 at 10 cores and 1 at 1 core (`max(1, floor(0.6 x cores))`), with no file.
 - Step 7: at every observed state, only one of two whole-budget processes runs; the other runs after the first ends.
 - Step 8: the stale file is gone, both live tickets stay, and one process runs.
 - Step 9: one ticket for the pid of O with its cores (H1's second take and H2's take add none); it stays after H1 and H2 exit (a helper writes no exit cleanup); it is gone after O ends and the next reader runs.
