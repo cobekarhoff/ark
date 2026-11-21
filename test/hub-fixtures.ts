@@ -56,6 +56,14 @@ export type FixtureRun = {
   statuses?: Record<string, string>;
   /** Closed runs only: the verbatim text of `metrics.json`, written instead of `metricsCostUsd`. */
   metricsText?: string;
+  /** The `runs/` folder to write into, instead of the project's under ARK_HOME: a project built outside the home (ARK-T751). */
+  runsRoot?: string;
+  /** The verbatim text of `plan.yml`, written instead of the plan made from `steps` (a plan that does not parse, a plan of a given size). */
+  planText?: string;
+  /** The `risks` of the `evaluation.recorded` event. Default: none. */
+  evaluationRisks?: string[];
+  /** Events written after the steps and before the merge requests, `after` seconds after the start. */
+  extraEvents?: { after: number; type: string; data: Record<string, unknown> }[];
 };
 
 /** `YYYY-MM-DD` of today, for run ids. */
@@ -69,7 +77,9 @@ export const runDirectoryOf = (project: string, run: string): string =>
  * The events are written directly, so a fixture can stand in any phase without walking the gates.
  */
 export function writeRun(fixture: FixtureRun): string {
-  const directory = runDirectoryOf(fixture.project, fixture.run);
+  const directory = fixture.runsRoot
+    ? join(fixture.runsRoot, fixture.run)
+    : runDirectoryOf(fixture.project, fixture.run);
   mkdirSync(directory, { recursive: true });
   const started = (fixture.startedAt ?? new Date(now() - 3_600_000)).getTime();
   let seq = 0;
@@ -96,9 +106,15 @@ export function writeRun(fixture: FixtureRun): string {
     round_budget: 3,
   });
   if (fixture.phase !== "awaiting_criteria") {
-    add(10, "evaluation.recorded", { blockers: [], risks: [], surfaces: ["none"] });
+    add(10, "evaluation.recorded", {
+      blockers: [],
+      risks: fixture.evaluationRisks ?? [],
+      surfaces: ["none"],
+    });
     const steps = fixture.steps ?? [];
-    if (steps.length > 0) {
+    if (fixture.planText !== undefined)
+      writeFileSync(join(directory, "plan.yml"), fixture.planText);
+    else if (steps.length > 0) {
       writeFileSync(
         join(directory, "plan.yml"),
         `${JSON.stringify({
@@ -137,6 +153,7 @@ export function writeRun(fixture: FixtureRun): string {
             outcome: step.outcome ?? "succeeded",
           });
       }
+      for (const extra of fixture.extraEvents ?? []) add(extra.after, extra.type, extra.data);
       for (const [step, value] of Object.entries(fixture.bumpRefreshed ?? {}))
         add(2900, "bump.refreshed", { step, value });
       for (const request of fixture.mergeRequests ?? []) add(3000, "merge_request.opened", request);
@@ -187,6 +204,8 @@ export type FixtureTicket = {
   kind?: string;
   milestone?: string;
   dependsOn?: string[];
+  /** The project folder to write into, instead of `$ARK_HOME/projects/<project>`: a project built outside the home (ARK-T751). */
+  projectDirectory?: string;
   /** Text under `## Problem` and `## Change`. */
   problem?: string;
   change?: string;
@@ -209,9 +228,7 @@ export function writeMinimalConfig(projectFolder: string): void {
 /** Writes `$ARK_HOME/projects/<project>/tickets/<id>.md` with the front matter the backlog reads. */
 export function writeBacklogTicket(ticket: FixtureTicket): string {
   const file = join(
-    process.env.ARK_HOME as string,
-    "projects",
-    ticket.project,
+    ticket.projectDirectory ?? join(process.env.ARK_HOME as string, "projects", ticket.project),
     "tickets",
     `${ticket.id}.md`,
   );
