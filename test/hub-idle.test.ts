@@ -632,7 +632,7 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   await holdAndLeave("fail");
   fake.control("orca.fail", false);
 
-  // Step 5: a quick disconnect and reconnect starts no second loop. The baseline of each source is the largest of the three windows.
+  // Step 5: a quick disconnect and reconnect starts no second loop. The baseline of each source is the largest of the three windows; the churn stays below 4 times it per source and below 1.5 times the sum of the baselines.
   client = await churnAndKeep(hub);
   const churnWindow = await windowOf(fake);
   checkWindows(sourceNames, windows, churnWindow);
@@ -700,7 +700,7 @@ test("ARK-T756 With every fake source held for the whole first 2 s window, the f
   client = await churnAndKeep(hub);
   const churnWindow = await windowOf(fake);
 
-  // Step 5: the largest healthy window is the baseline, so the churn of one loop passes.
+  // Step 5: the largest healthy window is the baseline; one loop's churn passes both the per-source and the sum rule.
   checkWindows(sourceNames, windows, churnWindow);
 });
 
