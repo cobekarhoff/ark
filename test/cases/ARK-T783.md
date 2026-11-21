@@ -11,9 +11,9 @@ changed_by: 2026-11-21-ARK-629-1
 
 ## Objective
 
-Prove that `lintBody` returns `pass` for PROV02 when the words `generated with` appear in a body or in a commit message of the range and no line starts with the trailer `Generated with`. Serves ARK-629/AC1.
+Prove that `lintBody` returns `pass` for PROV02 when the words `generated with` appear in a body or in a commit message of the range, no line starts with the trailer `Generated with` and no line is a model `Co-Authored-By` line. Serves ARK-629/AC1.
 
-Expected: When no line of the body or of a commit message in the range starts, after optional spaces and an optional emoji, with `Generated with`, the system shall return `pass` for PROV02.
+Expected: When no line of the body or of a commit message in the range starts, after optional spaces and an optional emoji, with `Generated with`, and no line is a model `Co-Authored-By` line, the system shall return `pass` for PROV02.
 
 Question 3 (why existing proof misses it): ARK-T39 owns the failing side of PROV02 (every trailer shape fails). It holds no body or commit with the same words in another place, so a rule that matches the words anywhere passes it. This case owns the false match and nothing else. The failing trailer shapes, the emoji line and the reason text stay with ARK-T39.
 
@@ -38,7 +38,7 @@ Question 4: no hook. The input is a body and a ledger that `lintBody` takes, the
 - Steps 1 to 4: PROV02 returns `pass` for each input, and every other check returns the same result as for the control body.
 - Step 5: PROV02 returns `fail` and its reason names `Generated with Claude Code`, not the `regenerated with` line. It proves that steps 1 to 4 pass because of the rule and not because PROV02 is off or skipped.
 - At base the rule is `/^.*Generated with.*$/im`. Run against these strings it matched each of them: the step 1 line, the step 2 line, `Regenerated with bun`, `generated with bun`, `The page is Generated with care.` and `Generated without review`. On the step 5 body (false-match line first) it returned the `regenerated with` line, so step 5 names the wrong line at base. The validator records the base run of the test before the fix lands.
-- The test fails when the rule drops the `^` anchor (steps 1, 2 and 4, and the capital line of step 3), keeps the `i` flag (the `generated with bun` line of step 3), or has no boundary after `with` (the `Generated without review` line of step 3).
+- The test fails when the rule drops the `^` anchor (the `The page is Generated with care.` line of step 3; steps 1, 2 and 4 hold only lower-case `generated with`, so they catch a dropped anchor only together with the `i` flag), keeps the `i` flag (the `generated with bun` line of step 3), or has no boundary after `with` (the `Generated without review` line of step 3).
 
 ## Screenshot checkpoints
 
