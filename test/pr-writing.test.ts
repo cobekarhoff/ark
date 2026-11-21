@@ -3558,7 +3558,7 @@ test("ARK-T779 post_mr on a public GitLab project uploads head, base and nested 
 const video: Media[] = [{ target: "results/screenshots/flow.mp4" }];
 
 for (const answer of ["internal", "public"])
-  test(`ARK-T780 post_mr on a ${answer} GitLab project exits 2 and uploads nothing for a video outside a checkpoint folder`, () => {
+  test(`ARK-T780 post_mr on GitLab with visibility ${answer} exits 2 and uploads nothing for a video outside a checkpoint folder`, () => {
     setVisibility("gitlab", answer);
     const run = mediaRun("gitlab", video);
     expectRefused(run.post(), {
