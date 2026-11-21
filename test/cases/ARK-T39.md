@@ -4,9 +4,9 @@ title: ARK-T39 lint fails each decidable check on its fixture
 level: integration
 technique: one fixture per check id (equivalence classes) with a corrected control for each, boundary values for SIZE01 and TITLE01
 priority: high
-risk: a decidable check never fails (a secret, a Co-Authored-By line, a missing tracker or dependency ref, a stale body or a missing Not done gap reaches the MR), or a good body fails
+risk: a decidable check never fails (a secret, a Co-Authored-By line, a `Generated with` trailer line with a leading emoji, an indent or no final newline, a missing tracker or dependency ref, a stale body or a missing Not done gap reaches the MR), or a good body fails
 status: active
-changed_by: 2026-11-06-ARK-316-1
+changed_by: 2026-11-21-ARK-629-1
 ---
 
 ## Objective
@@ -40,7 +40,7 @@ Expected: When a body breaks a decidable check, the system shall return `fail` f
 1. Run lint on the good body. Read every result.
 2. For each fixture, run lint on the offending body, then on the control, and read the result for that check id.
 3. PROV01: provenance line second (fail); a first line that matches none of the three variants, for example `> Written by an AI.` (fail); control: the exact first line of a variant.
-4. PROV02: `Co-Authored-By: Claude <noreply@anthropic.com>` in the body (fail); `Generated with Claude Code` in the body (fail); the same line only in a commit message of the range (fail); control: none of them.
+4. PROV02: `Co-Authored-By: Claude <noreply@anthropic.com>` in the body (fail); a body line `Generated with Claude Code` (fail); a body line `🤖 Generated with [Claude Code](https://claude.com/claude-code)` (fail); the emoji line with a variation selector (U+FE0F) after the emoji (fail); the plain line indented with two spaces (fail); the plain line as the last line of the body with no final newline (fail); each of the plain line and the emoji line only in a commit message of the range (fail). Control: none of them. False-match control: the control body with the criterion line ``- AC1: `docs/reference/cli.md` regenerated with `bun scripts/cli-reference.ts` `` and a sentence with `generated with` in the middle passes PROV02 (ARK-T783 owns this input and its assertion; this case keeps the failing side, so it holds at base).
 5. TITLE01: a title of 72 characters (pass), 73 characters (fail), `ARK-316: Fix stale bodies.` with a trailing period (fail), and with `title_prefix: "feat(TICKET): desc"` the title `ARK-316: Fix stale bodies` (fail; the prefix rule is broken) against `feat(ARK-316): Fix stale bodies` (pass).
 6. SIZE01: count prose lines outside code fences against the ceiling of each tier, 3, 12, 40, 150 for tiers 0-3: at the ceiling (pass) and one line above (fail), for each tier. Lines inside a code fence do not count.
 7. SIZE02: a tier 0 body with a heading (fail); a tier 1 body with headings (pass).
@@ -60,7 +60,7 @@ Expected: When a body breaks a decidable check, the system shall return `fail` f
 - Each offending body returns `fail` for its own check id with a reason that names the cause. The reasons name: the failing line or the second-place provenance (PROV01); the matching line and whether it came from the body or from the commit range (PROV02); the length, the trailing period or the broken prefix (TITLE01); the counted lines against the ceiling (SIZE01); the heading (SIZE02); the missing or contradicting ref, `ARK-77` or `ARK-78` (REF01); the missing or contradicting dependency or order, `ARK-311` or `ARK-312` (REF02); the missing item (VAL01); the unlisted gap (VAL03); the missing rollback (RISK02); the missing CI note (RISK03); the wrapped paragraph (FMT01); the token prefix (FMT02); the SHA or hash that differs (STALE01).
 - Boundaries: TITLE01 passes at 72 and fails at 73 characters. SIZE01 passes at 3, 12, 40 and 150 prose lines for tiers 0, 1, 2 and 3, and fails at 4, 13, 41 and 151.
 - SIZE02 fails for a heading at tier 0 only. FMT01 fails only for a hard-wrapped paragraph outside fences, lists, quotes and tables. FMT02 fails for each of the five known prefixes.
-- PROV02 fails for a model `Co-Authored-By` or `Generated with` line in the body, and in the commit range.
+- PROV02 fails for a model `Co-Authored-By` line, and for a line that is `Generated with` at its start (after optional spaces and an optional emoji), in the body and in the commit range. Its reason names the whole line without its indent, `the body has "..."` or `commit <sha7> in the range has "..."`, so the emoji line names the emoji and the link. It does not fail for `regenerated with` or a mid-sentence `generated with` (ARK-T783).
 - STALE01 fails when the head SHA or the body hash differs, and passes when both are equal.
 - `bun test test/pr-writing.test.ts` exits 0 and runs each fixture.
 
