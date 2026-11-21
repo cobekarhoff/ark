@@ -513,6 +513,13 @@ async function loadWindowCheck(): Promise<
   return checkWindows;
 }
 
+/** The settle wait is a module under test/ for the same reason as the window check. It returns the call count once the count stayed the same over a quiet span, and fails with the counts it sampled at its bound. */
+async function loadSettle(): Promise<(count: () => number) => Promise<number>> {
+  const helperPath = "./hub-settle.ts";
+  const { settleCount } = await import(helperPath);
+  return settleCount;
+}
+
 /** Fake tools, a run in `building`, a run with an open plan gate and a Plannotator session, and a hub at a 100 ms interval with no page. */
 async function startIdleHub() {
   const fake = fixture();
@@ -573,6 +580,7 @@ async function churnAndKeep(hub: Hub): Promise<Client> {
 
 test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHub read, the first page gets fresh data within 5 s, and a quick disconnect and reconnect starts no second loop", async () => {
   const checkWindows = await loadWindowCheck();
+  const settleCount = await loadSettle();
   const { fake, building, hub } = await startIdleHub();
   const everyCall = () => fake.orcaCalls() + fake.reads("plannotator") + fake.reads("gh");
 
@@ -624,15 +632,19 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   await holdAndLeave("fail");
   fake.control("orca.fail", false);
 
-  // Step 5: a quick disconnect and reconnect starts no second loop. The baseline of each source is the largest of the three windows.
+  // Step 5: a quick disconnect and reconnect starts no second loop. The baseline of each source is the largest of the three windows; the churn stays below 4 times it per source and below 1.5 times the sum of the baselines.
   client = await churnAndKeep(hub);
   const churnWindow = await windowOf(fake);
   checkWindows(sourceNames, windows, churnWindow);
 
-  // Step 6: no page, no read.
+  // Step 6: no page, no read. A read is in flight at the disconnect and ends 700 ms after it; the settle wait starts at that release, so its quiet span is counted from the end of the read and not from the disconnect.
+  fake.control("orca.hold", true);
+  const heldRead = fake.reads("orca") + 1;
+  await until("an orca read in flight", () => fake.reads("orca") >= heldRead);
   client.close();
-  await sleep(500); // a read in flight ends
-  const settled = everyCall();
+  await sleep(700);
+  fake.control("orca.hold", false);
+  const settled = await settleCount(everyCall);
   const settledConversation = fake.conversationReads();
   const settledUnread = fake.reads("chiefUnread");
   await sleep(1500);
@@ -679,7 +691,7 @@ test("ARK-T756 With every fake source held for the whole first 2 s window, the f
   client = await churnAndKeep(hub);
   const churnWindow = await windowOf(fake);
 
-  // Step 5: the largest healthy window is the baseline, so the churn of one loop passes.
+  // Step 5: the largest healthy window is the baseline; one loop's churn passes both the per-source and the sum rule.
   checkWindows(sourceNames, windows, churnWindow);
 });
 
