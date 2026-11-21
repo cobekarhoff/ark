@@ -36,7 +36,7 @@ beforeAll(() => {
 afterEach(async () => {
   for (const client of clients.splice(0)) client.close();
   for (const child of processes.splice(0)) child.kill("SIGKILL");
-  for (const hold of ["orca.hold", "gh.hold"])
+  for (const hold of ["orca.hold", "plannotator.hold", "inbox.hold", "gh.hold"])
     rmSync(join(process.env.ARK_FAKE_STATE ?? tmpdir(), hold), { force: true });
 });
 
@@ -129,7 +129,13 @@ case "$1 $2" in
     case " $* " in
       *" --terminal "*)
         echo x >> "$S/orca.chief-unread"
+        waited=0
+        while [ -e "$S/inbox.hold" ] && [ "$waited" -lt 1500 ]; do sleep 0.02; waited=$((waited + 1)); done
         [ -e "$S/orca.unread-fail" ] && exit 1 ;;
+      *" --limit 200 "*) ;;
+      *)
+        waited=0
+        while [ -e "$S/inbox.hold" ] && [ "$waited" -lt 1500 ]; do sleep 0.02; waited=$((waited + 1)); done ;;
     esac
     echo '{"result":{"messages":[]}}' ;;
   "worktree ps") echo '{"result":{"worktrees":[]}}' ;;
@@ -139,6 +145,8 @@ esac`,
   script(
     "plannotator",
     `echo "$*" >> "$S/plannotator.log"
+waited=0
+while [ -e "$S/plannotator.hold" ] && [ "$waited" -lt 1500 ]; do sleep 0.02; waited=$((waited + 1)); done
 [ -e "$S/plannotator.fail" ] && exit 1
 cat "$S/plannotator.sessions"`,
   );
@@ -487,9 +495,26 @@ test("ARK-T240 With no change in any source, 10 reads of every source send 0 pus
   }
 });
 
-// ---------------------------------------------------------------- ARK-T241
+// ---------------------------------------------------------------- shared by ARK-T241 and ARK-T756
 
-test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHub read, the first page gets fresh data within 5 s, and a quick disconnect and reconnect starts no second loop", async () => {
+/** The five counted sources, in the order of `windowOf`. */
+const sourceNames = ["orca", "plannotator", "gh", "conversation", "chiefUnread"];
+
+/** The window check is its own module under test/, loaded by both tests. A static import cannot work: the module is the fix of ARK-615, so on the base its import must fail one test, not the whole file. The specifier is a variable so that the typecheck does not need the module while the tests come first. */
+async function loadWindowCheck(): Promise<
+  (
+    names: readonly string[],
+    windows: readonly (readonly number[])[],
+    churn: readonly number[],
+  ) => void
+> {
+  const helperPath = "./hub-window-check.ts";
+  const { checkWindows } = await import(helperPath);
+  return checkWindows;
+}
+
+/** Fake tools, a run in `building`, a run with an open plan gate and a Plannotator session, and a hub at a 100 ms interval with no page. */
+async function startIdleHub() {
   const fake = fixture();
   const building = buildingRun(2);
   const planning = planningRun(2);
@@ -497,6 +522,58 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   orcaRunsFor(fake, [building]);
   fake.setSessions([{ index: 1, target: planDocument(planning), url: "http://localhost:20000/a" }]);
   const hub = await startHub({ interval: 100 });
+  return { fake, building, hub };
+}
+
+/** A page whose first pushes hold fresh orca, plannotator and github data, within 5 s of the connect. */
+async function connectFresh(hub: Hub): Promise<Client> {
+  const connectedAt = Date.now();
+  const client = connect(hub);
+  await until(
+    "fresh data for orca, plannotator and github",
+    () =>
+      client.pushes.some((push) =>
+        (["orca", "plannotator", "github"] as const).every(
+          (source) => okOf(push, source) && Date.parse(readAtOf(push, source)!) > connectedAt,
+        ),
+      ),
+    5000,
+  );
+  return client;
+}
+
+/** The reads of each counted source during the next 2 s. The fourth is the full conversation inbox read (ARK-344), its own loop; the fifth is the Master Chief unread read of each project (ARK-499), also its own loop. */
+async function windowOf(fake: Fixture): Promise<number[]> {
+  const counts = () => [
+    fake.reads("orca"),
+    fake.reads("plannotator"),
+    fake.reads("gh"),
+    fake.conversationReads(),
+    fake.reads("chiefUnread"),
+  ];
+  const start = counts();
+  await sleep(2000);
+  return counts().map((count, index) => count - start[index]);
+}
+
+/** Five quick connects and disconnects, then a kept page. Called with no page connected, so each connect resumes the hub. */
+async function churnAndKeep(hub: Hub): Promise<Client> {
+  for (let round = 0; round < 5; round++) {
+    const page = connect(hub);
+    await until("the page to connect", () => page.pushes.length > 0);
+    page.close();
+  }
+  const client = connect(hub);
+  await until("the last page to connect", () => client.pushes.length > 0);
+  await sleep(200);
+  return client;
+}
+
+// ---------------------------------------------------------------- ARK-T241
+
+test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHub read, the first page gets fresh data within 5 s, and a quick disconnect and reconnect starts no second loop", async () => {
+  const checkWindows = await loadWindowCheck();
+  const { fake, building, hub } = await startIdleHub();
   const everyCall = () => fake.orcaCalls() + fake.reads("plannotator") + fake.reads("gh");
 
   // Step 1: no page, no read, no child process.
@@ -510,38 +587,10 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   expect(children.stdout.toString().trim()).toBe("");
 
   // Step 2: the first page gets every source fresh within 5 s.
-  const connectedAt = Date.now();
-  let client = connect(hub);
-  await until(
-    "fresh data for orca, plannotator and github",
-    () =>
-      client.pushes.some((push) =>
-        (["orca", "plannotator", "github"] as const).every(
-          (source) => okOf(push, source) && Date.parse(readAtOf(push, source)!) > connectedAt,
-        ),
-      ),
-    5000,
-  );
+  let client = await connectFresh(hub);
 
-  // Step 3: reads run at the interval.
-  // The fourth count is the full conversation inbox read (ARK-344): its own loop, so it has its own rate. The fifth is the Master Chief unread read of each project (ARK-499), also its own loop.
-  const counts = () => [
-    fake.reads("orca"),
-    fake.reads("plannotator"),
-    fake.reads("gh"),
-    fake.conversationReads(),
-    fake.reads("chiefUnread"),
-  ];
-  const windowOf = async () => {
-    const start = counts();
-    await sleep(2000);
-    return counts().map((count, index) => count - start[index]);
-  };
-  const firstWindow = await windowOf();
-  for (const reads of firstWindow) {
-    expect(reads).toBeGreaterThanOrEqual(5);
-    expect(reads).toBeLessThan(25);
-  }
+  // Step 3: reads run at the interval, in three consecutive windows. No window has a floor: a window a loaded host starved is not a failure.
+  const windows = [await windowOf(fake), await windowOf(fake), await windowOf(fake)];
 
   // Step 4: a read in flight when the last page leaves is discarded: no publish, no re-armed timer.
   const holdAndLeave = async (answer: "model-B" | "fail") => {
@@ -575,20 +624,10 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   await holdAndLeave("fail");
   fake.control("orca.fail", false);
 
-  // Step 5: a quick disconnect and reconnect starts no second loop.
-  for (let round = 0; round < 5; round++) {
-    const page = connect(hub);
-    await until("the page to connect", () => page.pushes.length > 0);
-    page.close();
-  }
-  client = connect(hub);
-  await until("the last page to connect", () => client.pushes.length > 0);
-  await sleep(200);
-  const churnWindow = await windowOf();
-  churnWindow.forEach((reads, index) => {
-    expect(reads).toBeLessThan(1.5 * firstWindow[index]);
-    expect(reads).toBeGreaterThanOrEqual(0.5 * firstWindow[index]);
-  });
+  // Step 5: a quick disconnect and reconnect starts no second loop. The baseline of each source is the largest of the three windows.
+  client = await churnAndKeep(hub);
+  const churnWindow = await windowOf(fake);
+  checkWindows(sourceNames, windows, churnWindow);
 
   // Step 6: no page, no read.
   client.close();
@@ -611,6 +650,37 @@ test("ARK-T241 With no page connected the hub runs no Orca, Plannotator or GitHu
   );
   expect(hub.child.exitCode).toBeNull();
   expect((await fetch(`${hub.baseUrl()}/api/snapshot`)).status).toBe(200);
+});
+
+// ---------------------------------------------------------------- ARK-T756
+
+test("ARK-T756 With every fake source held for the whole first 2 s window, the first window counts 0 to 5 reads, and after the release the churn check of ARK-T241 passes with no second loop", async () => {
+  const checkWindows = await loadWindowCheck();
+  const { fake, hub } = await startIdleHub();
+
+  // Step 1: one page with fresh data from every source.
+  let client = await connectFresh(hub);
+
+  // Step 2: every source held for the first window. A source above 5 means its hold does not reach it.
+  const holds = ["orca.hold", "plannotator.hold", "inbox.hold", "gh.hold"];
+  for (const hold of holds) fake.control(hold, true);
+  const heldWindow = await windowOf(fake);
+  heldWindow.forEach((reads, index) => {
+    expect(reads, `${sourceNames[index]} reads in the held window`).toBeLessThanOrEqual(5);
+  });
+
+  // Step 3: released, two healthy windows.
+  for (const hold of holds) fake.control(hold, false);
+  const windows = [heldWindow, await windowOf(fake), await windowOf(fake)];
+
+  // Step 4: the hub goes to 0 clients and pauses; the churn connects resume it.
+  client.close();
+  await sleep(200); // the hub sees the disconnect
+  client = await churnAndKeep(hub);
+  const churnWindow = await windowOf(fake);
+
+  // Step 5: the largest healthy window is the baseline, so the churn of one loop passes.
+  checkWindows(sourceNames, windows, churnWindow);
 });
 
 // ---------------------------------------------------------------- ARK-T242
