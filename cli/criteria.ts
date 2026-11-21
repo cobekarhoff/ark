@@ -6,10 +6,18 @@ import { appendEvent, deriveState, readEvents } from "./events.ts";
 import { findRun } from "./paths.ts";
 import { assertAllowed } from "./transitions.ts";
 import { isCaseId } from "./criterion-id.ts";
-import { frontmatter, manualCriteria, methods, parseCriteria, runCriteria } from "./ticket.ts";
+import {
+  assertGuardsAllowed,
+  frontmatter,
+  manualCriteria,
+  methods,
+  parseCriteria,
+  runCriteria,
+} from "./ticket.ts";
+import type { TicketKind } from "./lifecycle.ts";
 import { discoverRepos, mirrorRoot } from "./workspace.ts";
 
-const criteriaFileKeys = ["id", "text", "method", "verified_by"];
+const criteriaFileKeys = ["id", "text", "method", "verified_by", "guard"];
 
 /** A YAML scalar for a flow list or a key: plain when it is a word, else a JSON string. */
 const scalar = (value: string): string =>
@@ -17,14 +25,26 @@ const scalar = (value: string): string =>
     ? value
     : JSON.stringify(value);
 
-type FileCriterion = { id: string; method: string; verified_by: string[]; text: string };
+type FileCriterion = {
+  id: string;
+  method: string;
+  guard?: true;
+  verified_by: string[];
+  text: string;
+};
 
 /**
  * Reads and checks a criteria file: a YAML mapping whose only key is `acceptance_criteria`, a list of
- * `{id, text, method, verified_by}`. Refuses an unknown key (`manual` too), a duplicate id, an unknown
- * method, an empty list and a `method: test` criterion with an empty `verified_by`. Writes nothing.
+ * `{id, text, method, verified_by, guard}`. Refuses an unknown key (`manual` too), a duplicate id, an unknown
+ * method, an empty list, a `method: test` criterion with an empty `verified_by`, and `guard: true` on a
+ * criterion whose method is not `test` or in a run whose kind is not `bug`. Writes nothing.
  */
-function readCriteriaFile(file: string, path: string, ticketId: string): FileCriterion[] {
+function readCriteriaFile(
+  file: string,
+  path: string,
+  ticketId: string,
+  kind: TicketKind,
+): FileCriterion[] {
   const source = `criteria file ${file}`;
   if (!existsSync(path)) throw new ArkError(`${source}: not found`);
   let parsed: unknown;
@@ -51,6 +71,7 @@ function readCriteriaFile(file: string, path: string, ticketId: string): FileCri
   });
   // The ticket loader checks id, text, duplicate ids, method and verified_by.
   const criteria = parseCriteria({ id: ticketId, acceptance_criteria: list }, source);
+  assertGuardsAllowed(criteria, kind, source);
   return criteria.map((criterion, i) => {
     const entry = list[i] as { id: string; text: string };
     if (entry.text.trim() === "")
@@ -62,6 +83,7 @@ function readCriteriaFile(file: string, path: string, ticketId: string): FileCri
     return {
       id: entry.id,
       method: criterion.method,
+      ...(criterion.guard && { guard: true as const }),
       verified_by: criterion.verified_by,
       text: entry.text,
     };
@@ -80,6 +102,7 @@ function replaceCriteriaBlock(ticket: string, criteria: FileCriterion[]): string
     ...criteria.flatMap((criterion) => [
       `  - id: ${scalar(criterion.id)}`,
       `    method: ${criterion.method}`,
+      ...(criterion.guard ? ["    guard: true"] : []),
       `    verified_by: [${criterion.verified_by.map(scalar).join(", ")}]`,
       `    text: ${JSON.stringify(criterion.text)}`,
     ]),
@@ -116,6 +139,7 @@ export function writeCriteriaFile(runDirectory: string, ticketFile: string, file
     file,
     isAbsolute(file) ? file : join(runDirectory, file),
     ticketId,
+    deriveState(readEvents(runDirectory)).kind,
   );
   const after = replaceCriteriaBlock(before, criteria);
   let afterFields: Record<string, unknown> | undefined;
@@ -241,6 +265,33 @@ function rewriteVerifiedBy(
   return lines.join("\n");
 }
 
+/** Sets (`guard: true`) or removes the `guard:` line of one criterion. Only that line changes; an existing `guard: false` line is replaced, not doubled. */
+function rewriteGuard(
+  ticket: string,
+  criterionId: string,
+  guard: boolean,
+  ticketId: string,
+): string {
+  const lines = ticket.split("\n");
+  const end = lines.indexOf("---", 1);
+  if (lines[0] !== "---" || end === -1)
+    throw new ArkError("ticket.md has no frontmatter between --- lines");
+  const idLine = lines.findIndex((line, i) => {
+    const written = i < end ? line.match(/^\s*-\s*id:\s*["']?([^"'\s]+)["']?\s*$/)?.[1] : undefined;
+    return written !== undefined && canonicalCriterion(written, ticketId) === criterionId;
+  });
+  if (idLine === -1) throw new ArkError(`ticket.md frontmatter has no criterion ${criterionId}`);
+  let guardLine = -1;
+  for (let i = idLine + 1; i < end && !/^\s*-\s*id:/.test(lines[i]); i++)
+    if (/^\s*guard:/.test(lines[i])) guardLine = i;
+  const indent = " ".repeat((lines[idLine].match(/^(\s*-\s*)id:/) as RegExpMatchArray)[1].length);
+  if (!guard) {
+    if (guardLine !== -1) lines.splice(guardLine, 1);
+  } else if (guardLine !== -1) lines[guardLine] = `${indent}guard: true`;
+  else lines.splice(idLine + 1, 0, `${indent}guard: true`);
+  return lines.join("\n");
+}
+
 /** Refuses an id with no active `test/cases/<id>.md` at HEAD of any repo of the run's worktree. */
 function assertCasesAtHead(directory: string, ids: string[]): void {
   const workspace = mirrorRoot(directory);
@@ -268,6 +319,8 @@ function assertCasesAtHead(directory: string, ids: string[]): void {
 type AmendOptions = {
   reason?: string;
   verifiedBy?: string;
+  /** `--guard` is true, `--no-guard` is false, neither is undefined. */
+  guard?: boolean;
   carryManual?: string;
   project?: string;
 };
@@ -278,18 +331,61 @@ export function criteriaAmend(
   file: string | undefined,
   options: AmendOptions,
 ): void {
-  const { reason, verifiedBy, carryManual, project } = options;
+  const { reason, verifiedBy, guard, carryManual, project } = options;
   const { directory } = findRun(runId, project);
   const state = deriveState(readEvents(directory));
   const ticketId = state.ticket.id;
   const criterionId = canonicalCriterion(criterionArgument, ticketId);
   // Refuse a wrong phase or an unknown criterion before reading the file.
   assertAllowed(state, "criteria.amended", { criterion: criterionId, reason }, directory);
-  if ((file === undefined) === (verifiedBy === undefined))
+  if ([file, verifiedBy, guard].filter((form) => form !== undefined).length !== 1)
     throw new ArkError(
-      "criteria.amended refused: give either <file> (new text) or --verified-by <case ids>, not both and not neither",
+      "criteria.amended refused: give exactly one of <file> (new text), --verified-by <case ids>, --guard or --no-guard",
     );
   const ticketFile = join(directory, "ticket.md");
+  if (guard !== undefined) {
+    if (carryManual !== undefined)
+      throw new ArkError(
+        "criteria.amended refused: --carry-manual works with the text form only (a guard amend keeps manual answers anyway)",
+      );
+    const criterion = runCriteria(directory).find((entry) => entry.id === criterionId);
+    if (!criterion)
+      throw new ArkError(`criteria.amended refused: ticket.md has no criterion ${criterionId}`);
+    if (guard)
+      assertGuardsAllowed([{ ...criterion, guard }], state.kind, "criteria.amended refused");
+    if (criterion.guard === guard)
+      throw new ArkError(
+        `criteria.amended refused: ${criterionId} is ${guard ? "already a guard" : "not a guard"}; nothing to change`,
+      );
+    const ticket = rewriteGuard(readFileSync(ticketFile, "utf8"), criterionId, guard, ticketId);
+    // A rewrite that does not parse back to the new flag is refused before anything is written.
+    let written: boolean | undefined;
+    try {
+      written = parseCriteria(frontmatter(ticket).fields ?? {}, ticketFile).find(
+        (entry) => entry.id === criterionId,
+      )?.guard;
+    } catch (error) {
+      throw new ArkError(
+        `criteria.amended refused: the rewritten ticket.md does not parse (${(error as Error).message}); nothing changed`,
+      );
+    }
+    if (written !== guard)
+      throw new ArkError(
+        "criteria.amended refused: the rewritten ticket.md does not hold the new guard; nothing changed",
+      );
+    // The event goes first: it re-checks the phase, and a refusal must leave ticket.md untouched.
+    appendEvent(directory, "criteria.amended", {
+      criterion: criterionId,
+      guard,
+      by: "human",
+      reason: reason?.trim(),
+    });
+    writeFileSync(ticketFile, ticket);
+    console.log(
+      `amended ${criterionId}: ${guard ? "guard: true (the red proof skips it)" : "guard removed (the red proof needs it failing)"}; recorded criteria.amended`,
+    );
+    return;
+  }
   const closing = () => {
     if (state.phase === "planning" || state.phase === "awaiting_strategy") {
       if (existsSync(join(directory, "plan.md")))

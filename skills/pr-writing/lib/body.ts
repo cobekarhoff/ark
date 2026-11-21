@@ -476,17 +476,24 @@ function riskBlock(ledger: Ledger, tier: number): Block {
 
 function acsBlock(ledger: Ledger): Block {
   const byStatus = new Map<string, string[]>();
+  const guards: string[] = [];
   for (const criterion of ledger.criteria) {
     const status = criterion.status === "passing" ? "tested" : criterion.status;
-    byStatus.set(status, [...(byStatus.get(status) ?? []), shortId(criterion.id)]);
+    const box = status === "tested" || status === "manual ok" ? "x" : " ";
+    // A guard holds before and after the fix: it gets a line of its own, not a place in a status group.
+    if (criterion.guard) guards.push(`- [${box}] ${shortId(criterion.id)} guard: ${status}`);
+    else byStatus.set(status, [...(byStatus.get(status) ?? []), shortId(criterion.id)]);
   }
   return {
     key: "acs",
     title: "Acceptance criteria",
-    lines: [...byStatus].map(
-      ([status, ids]) =>
-        `- [${status === "tested" || status === "manual ok" ? "x" : " "}] ${ids.join(" ")} ${status}`,
-    ),
+    lines: [
+      ...[...byStatus].map(
+        ([status, ids]) =>
+          `- [${status === "tested" || status === "manual ok" ? "x" : " "}] ${ids.join(" ")} ${status}`,
+      ),
+      ...guards,
+    ],
   };
 }
 
