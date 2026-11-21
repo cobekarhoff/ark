@@ -476,6 +476,19 @@ export type OrcaJob =
     };
 
 /**
+ * `Promise.all` that settles every read before it throws the first failure. The worker is terminated once it answers, and the
+ * timeout kill of a read that is still running lives in the worker: a rejected sibling must not leave a hung `orca` child behind.
+ */
+async function allSettledOrThrow<const Reads extends readonly unknown[]>(
+  reads: Reads,
+): Promise<{ -readonly [Index in keyof Reads]: Awaited<Reads[Index]> }> {
+  const results = await Promise.allSettled(reads);
+  const rejected = results.find((result) => result.status === "rejected");
+  if (rejected) throw rejected.reason;
+  return results.map((result) => (result as PromiseFulfilledResult<unknown>).value) as never;
+}
+
+/**
  * Runs one Orca job in a thread of its own: the parse and map work of a large Orca answer, and the spawns of
  * two reads for each open run, held the hub's loop over 200 ms (ARK-606, as ARK-533). `env` is the current
  * one: a worker otherwise sees only the environment the process started with, not a PATH or timeout a test
@@ -501,7 +514,7 @@ async function inOrcaWorker<T>(job: OrcaJob): Promise<T> {
 export async function readOrcaPass(
   openRuns: { run: string; project: string }[],
 ): Promise<OrcaValue | null> {
-  const [runList, terminalList, inbox] = await Promise.all([
+  const [runList, terminalList, inbox] = await allSettledOrThrow([
     orcaPages<OrcaRun>("run-list", "runs", ["--full"]),
     execJson<{ result?: { terminals?: OrcaTerminalFull[] } }>([
       "orca",
@@ -524,7 +537,7 @@ export async function readOrcaPass(
     orcaRuns.find((orcaRun) => orcaRun.objective === `Master Chief: ${project} tickets`);
   // A run lead is a supervised worker of Master Chief's Orca run, not a terminal Orca lists.
   const chiefWorkers = new Map<string, OrcaWorker[]>();
-  await Promise.all(
+  await allSettledOrThrow(
     [...new Set(openRuns.map((open) => open.project))].map(async (project) => {
       const chief = chiefOf(project);
       if (!chief) return;
@@ -539,11 +552,11 @@ export async function readOrcaPass(
   const agents = new Map<string, Agent[]>();
   const waits = new Map<string, Wait[]>();
   let failed = false;
-  await Promise.all(
+  await allSettledOrThrow(
     openRuns.map(async ({ run, project }) => {
       const orcaRun = leadOf.get(run);
       if (!orcaRun) return;
-      const [workers, tasks] = await Promise.all([
+      const [workers, tasks] = await allSettledOrThrow([
         orcaPages<OrcaWorker>("worker-list", "workers", ["--run", orcaRun.id, "--include-remote"]),
         orcaOrchestration<{ tasks?: OrcaTask[] }>("task-list", "--run", orcaRun.id),
       ]);
@@ -721,7 +734,7 @@ const handlesOf = (worker: OrcaWorker): string[] =>
 export type RunWorkers = DirectoryWorker[];
 
 async function readRunWorkers(arkRun: string, orcaRun: string): Promise<RunWorkers | null> {
-  const [workers, tasks] = await Promise.all([
+  const [workers, tasks] = await allSettledOrThrow([
     orcaPages<OrcaWorker>("worker-list", "workers", ["--run", orcaRun, "--include-remote"]),
     orcaOrchestration<{ tasks?: OrcaTask[] }>("task-list", "--run", orcaRun),
   ]);
@@ -776,7 +789,7 @@ export async function readDirectoryPass(
     /^Master Chief: .+ tickets$/.test(orcaRun.objective ?? ""),
   );
   const chiefWorkers = (
-    await Promise.all(
+    await allSettledOrThrow(
       chiefRuns.map((chief) =>
         orcaPages<OrcaWorker>("worker-list", "workers", ["--run", chief.id, "--include-remote"]),
       ),
@@ -804,7 +817,7 @@ export async function readDirectoryPass(
   const workers: DirectoryWorker[] = [];
   // Eight Orca reads at a time: the first read of a long inbox must not start hundreds of processes together.
   for (let start = 0; start < wanted.length; start += 8)
-    await Promise.all(
+    await allSettledOrThrow(
       wanted.slice(start, start + 8).map(async (lead) => {
         const closed = arkRuns.find((known) => known.run === lead.arkRun)?.closed === true;
         const kept = closed ? closedWorkers.get(lead.arkRun) : undefined;
