@@ -832,6 +832,8 @@ test("ARK-T789 merge-request check names results/evidence/<AC id>.md for a missi
   expect(malformedLine).not.toContain("expected");
 });
 
+// The case of ARK-613: its worker wrote results/evidence/ARK-613/AC2.md and the line now ends
+// "; found results/evidence/ARK-613/AC2.md: move it to results/evidence/AC2.md".
 test("ARK-T790 merge-request check adds the found path and the move text when the file sits under results/evidence/<ticket id>/, adds it for no other layout, and moves nothing", () => {
   useFakeHost();
   const run = kindRun();
