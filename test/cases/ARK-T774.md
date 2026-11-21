@@ -20,7 +20,7 @@ Expected: When a scenario calls `waitFor` with marker names only (so the 20 s de
 - The real `scenario()` helper of `test/test-lock.test.ts` with its temp home; no child process is started (no child writes the asked marker).
 - The test writes one marker file `present-running` into the scenario home itself before the wait. It is not one of the names asked for, so the only way the error can name it is the listing of the home.
 - The test's own timeout is 25 s (the third argument of `test(...)`, a named constant), so a wait without a limit fails at 25 s and not at 90 s. No `setTimeout(`, no `toBeLessThan(<3+ digits>)`: the wall-clock guard (ARK-T126) gives this file no allowance.
-- This is the only case that waits until the 20 s default ends. ARK-T775 calls `waitForWithin(1000, ...)` with a 1 s limit. The ARK-T155 and ARK-T721 tests call `waitFor` with names only and so run with the 20 s default, but their markers appear and their waits end early.
+- This is the only case that waits until the 20 s default ends. ARK-T775 calls `waitForWithin(1000, ...)` with a 1 s limit. The ARK-T155 scenario tests (`test/test-lock.test.ts:744-813`) and the ARK-T721 scenario test (`:855-892`) call `waitFor` with names only and so run with the 20 s default, but their markers appear and their waits end early. The other ARK-T155 tests (`test/budget.test.ts`, `test/test-lock.test.ts:1262`) do not use `scenario()`.
 
 ## Steps
 
