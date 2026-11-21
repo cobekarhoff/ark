@@ -23,6 +23,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -165,11 +166,10 @@ function buildFixture(
   };
   const writeConfig = () => {
     activate();
+    writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
     writeProject("demo", {
       workspace,
       ticket_source: "local",
-      test_min_free_memory_percent: 0,
-      test_max_swap_gb: 1000,
       suites: ["unit", "e2e"].map((name) => ({
         name,
         level: name === "unit" ? "unit" : "e2e",

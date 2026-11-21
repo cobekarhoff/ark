@@ -6,7 +6,7 @@ technique: "equivalence classes (no limit crossed, one class for each of free me
 priority: high
 risk: "Master Chief starts runs on a host that is swapping or out of disk because the hold line is missing, names the wrong reason or the wrong order, or holds a healthy host; or the Host section disappears when no test runs"
 status: active
-changed_by: 2026-11-13-ARK-434-1
+changed_by: 2026-11-21-ARK-623-1
 ---
 
 ## Objective
@@ -20,7 +20,7 @@ The `no free-memory reason above the floor` contract (a free-memory reason is ne
 ## Preconditions
 
 - Temp project and temp `ARK_HOME` with no test lock tickets, and no live Orca (the sections for Orca print their unavailable lines).
-- Fake host reading at the real boundary as in ARK-T187 (fake `memory_pressure`, `sysctl vm.swapusage`, 5-minute load and disk readings that the real reader parses, and the CPU reading of the `chief state` seam `ARK_FAKE_CPU_PERCENT`, see ARK-T365). The disk limit (under the fixed free GB it names) is the value the steps use; the free memory floor and swap ceiling are the `ark.yml` values, default 20 percent and 8 GB.
+- Fake host reading at the real boundary as in ARK-T187 (fake `memory_pressure`, `sysctl vm.swapusage`, 5-minute load and disk readings that the real reader parses, and the CPU reading of the `chief state` seam `ARK_FAKE_CPU_PERCENT`, see ARK-T365). The disk limit (under the fixed free GB it names) is the value the steps use; the free memory floor and swap ceiling are the defaults, 20 percent and 8 GB, because the `host.yml` of the temp `ARK_HOME` sets only `test_budget_cores: 6` (the values of a host file are owned by ARK-T771).
 
 ## Steps
 

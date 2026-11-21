@@ -18,6 +18,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -522,6 +523,8 @@ describe("ark test old-id gate", () => {
   function run(planned = ["proves", "ARK-T1"], source = baseSource, suiteMarker?: string) {
     const arkHome = tempArkHome();
     const workspace = tempGitRepo({ "e2e.test.ts": source });
+    // the fake run never waits for the host: no memory floor, no swap ceiling
+    writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1_000_000 });
     writeProject("fx", {
       workspace,
       ticket_source: "local",
@@ -539,9 +542,6 @@ describe("ark test old-id gate", () => {
         { name: "py", level: "unit", repo: ".", command: pytestCommand, parser: "pytest" },
       ],
       roles,
-      // the fake run never waits for the host: no memory floor, no swap ceiling
-      test_min_free_memory_percent: 0,
-      test_max_swap_gb: 1_000_000,
     });
     const ticket = writeTicket("fx", "FAKE-1", [{ id: "FAKE-1-AC1", text: "criterion" }]);
     const runId = ark("run", "start", ticket, "--project", "fx").out.match(
