@@ -24,7 +24,7 @@ bun run lint
 
 `format` writes; the other three only check. `.githooks/pre-commit` and CI never run `format`: a file you forgot to format fails there. The order to run them in is in [`AGENTS.md`](../../AGENTS.md).
 
-[`.githooks/pre-commit`](../../.githooks/pre-commit) runs `typecheck`, `lint`, `format:check` and `bun test --parallel`. CI runs the same checks, with the Bun suite in 4 shards ([below](#how-ci-shards-the-bun-suite)), and `bunx playwright test`.
+[`.githooks/pre-commit`](../../.githooks/pre-commit) runs `typecheck`, `lint`, `format:check` and `bun test --parallel`. CI runs the same checks, with the Bun suite in 4 shards and a serial `hub-timing` job ([below](#how-ci-shards-the-bun-suite)), and `bunx playwright test`. The hook, `bun run test` and the `cli` suite of `ark.yml` still run every file with `--parallel`.
 
 The hook is opt-in. Turn it on once per clone:
 
@@ -39,11 +39,12 @@ The hook runs the full Bun suite, not only the files you changed. On a busy host
 Every pull request, and every push to `main`, runs the full suite: there is no fast lane and no path filter. CI has these jobs:
 
 - `checks` runs `typecheck`, `lint` and `format:check`.
-- `bun-shards` is a matrix of 4 jobs. Shard `N` runs `bun test --parallel --shard=N/4 --timings=test/timings.json`, which is one quarter of the `*.test.ts` files. Together the 4 shards run every file once, and a file that is not in the timings file still runs in exactly one shard.
+- `bun-shards` is a matrix of 4 jobs. Shard `N` runs `bun test --parallel --shard=N/4 --timings=test/timings.json`, which is one quarter of the `*.test.ts` files except the four hub timing files (one `--path-ignore-patterns=test/<file>` each, plus `--path-ignore-patterns=test/pw/**`, because a command line ignore flag replaces the `pathIgnorePatterns` list of `bunfig.toml`). A new test file runs in exactly one shard with no edit to the workflow, and a file that is not in the timings file still runs in exactly one shard.
+- `hub-timing` is a matrix of 2 serial entries that run `bun test` with no `--parallel` and no `--shard`: `./test/hub-stall.test.ts` alone, and `./test/hub-idle.test.ts ./test/hub-home-lag.test.ts ./test/hub-stall-window.test.ts` in one process. `--parallel` workers on a 4-core runner starve hub-stall's 120 s soak, hub-home-lag's 1,620-run fixture and hub-idle's call counts. If you rename or delete one of the four files, change the `hub-timing` entries and the `--path-ignore-patterns` flags of `bun-shards` in the same commit.
 - `playwright` runs `bunx playwright test` on 4 workers (`playwright.config.ts` sets 4 when `CI` is set, 2 otherwise).
-- `test` is the required status check of `main`. It needs `checks` and `bun-shards`, always runs, and fails unless both succeeded, so a failed, cancelled or skipped shard fails it. A matrix job cannot be named `test`: it would report `test (1)` to `test (4)`.
+- `test` is the required status check of `main`. It needs `checks`, `bun-shards` and `hub-timing`, always runs, and fails unless all three succeeded, so a failed, cancelled or skipped shard or hub timing entry fails it. A matrix job cannot be named `test`: it would report `test (1)` to `test (4)`.
 
-`test/timings.json` is the shard balance and nothing else: Bun reads the recorded milliseconds of each file to give the 4 shards about equal total time, and to start the slowest files first. It does not select, skip or order what must pass. A stale or missing entry makes a shard slower, never a file unrun.
+`test/timings.json` is the shard balance and nothing else: Bun reads the recorded milliseconds of each file to give the 4 shards about equal total time (the four hub timing files are not in a shard, so their entries do not count), and to start the slowest files first. It does not select, skip or order what must pass. A stale or missing entry makes a shard slower, never a file unrun.
 
 The recorded milliseconds are from the Linux CI run 44464183048 (the per-test times summed for each file); a file added since has the median. Refresh it from CI when the suite changes much: a Mac gives times that do not match the runner. In a CI job, run the command below unsharded, download the file it writes, run `bun run format` and commit it. For a local refresh, run the same command. It must run unsharded, because `--update-timings` under `--shard` replaces the file with that shard's files only:
 

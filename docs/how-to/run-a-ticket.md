@@ -109,7 +109,7 @@ ark status
 ark status <run>
 ```
 
-`ark status` lists every open run: the run id, its phase, its current step (`-` for none) and its age. `ark status <run>` shows the phase, the round, the current step, the gate that waits for you, the gates answered so far, the MR links and the cost so far. This is real output, trimmed:
+`ark status` lists every open run of every project (`--project <name>` or `ARK_PROJECT` limits the list to one project): the run id, its phase, its current step (`-` for none) and its age. `ark status <run>` shows the phase, the round, the current step, the gate that waits for you, the gates answered so far, the MR links and the cost so far. This is real output, trimmed:
 
 ```text
 $ ark status
