@@ -76,8 +76,10 @@ export type RunState = {
   } | null;
   /** Files of the last full test.completed that failed at head and at the tip of the target branch, and were not counted. A quick test leaves it as it was. */
   red_on_main: string[];
-  /** Some test.completed had every non-manual criterion failing: the bug run's proof that the tests fail before the fix. */
+  /** Some test.completed had every non-manual, non-guard criterion failing: the bug run's proof that the tests fail before the fix. */
   red_test: boolean;
+  /** Ids of the criteria that `criteria.updated` and `criteria.amended` mark as guards: they hold before and after the fix, so the red proof skips them. */
+  guards: string[];
   /** Suites at the base commit of a refactor run: undefined until `ark test` ran them. */
   base_passed?: boolean;
   merge_requests: {
@@ -162,6 +164,7 @@ export function deriveState(events: ArkEvent[]): RunState {
   const startedRounds: { step: string; round: number }[] = [];
   let roundBudget = 0;
   let criteriaIds: string[] = [];
+  let guardIds = new Set<string>();
   let criteriaStatus: Record<string, CriterionStatus> = {};
   const gates: Record<string, string> = {};
   const manualHeads: Record<string, Record<string, string>> = {};
@@ -193,16 +196,24 @@ export function deriveState(events: ArkEvent[]): RunState {
         project = data.project;
         ticket = { id: data.ticket.id, title: data.ticket.title };
         criteriaIds = data.criteria.map(alias);
+        guardIds = new Set();
         gateAlwaysOpen = data.criteria_gate === true;
         startedWithoutCriteria = criteriaIds.length === 0;
         roundBudget = data.round_budget ?? 0;
         break;
       case "criteria.updated":
         criteriaIds = data.criteria.map(alias);
+        guardIds = new Set((data.guards ?? []).map(alias));
         criteriaStatus = {};
         break;
       case "criteria.amended": {
         const id = alias(data.criterion);
+        // A guard amend (`guard` is a boolean) changes no text and no plan: no text amendment, the manual answers stand.
+        if (typeof data.guard === "boolean") {
+          if (data.guard) guardIds.add(id);
+          else guardIds.delete(id);
+          break;
+        }
         // A verified_by amend changes no text: no text amendment and the manual answers stand.
         // Old events have no verified_by_new and keep today's behaviour.
         if (data.verified_by_new === undefined) {
@@ -384,9 +395,11 @@ export function deriveState(events: ArkEvent[]): RunState {
     phase = "escalation";
   else phase = "building";
 
-  // Red proof: one test run where every current non-manual criterion failed.
+  // Red proof: one test run where every current non-manual, non-guard criterion failed.
   const redTest = testRuns.some((statuses) => {
-    const required = criteriaIds.filter((id) => !statuses[id]?.startsWith("manual"));
+    const required = criteriaIds.filter(
+      (id) => !guardIds.has(id) && !statuses[id]?.startsWith("manual"),
+    );
     return required.length > 0 && required.every((id) => statuses[id] === "failing");
   });
 
@@ -424,6 +437,7 @@ export function deriveState(events: ArkEvent[]): RunState {
     last_test: lastTest,
     red_on_main: redOnMain,
     red_test: redTest,
+    guards: criteriaIds.filter((id) => guardIds.has(id)),
     ...(basePassed === undefined ? {} : { base_passed: basePassed }),
     merge_requests: mergeRequests,
     outcome,

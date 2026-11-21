@@ -39,6 +39,8 @@ export type TicketCriterion = {
   verified_by: string[];
   /** The ticket gives `verified_by` or writes a local id (`AC1`): the human approves its test cases at the criteria gate. */
   newScheme: boolean;
+  /** The criterion holds before and after the fix, so a bug run's red proof skips it. Only a `test` criterion of a bug run can be one. */
+  guard: boolean;
 };
 
 /**
@@ -66,13 +68,38 @@ export function parseCriteria(fields: Record<string, unknown>, source: string): 
       (!Array.isArray(verified) || !verified.every((item) => typeof item === "string"))
     )
       throw new ArkError(`${source}: criterion ${id} verified_by must be a list of strings`);
+    const guard = entry.guard;
+    if (guard !== undefined && typeof guard !== "boolean")
+      throw new ArkError(
+        `${source}: criterion ${id} guard must be true or false, not ${JSON.stringify(guard)}`,
+      );
     return {
       id,
       method,
       verified_by: verified ?? [],
       newScheme: verified !== undefined || /^AC\d+$|\/AC\d+$/.test(entry.id),
+      guard: guard === true,
     };
   });
+}
+
+/** Refuses `guard: true` on a criterion whose method is not `test` and in a run whose kind is not `bug`, naming the criterion. */
+export function assertGuardsAllowed(
+  criteria: Pick<TicketCriterion, "id" | "method" | "guard">[],
+  kind: TicketKind,
+  source: string,
+): void {
+  for (const criterion of criteria) {
+    if (!criterion.guard) continue;
+    if (criterion.method !== "test")
+      throw new ArkError(
+        `${source}: criterion ${criterion.id} has guard: true and method ${criterion.method}: only a method test criterion can be a guard`,
+      );
+    if (kind !== "bug")
+      throw new ArkError(
+        `${source}: criterion ${criterion.id} has guard: true in a ${kind} run: only a bug run has a red proof that a guard skips`,
+      );
+  }
 }
 
 /** The id, title, kind and criterion ids of a ticket file, refusing one that lacks the required fields. */
