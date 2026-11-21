@@ -28,7 +28,25 @@ jobs:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
-      - run: bun test --parallel --shard=${{ matrix.shard }}/4 --timings=test/timings.json
+      # The four hub timing files run in `hub-timing`. A CLI flag replaces the bunfig.toml ignore list, so test/pw/** is repeated.
+      - run: bun test --parallel --shard=${{ matrix.shard }}/4 --timings=test/timings.json --path-ignore-patterns=test/hub-stall.test.ts --path-ignore-patterns=test/hub-idle.test.ts --path-ignore-patterns=test/hub-home-lag.test.ts --path-ignore-patterns=test/hub-stall-window.test.ts --path-ignore-patterns=test/pw/**
+  # The hub timing tests (a 120 s soak, a 1,620-run fixture, exact call counts) fail when --parallel workers
+  # share a 4-core runner, so each entry runs its files in one process with no --parallel.
+  hub-timing:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        files:
+          - ./test/hub-stall.test.ts
+          - ./test/hub-idle.test.ts ./test/hub-home-lag.test.ts ./test/hub-stall-window.test.ts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun test ${{ matrix.files }}
   playwright:
     runs-on: ubuntu-latest
     steps:
@@ -42,8 +60,8 @@ jobs:
   # The required status check is named `test`. A matrix job reports `test (1)`..`test (4)`, so this job
   # reports the one name branch protection waits for, and fails unless every needed job succeeded.
   test:
-    needs: [checks, bun-shards]
+    needs: [checks, bun-shards, hub-timing]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.checks.result }}" = success && test "${{ needs.bun-shards.result }}" = success
+      - run: test "${{ needs.checks.result }}" = success && test "${{ needs.bun-shards.result }}" = success && test "${{ needs.hub-timing.result }}" = success
