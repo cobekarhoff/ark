@@ -6,7 +6,7 @@ technique: decision table (missing / malformed / valid) times two entry points; 
 priority: high
 risk: a missing or malformed file ships; only the first bad AC is named; the refusal happens after a push or an event; ark run close handed_off does not share the check
 status: active
-changed_by: 2026-11-06-ARK-312-1
+changed_by: 2026-11-21-ARK-626-1
 ---
 
 ## Objective
@@ -26,15 +26,15 @@ Prove `ark merge-request open` and `ark run close <run> handed_off` refuse, befo
 ## Steps
 
 1. For each of state (a) and state (b), and for each command in `ark merge-request open` and `ark run close <run> handed_off` (four fresh fixtures): run the command and capture the full error text and exit code.
-2. State (a), either command: assert exit non-zero and the one message holds `evidence missing: AC1 (demonstration)`, `evidence missing: AC2 (inspection)`, `evidence missing: AC3 (analysis)`, `evidence missing: AC4 (demonstration)`, `evidence missing: AC5 (demonstration)`.
-3. State (b), either command: assert exit non-zero and the one message holds `evidence missing: AC1 (demonstration)`, `evidence malformed: AC2: <reason naming Verdict>`, `evidence malformed: AC3: <reason naming Result>` and no `AC4` line.
+2. State (a), either command: assert exit non-zero and the one message holds `evidence missing: AC1 (demonstration): expected results/evidence/AC1.md`, `evidence missing: AC2 (inspection): expected results/evidence/AC2.md`, `evidence missing: AC3 (analysis): expected results/evidence/AC3.md`, `evidence missing: AC4 (demonstration): expected results/evidence/AC4.md`, `evidence missing: AC5 (demonstration): expected results/evidence/AC5.md`, each on its own line and with no `; found` text (no ticket-prefixed folder exists; ARK-T790 owns the hint).
+3. State (b), either command: assert exit non-zero and the one message holds `evidence missing: AC1 (demonstration): expected results/evidence/AC1.md`, `evidence malformed: AC2: <reason naming Verdict>`, `evidence malformed: AC3: <reason naming Result>` and no `AC4` line.
 4. After each refusal assert remote refs equal the recorded refs, `events.ndjson` line count is unchanged, and `state.json` status is unchanged.
 5. In a fresh state-(b) fixture of each command with an unproven manual criterion, assert the existing manual-gate error appears and is unchanged from before this feature (evidence check does not replace it).
 6. State (c), fresh fixture for each command: assert no `evidence` refusal text. For `merge-request open` assert the remote ref was pushed; for `handed_off` assert the event was appended and the status changed.
 
 ## Expected results
 
-- When a non-test AC has no evidence file, the system shall refuse with `evidence missing: <AC id> (<method>)` before any push and before any event, on both commands.
+- When a non-test AC has no evidence file, the system shall refuse with `evidence missing: <AC id> (<method>): expected results/evidence/<AC id>.md` before any push and before any event, on both commands.
 - When a non-test AC has a malformed evidence file, the system shall refuse with `evidence malformed: <AC id>: <reason>` before any push and before any event, on both commands.
 - The refusal shall name every AC with missing or malformed evidence in one message, including a legacy `manual: true` AC.
 - When every non-test AC has a well-formed evidence file, the system shall pass the evidence check on both commands.

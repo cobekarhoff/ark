@@ -6,7 +6,7 @@ technique: equivalence classes (head problem present or absent) against test out
 priority: high
 risk: "ark test hides an AC string that open will refuse later (the D11 loop: a 7-14 minute test runs again after the fix), prints the heading on a clean run and breaks tests that compare whole output, prints after the failure throw so a red run shows nothing, lists a final-stage problem (missing evidence) that is not due yet, or turns the information into a gate by changing the exit code or passed in test.completed"
 status: active
-changed_by: 2026-11-14-ARK-481-1
+changed_by: 2026-11-21-ARK-626-1
 ---
 
 ## Objective
@@ -28,7 +28,7 @@ Prove that at its end `ark test <run>` runs stage `head` and prints each problem
 2. Read the last `test.completed` event: `passed` is true. Run `ark test <run>` in the control fixture and assert exit 0, `passed` true, and that the output has no `merge-request check` heading at all.
 3. Compare the two outputs after removing the block of step 1: their `tests`, `criterion` and `evidence` lines are the same (the test, criteria and result lines are untouched). The `suite` lines are left out of the comparison, because a suite line may carry a `reused` suffix.
 4. Run `ark test <run>` in the variant (the old-id check fails, the suites do not run) with the problem present. Assert exit 1 with the same error text as the same variant in the control fixture (`check old-id e2e failed`, no `suite e2e failed`), `passed` false, and that the heading and the line are in the output, printed before the failure is thrown, on the stop path.
-5. In the problem fixture after step 1 run `ark merge-request open <run>`. Assert it is refused and that its error text is the line of step 1 byte for byte (`AC2` is answered, so open reaches the AC-string refusal). Add the string to a tracked file, commit, run `ark test` again: no heading. Run open again: it is refused, but with `refused: evidence is not complete` and the line `evidence missing: AC2 (analysis)`. That line is a final-stage problem: it was not in the head block of step 1. The AC-string line is gone because the string was added.
+5. In the problem fixture after step 1 run `ark merge-request open <run>`. Assert it is refused and that its error text is the line of step 1 byte for byte (`AC2` is answered, so open reaches the AC-string refusal). Add the string to a tracked file, commit, run `ark test` again: no heading. Run open again: it is refused, but with `refused: evidence is not complete` and the line `evidence missing: AC2 (analysis): expected results/evidence/AC2.md`. That line is a final-stage problem: it was not in the head block of step 1. The AC-string line is gone because the string was added.
 6. Compare the `test.completed` events of the problem run (step 1) and the control run (step 2): they differ in no key (no new key in `data`); the head list is not recorded as a gate.
 
 ## Expected results
