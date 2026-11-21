@@ -6,7 +6,7 @@ technique: "state transition (valid config exit 0, same config with one typo exi
 priority: high
 risk: "`loadConfig` throws but `ark status` hides the error, takes the default and exits 0, or the exit code is 1 with no key in the output, so a person who typed `merge_request: none` is told nothing before a run pushes"
 status: active
-changed_by: 2026-11-13-ARK-332-1
+changed_by: 2026-11-21-ARK-622-1
 ---
 
 ## Objective
@@ -16,7 +16,7 @@ changed_by: 2026-11-13-ARK-332-1
 ## Preconditions
 
 - A temp `ARK_HOME` with a project `demo` and a valid `ark.yml`.
-- The harnesses of the roles in that `ark.yml` are on PATH (a stub `PATH` that holds each one), as in ARK-T165. Without them `ark status` exits 1 on `role ...: harness ... not installed`, so steps 1 and 4 would not show a valid config.
+- The harnesses of the roles in that `ark.yml` are on PATH (a stub `PATH` that holds each one), as in ARK-T767. Without them `ark status` exits 1 on `role ...: harness ... not installed`, so steps 1 and 4 would not show a valid config.
 - The `ark` CLI run as a child process (`bun cli/ark.ts status`), with `ARK_PROJECT=demo`.
 
 ## Steps

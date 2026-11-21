@@ -86,10 +86,15 @@ esac
   installFakeOrca();
 });
 
-/** Two repos (PR 11 CLEAN, PR 12 DIRTY) with retro.md, ticket.md id ARK-900 and a ready ticket file; one auto-merger pass. */
-function runCleanPullRequestScenario() {
-  const workspace = tempGitRepo();
-  const projectDirectory = writeProject("demo", {
+/** Seeds a `merge_requests_open` run of a project: one repo per pull request, retro.md, ticket.md and a ready ticket file. */
+function seedMergeRequestRun(
+  workspace: string,
+  project: string,
+  runId: string,
+  ticketId: string,
+  pullRequests: readonly (readonly [string, number])[],
+) {
+  const projectDirectory = writeProject(project, {
     workspace,
     ticket_source: "local",
     suites: [{ name: "unit", level: "unit", repo: ".", command: "true {report}", parser: "bun" }],
@@ -99,27 +104,24 @@ function runCleanPullRequestScenario() {
       reviewer: { harness: "codex", model: "gpt-codex" },
     },
   });
-  const runDirectory = join(projectDirectory, "runs", run);
+  const runDirectory = join(projectDirectory, "runs", runId);
   mkdirSync(runDirectory, { recursive: true });
   const events: { type: string; data: Record<string, unknown> }[] = [
     {
       type: "run.started",
       data: {
-        run,
-        project: "demo",
+        run: runId,
+        project,
         round_budget: 2,
-        ticket: { id: "ARK-900", title: "Two repos" },
+        ticket: { id: ticketId, title: "Two repos" },
         criteria: [],
       },
     },
   ];
-  for (const [repo, number] of [
-    ["app", 11],
-    ["core", 12],
-  ] as const) {
+  for (const [repo, number] of pullRequests) {
     const path = mkdtempSync(join(tmpdir(), `ark-worktree-${repo}-`));
     events.push(
-      { type: "worktree.created", data: { repo, path, branch: `ark/${run}`, base: "main" } },
+      { type: "worktree.created", data: { repo, path, branch: `ark/${runId}`, base: "main" } },
       {
         type: "merge_request.opened",
         data: { repo, url: `https://github.com/org/${repo}/pull/${number}`, number },
@@ -128,13 +130,21 @@ function runCleanPullRequestScenario() {
   }
   writeEvents(runDirectory, events);
   writeFileSync(join(runDirectory, "retro.md"), "# Retro\n");
-  writeFileSync(join(runDirectory, "ticket.md"), "---\nid: ARK-900\n---\n");
+  writeFileSync(join(runDirectory, "ticket.md"), `---\nid: ${ticketId}\n---\n`);
   mkdirSync(join(projectDirectory, "tickets"), { recursive: true });
   writeFileSync(
-    join(projectDirectory, "tickets", "ARK-900.md"),
-    "---\nid: ARK-900\nstatus: ready\n---\n",
+    join(projectDirectory, "tickets", `${ticketId}.md`),
+    `---\nid: ${ticketId}\nstatus: ready\n---\n`,
   );
+}
 
+/** Two repos (PR 11 CLEAN, PR 12 DIRTY) with retro.md, ticket.md id ARK-900 and a ready ticket file; one auto-merger pass. */
+function runCleanPullRequestScenario() {
+  const workspace = tempGitRepo();
+  seedMergeRequestRun(workspace, "demo", run, "ARK-900", [
+    ["app", 11],
+    ["core", 12],
+  ]);
   return runScript("auto-merger.sh", [workspace, "1", "--once"], { ARK_PROJECT: "demo" });
 }
 
@@ -165,6 +175,30 @@ test(
     const result = runCleanPullRequestScenario();
     expectCleanPullRequestOnlyMerged(result);
     expect(result.err).not.toContain("HELD:");
+  },
+  { timeout: 90_000 },
+);
+
+test(
+  "ARK-T768 auto-merger with ARK_PROJECT set reads only the runs of that project: no gh call and no 'run not found' line for a run of another project in merge_requests_open",
+  () => {
+    const workspace = tempGitRepo();
+    seedMergeRequestRun(workspace, "demo", run, "ARK-900", [
+      ["app", 11],
+      ["core", 12],
+    ]);
+    // A different run id: with one id in both projects `ark merge-request status --project other` finds the other run for the demo line too.
+    seedMergeRequestRun(workspace, "other", "2026-11-02-ARK-901-1", "ARK-901", [["app", 21]]);
+
+    const result = runScript("auto-merger.sh", [workspace, "1", "--once"], {
+      ARK_PROJECT: "other",
+    });
+
+    expect(result.code).toBe(0);
+    const calls = readFileSync(ghLog, "utf8").split("\n");
+    expect(calls).toContain("pr merge https://github.com/org/app/pull/21 --merge");
+    expect(calls.filter((call) => /pull\/1[12]\b/.test(call))).toEqual([]);
+    expect(result.out + result.err).not.toContain("run not found");
   },
   { timeout: 90_000 },
 );
