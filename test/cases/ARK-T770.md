@@ -33,8 +33,8 @@ Gate answers:
 
 ## Expected results
 
-- Step 1: the second output has `waiting: place 1 of 1; running: <run one> 2 cores`; while it waits the suite log has no `start <run two>` and the store holds one started ticket of 2 cores and one waiting ticket of 2 cores. After the release both exit 0 and `end <run one>` comes before `start <run two>` in the log.
-- Step 2: `start <run two>` comes before `end <run one>` (both suites run together within 4 cores), and neither output has a `waiting:` line. Both exit 0.
+- Step 1: the second output has `waiting: place 1 of 1; running: <run one> 2 cores`; while it waits the suite log has no `start <run two>` and the store holds one started ticket of 2 cores and one waiting ticket of 2 cores. After the release both exit 0, the suites of the two runs never overlap (each `start` is followed at once by the `end` of the same suite), and `end <run one>` comes before `start <run two>` in the log (the cores are taken for each suite, so the two runs interleave suite by suite).
+- Step 2: `start <run two>` comes before `end <run one>` (both suites run together within 4 cores), and the second output never names `<run one>` as running. Both exit 0.
 - No ticket is left in the store after both runs end.
 
 ## Screenshot checkpoints

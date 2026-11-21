@@ -23,6 +23,7 @@ Gate answers:
 ## Preconditions
 
 - Temp `ARK_HOME` with a valid project (no host key in its `ark.yml`) and an open run.
+- Fake `claude` and `codex` harnesses on `PATH` for `ark status`, which exits 1 when a role's harness is not installed on the host (`withFakeHarnesses` of `test/helpers.ts`).
 - Three bad host files, one per row: `A`, `test_min_free_memory_percent: 10` and `test_budget_core: 6` (an unknown key next to a valid one); `B`, `test_budget_cores: 0`; `C`, `test_budget_cores: [` (YAML that does not parse).
 - For each bad file the case first runs `ark test <run>` and keeps its error line (ARK-T772 proves that it refuses).
 - For step 3: the scratch repo, preload and marker-writing files of ARK-T683, in the `workspace` of a project `demo` in the same `ARK_HOME`; a holder that holds `D` cores, the default budget `max(1, floor(0.6 x os.cpus().length))` that the case computes.

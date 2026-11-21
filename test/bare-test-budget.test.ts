@@ -13,7 +13,7 @@ import {
   watch,
   writeFileSync,
 } from "node:fs";
-import { availableParallelism, tmpdir } from "node:os";
+import { availableParallelism, cpus, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { budgetHeldVariable, readTestLock } from "../cli/test-lock.ts";
 import { macOnly, recordStartedRun, stopStartedRuns } from "./orphan-runners.ts";
@@ -193,14 +193,14 @@ function environment(
   ) as Record<string, string>;
 }
 
-/** A real process that holds `cores` of the 3-core budget of `home` until it is released. */
-async function startHolder(home: string, cores: number) {
+/** A real process that holds `cores` of the `budgetCores`-core budget of `home` (3 by default) until it is released. */
+async function startHolder(home: string, cores: number, budgetCores = 3) {
   const holder = Bun.spawn(
     [
       process.execPath,
       "-e",
       `import { openTestBudget } from ${JSON.stringify(lockModule)};
-const budget = openTestBudget("holder", 3, { print: () => {} });
+const budget = openTestBudget("holder", ${budgetCores}, { print: () => {} });
 await budget.take(${cores});
 console.log("held");
 await new Promise((done) => process.stdin.once("data", done));
@@ -1070,6 +1070,38 @@ test("ARK-T685 a serial bun test of a project with no host.yml runs at once on t
   for (const name of ["a", "b", "c", "gate"])
     expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
 });
+
+// ARK-T773: the preload never refuses a bad host.yml. It waits on the default budget (all three keys default, never the
+// valid keys of the bad file), so a holder that fills the default budget holds the run, and every file runs after the release.
+test.each([
+  {
+    title: "an unknown key next to a valid one",
+    host: "test_min_free_memory_percent: 10\ntest_budget_core: 6\n",
+  },
+  { title: "YAML that does not parse", host: "test_budget_cores: [\n" },
+])(
+  "ARK-T773 a serial bun test with a bad host.yml ($title) waits on the default budget with one line, then runs every file and exits 0",
+  async ({ host }) => {
+    const fixture = makeFixture({ budget: null });
+    writeFileSync(join(fixture.home, "host.yml"), host);
+    const defaultBudget = Math.max(1, Math.floor(0.6 * cpus().length));
+    const holder = await startHolder(fixture.home, defaultBudget, defaultBudget);
+    const run = bunTest(fixture.directory, [], environment(fixture.home));
+    await run.output.until(waitingLine, waitingLineLimit);
+    expect(fixture.ran()).toEqual([]);
+    expect(run.child.exitCode).toBeNull();
+    expect(readTestLock().waiting).toMatchObject([
+      { run: "bun test", pid: run.child.pid, cores: 1 },
+    ]);
+
+    await holder.release();
+    expect(await finish(run), run.output.text).toBe(0);
+    expect(run.output.count(waitingLine)).toBe(1);
+    for (const name of ["a", "b", "c", "gate"])
+      expect(fixture.markerLines(`ran-${name}`)).toHaveLength(1);
+    expect(readTestLock()).toEqual({ running: [], waiting: [] });
+  },
+);
 
 test("ARK-T685 a failing test file fails the run with exit 1 and the failure text, and adds no failure of the hook", async () => {
   const fixture = makeFixture({ where: "elsewhere", failing: true });
