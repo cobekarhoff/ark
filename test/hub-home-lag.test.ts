@@ -755,7 +755,7 @@ function expectedSurfaces(
 
 // ---------------------------------------------------------------- ARK-T751
 
-test("ARK-T751 On a hub whose Ark home switches from a near-empty project to a project of the real home's size and shape (270 run folders with real events, plans and metrics, 505 tickets), the largest health lag of the large pass and of the compose and publish after it is at most 150 ms over the largest lag of a control phase on the same hub, and the snapshot holds every run, gate, ticket, cost, role time, queue and unread count the fixture names", async () => {
+test("ARK-T751 On a hub whose Ark home switches from a near-empty project to a project at or above the real home's size and shape, the added health lag of the large pass is at most 150 ms over the control, and the snapshot holds every run, gate, ticket, cost, role time, queue and unread count the fixture names", async () => {
   const fake = stage();
   const runs = runModels();
   const tickets = ticketModels();
