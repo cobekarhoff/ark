@@ -3485,8 +3485,8 @@ test("ARK-T778 post_mr outside an Ark run sends no local image to a public repo,
   writeFileSync(
     bodyFile,
     readFileSync(bodyFile, "utf8").replace(
-      /^(## .*)$/m,
-      (line) => `${line}\n\n![a](${shotPath("ARK-T1")})`,
+      /^ARK-9: change$/m,
+      `![checkpoint](${shotPath("ARK-T1")})`,
     ),
   );
   const title = "ARK-9: Show units";

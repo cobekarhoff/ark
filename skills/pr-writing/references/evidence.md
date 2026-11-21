@@ -4,16 +4,17 @@ What counts as evidence in an MR or PR body, and every check `lint_body.ts` runs
 
 ## What counts as evidence
 
-| Claim in the body              | Evidence the reader can check                                                                                   |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| "tests pass"                   | The command and its result line, for example `bun test` and `42 pass, 0 fail`. Paste the output of `review.ts`. |
-| "bug fixed"                    | A test that fails at base and passes at head, with both results.                                                |
-| "refactor, no behavior change" | The same test passing at base and at head.                                                                      |
-| "faster"                       | Baseline and compare numbers, with n, the machine and the bounds.                                               |
-| "works in the UI"              | Screenshots as Markdown images in the body, 5 at most; `post_mr.ts` uploads them.                               |
-| "not tested"                   | `Not run: <what>, <reason>`. This is evidence of honesty and is welcome.                                        |
-| "[x] Self-review completed"    | None. Delete it or name the command.                                                                            |
-| "passed three runs in a row"   | The three commands and their result lines, or drop the claim.                                                   |
+| Claim in the body              | Evidence the reader can check                                                                                                                                                                                                                                                           |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "tests pass"                   | The command and its result line, for example `bun test` and `42 pass, 0 fail`. Paste the output of `review.ts`.                                                                                                                                                                         |
+| "bug fixed"                    | A test that fails at base and passes at head, with both results.                                                                                                                                                                                                                        |
+| "refactor, no behavior change" | The same test passing at base and at head.                                                                                                                                                                                                                                              |
+| "faster"                       | Baseline and compare numbers, with n, the machine and the bounds.                                                                                                                                                                                                                       |
+| "works in the UI"              | Screenshots as Markdown images in the body, 5 at most; `post_mr.ts` uploads them (see the next row for a repo that is not private).                                                                                                                                                     |
+| "works in a live check"        | On a repo that is not private, only checkpoint screenshots of test cases are uploaded. Any other screenshot or video stays in the run folder, and the body says `Not run:` with the reason. The rule trusts the checkpoint folder and does not prove that the test ran on fixture data. |
+| "not tested"                   | `Not run: <what>, <reason>`. This is evidence of honesty and is welcome.                                                                                                                                                                                                                |
+| "[x] Self-review completed"    | None. Delete it or name the command.                                                                                                                                                                                                                                                    |
+| "passed three runs in a row"   | The three commands and their result lines, or drop the claim.                                                                                                                                                                                                                           |
 
 ## Lint checks
 
