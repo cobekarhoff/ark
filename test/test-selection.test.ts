@@ -5,17 +5,21 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
+import { buildLedger } from "../skills/pr-writing/lib/ledger.ts";
+import { lintBody } from "../skills/pr-writing/lib/lint.ts";
 import {
   ark,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeEvidenceFile,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -128,8 +132,11 @@ function markerFixture(): Fixture {
 }
 
 /**
- * Starts a run at the building phase on `workspace` (one repo): an AC with `method: test` verified by `cases`,
- * an approved plan and the worktree. `forge` gives the repo an origin whose pushes go to a local bare repo.
+ * Starts a run at the building phase on `workspace`: an AC with `method: test` verified by `cases`, an approved plan and
+ * a worktree for each of `repos` (default the one repo "."; else folders of the workspace, the first holds the plan step).
+ * `forge` gives each of those repos an origin whose pushes go to a local bare repo. `action` is the plan `test_cases`
+ * action of each case (default `add`), `generated` the `generated` list of ark.yml (default none) and `manualAc` adds a
+ * second AC with `manual: true`.
  */
 function startRun(options: {
   workspace: string;
@@ -139,15 +146,32 @@ function startRun(options: {
   forge?: boolean;
   checks?: { name: string; repo: string; command: string }[];
   setup?: string;
-}): { runId: string; runDirectory: string; mirror: string } {
+  action?: string;
+  /** The plan `test_cases` as written, in place of one entry of `action` for each of `cases`. */
+  planCases?: Record<string, unknown>[];
+  generated?: { path: string; command: string }[];
+  repos?: string[];
+  manualAc?: boolean;
+}): { runId: string; runDirectory: string; mirror: string; mirrors: Record<string, string> } {
   const arkHome = tempArkHome();
+  const repos = options.repos ?? ["."];
+  const repoPath = (repo: string) =>
+    repo === "." ? options.workspace : join(options.workspace, repo);
   if (options.forge) {
-    const bare = join(mkdtempSync(join(tmpdir(), "ark-origin-")), "github.com", "org", "core.git");
-    mkdirSync(bare, { recursive: true });
-    git(bare, "init", "--bare", "-q");
-    git(options.workspace, "remote", "add", "origin", bare);
-    git(options.workspace, "push", "origin", "HEAD:refs/heads/main");
-    git(options.workspace, "remote", "set-head", "origin", "main");
+    for (const repo of repos) {
+      const name = repo === "." ? "core" : repo;
+      const bare = join(
+        mkdtempSync(join(tmpdir(), "ark-origin-")),
+        "github.com",
+        "org",
+        `${name}.git`,
+      );
+      mkdirSync(bare, { recursive: true });
+      git(bare, "init", "--bare", "-q");
+      git(repoPath(repo), "remote", "add", "origin", bare);
+      git(repoPath(repo), "push", "origin", "HEAD:refs/heads/main");
+      git(repoPath(repo), "remote", "set-head", "origin", "main");
+    }
   }
   writeProject("demo", {
     workspace: options.workspace,
@@ -156,13 +180,25 @@ function startRun(options: {
     test_max_swap_gb: 1000,
     ...(options.setup === undefined ? {} : { setup: options.setup }),
     ...(options.checks === undefined ? {} : { checks: options.checks }),
+    ...(options.generated === undefined ? {} : { generated: options.generated }),
     suites: options.suites,
     roles,
   });
   const ticket = writeTicket(
     "demo",
     "FAKE-1",
-    [{ id: "AC1", text: "criterion AC1", method: "test", verified_by: options.cases }],
+    [
+      // With no case to verify it, AC1 is an inspection AC: plan check refuses a test AC with no integration case.
+      {
+        id: "AC1",
+        text: "criterion AC1",
+        method: options.cases.length === 0 ? "inspection" : "test",
+        verified_by: options.cases,
+      },
+      ...(options.manualAc
+        ? [{ id: "AC2", text: "criterion AC2", method: "demonstration", manual: true }]
+        : []),
+    ],
     "Ticket FAKE-1",
     options.kind,
   );
@@ -172,46 +208,60 @@ function startRun(options: {
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
   recordStartedRun({ runId, runDirectory });
   recordEvaluation(runDirectory);
+  const criteria = ["FAKE-1/AC1", ...(options.manualAc ? ["FAKE-1/AC2"] : [])];
   writeFileSync(
     join(runDirectory, "plan.yml"),
     JSON.stringify({
       design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
       summary: {
         why: "Test the run.",
-        changes: [{ criterion: "FAKE-1/AC1", where: "tests", now: "None.", fix: "A test checks." }],
+        changes: criteria.map((criterion) => ({
+          criterion,
+          where: "tests",
+          now: "None.",
+          fix: "A test checks.",
+        })),
       },
       steps: [
         {
           id: "build",
           role: "implementer",
-          repo: ".",
+          repo: repos[0],
           harness: "claude",
           model: "claude-sonnet",
           needs: [],
-          criteria: ["FAKE-1/AC1"],
+          criteria,
         },
       ],
-      test_cases: options.cases.map((id) => ({
-        id,
-        action: "add",
-        level: "integration",
-        given: [],
-        when: ["run it"],
-        // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
-        then: ["it works"],
-        expected: "it works",
-      })),
+      test_cases:
+        options.planCases ??
+        options.cases.map((id) => ({
+          id,
+          action: options.action ?? "add",
+          level: "integration",
+          given: [],
+          when: ["run it"],
+          // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+          then: ["it works"],
+          expected: "it works",
+        })),
     }),
   );
   for (const args of [
     ["plan", "check", runId],
     ["gate", "record", runId, "plan", "approve"],
-    ["worktree", "create", runId, "."],
+    ["worktree", "create", runId, ...repos],
   ]) {
     const result = ark(...args);
-    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}`);
+    if (result.code !== 0) throw new Error(`${args.join(" ")} failed: ${result.err}${result.out}`);
   }
-  return { runId, runDirectory, mirror: join(runDirectory, "workspace") };
+  const mirrors = Object.fromEntries(
+    repos.map((repo) => [
+      repo,
+      repo === "." ? join(runDirectory, "workspace") : join(runDirectory, "workspace", repo),
+    ]),
+  );
+  return { runId, runDirectory, mirror: mirrors[repos[0]!]!, mirrors };
 }
 
 const readResult = (runDirectory: string, id: string, side: "base" | "head") =>
@@ -1212,5 +1262,433 @@ describe("ark test changed_command", () => {
     const loaded = ark("test", run.runId, "--quick");
     expect(loaded.code, loaded.err + loaded.out).toBe(0);
     expect(marked(markers, "unit-changed-ran")).toBe(true);
+  });
+});
+
+describe("ark merge-request open on a quick test of a run with no code file", () => {
+  const fakeForge = join(import.meta.dir, "fixtures/merge-request");
+  const fullSuiteLine = "Full suite: CI (no code file in this diff)";
+  const quickRefusal = (runId: string) =>
+    `the last test at this head is quick, not a gate: run \`ark test ${runId}\``;
+  const notPassedRefusal =
+    "the last test run did not pass: fix the failures and run `ark test` again";
+
+  type Shape = {
+    kind?: string;
+    cases?: string[];
+    action?: string;
+    planCases?: Record<string, unknown>[];
+    manualAc?: boolean;
+    /** "one": the repo of the workspace. "core": two repos, a worktree in `core` only. "both": a worktree in each. */
+    repos?: "one" | "core" | "both";
+    /** No `base_files`, so a quick run runs the whole suite (and `test/other.test.ts` joins the base). */
+    wholeSuite?: boolean;
+    checks?: { name: string; repo: string; command: string }[];
+    /** Extra change on top of the own Markdown commit, in the mirrors of the run. */
+    change?: (mirrors: Record<string, string>) => void;
+  };
+
+  /**
+   * A run on a fake forge whose own commit holds `docs/guide.md` and `skills/demo/SKILL.md` only (the accepted head
+   * of ARK-T748 fixture A), with `shape` changing one thing. `ark.yml` lists `docs/reference/cli.md` as generated.
+   */
+  function noCodeRun(shape: Shape = {}) {
+    process.env.PATH = `${fakeForge}:${(process.env.PATH ?? "")
+      .split(":")
+      .filter((entry) => entry !== fakeForge)
+      .join(":")}`;
+    const logFile = join(mkdtempSync(join(tmpdir(), "ark-fake-log-")), "calls.ndjson");
+    process.env.FAKE_LOG = logFile;
+    const caseEntry = (id: string) =>
+      [
+        "---",
+        `id: ${id}`,
+        `title: ${id} fixture entry`,
+        "level: integration",
+        "technique: fixture",
+        "priority: low",
+        "risk: none",
+        "status: active",
+        "changed_by: FAKE-1",
+        "---",
+        "",
+        ...[
+          "Objective",
+          "Preconditions",
+          "Steps",
+          "Expected results",
+          "Screenshot checkpoints",
+        ].flatMap((section) => [`## ${section}`, "", "x", ""]),
+      ].join("\n");
+    const fixture = markerFixture();
+    const switchFile = join(fixture.directory, "switch");
+    const files: Record<string, string> = {
+      "test/existing.test.ts": fixture.testFile(["FAKE-T1 existing"]),
+      "src/old.ts": "export const old = 1;\n",
+      "test/cases/FAKE-T1.md": caseEntry("FAKE-T1"),
+      "test/cases/FAKE-T9.md": caseEntry("FAKE-T9"),
+      ...(shape.wholeSuite
+        ? {
+            "test/other.test.ts": [
+              'import { existsSync } from "node:fs";',
+              'import { expect, test } from "bun:test";',
+              `test("FAKE-T2 other", () => { expect(existsSync(${JSON.stringify(switchFile)})).toBe(false); });`,
+              "",
+            ].join("\n"),
+          }
+        : {}),
+    };
+    const layout = shape.repos ?? "one";
+    let workspace: string;
+    let repos: string[] | undefined;
+    if (layout === "one") workspace = tempGitRepo(files);
+    else {
+      workspace = mkdtempSync(join(tmpdir(), "ark-workspace-"));
+      renameSync(tempGitRepo(files), join(workspace, "core"));
+      renameSync(tempGitRepo(), join(workspace, "site"));
+      repos = layout === "both" ? ["core", "site"] : ["core"];
+    }
+    const suiteRepo = layout === "one" ? "." : "core";
+    fixture.recordBase(layout === "one" ? workspace : join(workspace, "core"));
+    const run = startRun({
+      workspace,
+      suites: [
+        suiteOf("cli", "test", {
+          repo: suiteRepo,
+          ...(shape.wholeSuite ? { base_files: undefined, base_command: undefined } : {}),
+        }),
+      ],
+      cases: shape.cases ?? ["FAKE-T1"],
+      forge: true,
+      kind: shape.kind,
+      action: shape.action ?? "reuse",
+      planCases: shape.planCases,
+      manualAc: shape.manualAc,
+      checks: shape.checks,
+      generated: [{ path: "docs/reference/cli.md", command: "true" }],
+      repos,
+    });
+    if (shape.cases?.length === 0) {
+      // The inspection AC1 is a manual criterion: its evidence file and a manual ok are the gate.
+      writeEvidenceFile(run.runDirectory, "AC1", "inspection");
+      const answered = ark("gate", "record", run.runId, "manual", "FAKE-1/AC1", "ok");
+      if (answered.code !== 0) throw new Error(`manual ok failed: ${answered.err}${answered.out}`);
+    }
+    commit(run.mirror, "own markdown", {
+      "docs/guide.md": "# Guide\n",
+      "skills/demo/SKILL.md": "# Demo\n",
+    });
+    shape.change?.(run.mirrors);
+    return {
+      ...run,
+      workspace,
+      switchFile,
+      remote: (mirror = run.mirror) => git(mirror, "ls-remote", "origin"),
+    };
+  }
+
+  type Call = { tool: string; argv: string[]; body?: string };
+  const calls = (): Call[] =>
+    existsSync(process.env.FAKE_LOG!)
+      ? readFileSync(process.env.FAKE_LOG!, "utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : [];
+  const created = () =>
+    calls().filter((call) => call.argv[0] === "pr" && call.argv[1] === "create");
+  const edited = () => calls().filter((call) => call.argv[0] === "pr" && call.argv[1] === "edit");
+  const lastQuick = (runDirectory: string) => events(runDirectory, "test.completed").at(-1);
+  const openedCount = (runDirectory: string) => events(runDirectory, "merge_request.opened").length;
+  const linesOf = (body: string, text: string) =>
+    body.split("\n").filter((line) => line.includes(text));
+
+  /** The checks every accepted open shares: the body of the first `gh pr create` call says the full suite is CI's. */
+  function expectFullSuiteBody(body: string | undefined) {
+    expect(linesOf(body!, fullSuiteLine)).toHaveLength(1);
+    expect(body!.split("\n").filter((line) => /^\s*- Tests: .*\d+ passed/.test(line))).toEqual([]);
+  }
+  const noRefusal = (text: string) => {
+    for (const refusal of ["quick, not a gate", "criteria not passing", "test evidence missing"])
+      expect(text).not.toContain(refusal);
+  };
+
+  test("ARK-T748 a passing quick test of a run whose own diff holds only hand-written Markdown opens the MR, check --stage final agrees, and the body says the full suite is CI's", () => {
+    const run = noCodeRun();
+    const quick = ark("test", run.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(quick.out).toContain("skipped  (no changed test file)");
+    expect(lastQuick(run.runDirectory)).toMatchObject({
+      mode: "quick",
+      passed: true,
+      criteria: { "FAKE-1/AC1": "not run" },
+    });
+
+    const check = ark("merge-request", "check", run.runId, "--stage", "final");
+    expect(check.code, check.err + check.out).toBe(0);
+    expect(check.err + check.out).toBe("");
+
+    const opened = ark("merge-request", "open", run.runId);
+    expect(opened.code, opened.err + opened.out).toBe(0);
+    noRefusal(opened.err + opened.out);
+    expect(openedCount(run.runDirectory)).toBe(1);
+    expect(run.remote()).toContain(`refs/heads/ark/`);
+    expect(created()).toHaveLength(1);
+    const body = created()[0]!.body;
+    expectFullSuiteBody(body);
+    const title = created()[0]!.argv[created()[0]!.argv.indexOf("--title") + 1]!;
+    const lint = lintBody({
+      body: body!,
+      title,
+      ledger: buildLedger({
+        runFolder: run.runDirectory,
+        heads: { ".": git(run.mirror, "rev-parse", "HEAD") },
+      }),
+    });
+    expect(lint.filter((check) => check.result === "fail")).toEqual([]);
+  });
+
+  test("ARK-T748 a run with empty test_cases and a refactor run open on a passing quick test, with no refactor refusal", () => {
+    for (const shape of [{ cases: [] }, { kind: "refactor" }]) {
+      const run = noCodeRun(shape);
+      ark("test", run.runId, "--quick");
+      expect(lastQuick(run.runDirectory)).toMatchObject({ mode: "quick", passed: true });
+      expect("base_passed" in lastQuick(run.runDirectory)).toBe(false);
+      const opened = ark("merge-request", "open", run.runId);
+      expect(opened.code, JSON.stringify(shape) + opened.err + opened.out).toBe(0);
+      expect(opened.err + opened.out).not.toContain("refactor run:");
+      expect(openedCount(run.runDirectory)).toBe(1);
+      expectFullSuiteBody(created()[0]!.body);
+    }
+  });
+
+  test("ARK-T748 a clean sync after the quick test that brings a target .ts keeps the run a no-code run, because the own diff is read from the synced commit", () => {
+    const run = noCodeRun();
+    expect(ark("test", run.runId, "--quick").code).toBe(0);
+    const clone = mkdtempSync(join(tmpdir(), "ark-target-clone-"));
+    git(clone, "clone", "-q", git(run.workspace, "remote", "get-url", "origin"), ".");
+    git(clone, "config", "user.name", "Ark Test");
+    git(clone, "config", "user.email", "ark@example.com");
+    commit(clone, "target move", { "src/target.ts": "export const target = 1;\n" });
+    git(clone, "push", "-q", "origin", "HEAD:refs/heads/main");
+    const synced = ark("worktree", "sync", run.runId);
+    expect(synced.code, synced.err + synced.out).toBe(0);
+    expect(git(run.mirror, "ls-tree", "-r", "--name-only", "HEAD")).toContain("src/target.ts");
+
+    const opened = ark("merge-request", "open", run.runId);
+    expect(opened.code, opened.err + opened.out).toBe(0);
+    expect(openedCount(run.runDirectory)).toBe(1);
+    expectFullSuiteBody(created()[0]!.body);
+  });
+
+  for (const layout of ["core", "both"] as const) {
+    test(`ARK-T748 a two-repo workspace with a worktree in ${layout === "core" ? "core only" : "each repo and no own commit in the second"} opens on a passing quick test`, () => {
+      const run = noCodeRun({ repos: layout });
+      expect(ark("test", run.runId, "--quick").code).toBe(0);
+      expect(lastQuick(run.runDirectory)).toMatchObject({ mode: "quick", passed: true });
+      const check = ark("merge-request", "check", run.runId, "--stage", "final");
+      expect(check.code, check.err + check.out).toBe(0);
+      expect(check.err + check.out).toBe("");
+
+      const opened = ark("merge-request", "open", run.runId);
+      expect(opened.code, opened.err + opened.out).toBe(0);
+      noRefusal(opened.err + opened.out);
+      expect(openedCount(run.runDirectory)).toBe(1);
+      expect(created()).toHaveLength(1);
+      expectFullSuiteBody(created()[0]!.body);
+    });
+  }
+
+  test("ARK-T749 the refresh of an open MR refuses a quick test after a code commit and pushes nothing, and after a full test it edits a body with no Full suite line", () => {
+    const run = noCodeRun({ wholeSuite: true });
+    expect(ark("test", run.runId, "--quick").code).toBe(0);
+    const first = ark("merge-request", "open", run.runId);
+    expect(first.code, first.err + first.out).toBe(0);
+    expect(created()).toHaveLength(1);
+    expect(linesOf(created()[0]!.body!, fullSuiteLine)).toHaveLength(1);
+    const firstTip = run.remote();
+
+    commit(run.mirror, "code", { "src/a.ts": "export const a = 1;\n" });
+    const quick = ark("test", run.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    const refused = ark("merge-request", "open", run.runId);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain(quickRefusal(run.runId));
+    expect(run.remote()).toBe(firstTip);
+    expect(edited()).toEqual([]);
+    expect(openedCount(run.runDirectory)).toBe(1);
+
+    const full = ark("test", run.runId);
+    expect(full.code, full.err + full.out).toBe(0);
+    for (const side of ["base", "head"])
+      expect(readResult(run.runDirectory, "FAKE-T1", side as "base" | "head").status).toBe(
+        "passed",
+      );
+    const refreshed = ark("merge-request", "open", run.runId);
+    expect(refreshed.code, refreshed.err + refreshed.out).toBe(0);
+    expect(edited()).toHaveLength(1);
+    const body = edited()[0]!.body!;
+    expect(linesOf(body, "Full suite:")).toEqual([]);
+    expect(body).toMatch(/^- Tests: \d+ passed/m);
+    expect(run.remote()).toContain(git(run.mirror, "rev-parse", "HEAD"));
+  });
+
+  type NoCodeRun = {
+    runId: string;
+    runDirectory: string;
+    switchFile: string;
+  };
+  type Row = {
+    label: string;
+    shape: Shape;
+    refusal: (runId: string) => string;
+    /** What the quick run records as `passed`; default true. */
+    passed?: boolean;
+    beforeQuick?: (run: NoCodeRun) => void;
+    afterQuick?: (run: NoCodeRun) => void;
+  };
+  const own = (path: string, content: string): Pick<Shape, "change"> => ({
+    change: (mirrors) => commit(mirrors["."]!, `own ${path}`, { [path]: content }),
+  });
+  const rows: Row[] = [
+    {
+      label: "adds src/a.ts",
+      shape: own("src/a.ts", "export const a = 1;\n"),
+      refusal: quickRefusal,
+    },
+    {
+      label: "adds the script scripts/release.sh",
+      shape: own("scripts/release.sh", "echo release\n"),
+      refusal: quickRefusal,
+    },
+    { label: "changes package.json", shape: own("package.json", "{}\n"), refusal: quickRefusal },
+    {
+      label: "adds the Markdown fixture test/fixtures/lint/fail.md",
+      shape: own("test/fixtures/lint/fail.md", "# fail\n"),
+      refusal: quickRefusal,
+    },
+    {
+      label: "changes the generated docs/reference/cli.md",
+      shape: own("docs/reference/cli.md", "# cli\n"),
+      refusal: quickRefusal,
+    },
+    {
+      label: "renames a .ts to .md",
+      shape: {
+        change: (mirrors) => {
+          git(mirrors["."]!, "mv", "src/old.ts", "docs/old.md");
+          git(mirrors["."]!, "commit", "-qm", "rename");
+        },
+      },
+      refusal: quickRefusal,
+    },
+    { label: "plan case action add", shape: { action: "add" }, refusal: quickRefusal },
+    { label: "plan case action update", shape: { action: "update" }, refusal: quickRefusal },
+    {
+      label: "plan case action retire",
+      shape: {
+        planCases: [
+          { id: "FAKE-T1", action: "reuse", level: "integration" },
+          { id: "FAKE-T9", action: "retire", reason: "The case is gone." },
+        ],
+      },
+      refusal: quickRefusal,
+    },
+    {
+      label: "plan case action empty (old plan shape)",
+      shape: {
+        planCases: [
+          {
+            id: "FAKE-T1",
+            criterion: "FAKE-1/AC1",
+            title: "old shape",
+            level: "integration",
+            given: [],
+            when: ["run it"],
+            // oxlint-disable-next-line unicorn/no-thenable -- plan test-case field `then: string[]`, not a Promise-like
+            then: ["it works"],
+            expected: "it works",
+          },
+        ],
+      },
+      refusal: quickRefusal,
+    },
+    {
+      label: "a check exits 1",
+      shape: { checks: [{ name: "lint", repo: ".", command: "false" }] },
+      refusal: () => notPassedRefusal,
+      passed: false,
+    },
+    {
+      label: "the quick suite fails through a test no AC names",
+      shape: { wholeSuite: true },
+      refusal: () => notPassedRefusal,
+      passed: false,
+      beforeQuick: ({ switchFile }) => writeFileSync(switchFile, "on\n"),
+    },
+    {
+      label: "a manual AC has no ok",
+      shape: { manualAc: true },
+      refusal: () => "manual criterion without ok: FAKE-1/AC2",
+    },
+    {
+      label: "plan.yml is missing",
+      shape: {},
+      refusal: quickRefusal,
+      afterQuick: ({ runDirectory }) => rmSync(join(runDirectory, "plan.yml")),
+    },
+    {
+      label: "a second repo holds an own src/b.ts",
+      shape: {
+        repos: "both",
+        change: (mirrors) =>
+          commit(mirrors.site!, "own code", { "src/b.ts": "export const b = 1;\n" }),
+      },
+      refusal: quickRefusal,
+    },
+  ];
+
+  for (const [index, row] of rows.entries())
+    test(`ARK-T750 row ${index + 1} merge-request open refuses a quick last test when ${row.label}`, () => {
+      const run = noCodeRun(row.shape);
+      row.beforeQuick?.(run);
+      ark("test", run.runId, "--quick");
+      const completed = lastQuick(run.runDirectory);
+      expect(completed).toMatchObject({ mode: "quick", passed: row.passed ?? true });
+      if (row.shape.wholeSuite) {
+        // A failed check stops the run with no suite; this row fails through its suite alone.
+        expect(completed.checks.filter((check: { passed: boolean }) => !check.passed)).toEqual([]);
+        expect(completed.suites.some((suite: { passed: boolean }) => !suite.passed)).toBe(true);
+      }
+      row.afterQuick?.(run);
+
+      const refused = ark("merge-request", "open", run.runId);
+      expect(refused.code, refused.err + refused.out).toBe(1);
+      expect(refused.err.split("\n")[0]).toStartWith(`ark: ${row.refusal(run.runId)}`);
+      expect(openedCount(run.runDirectory)).toBe(0);
+      expect(run.remote()).not.toContain("refs/heads/ark/");
+      expect(created()).toEqual([]);
+
+      if (row.label === "plan.yml is missing") {
+        const check = ark("merge-request", "check", run.runId, "--stage", "final");
+        const text = check.err + check.out;
+        expect(check.code).toBe(1);
+        expect(text).toContain(quickRefusal(run.runId));
+        expect(text).not.toMatch(/\n\s+at |Error:/);
+      }
+    });
+
+  test("ARK-T750 the row of the failed quick suite is an accepted head with its switch off", () => {
+    const run = noCodeRun({ wholeSuite: true });
+    const quick = ark("test", run.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(0);
+    expect(lastQuick(run.runDirectory)).toMatchObject({
+      mode: "quick",
+      passed: true,
+      criteria: { "FAKE-1/AC1": "not run" },
+    });
+    const check = ark("merge-request", "check", run.runId, "--stage", "final");
+    expect(check.code, check.err + check.out).toBe(0);
+    expect(check.err + check.out).toBe("");
   });
 });
