@@ -34,7 +34,7 @@ Authoring gate:
 ## Expected results
 
 - Step 1: exit 0; the created body holds `Full suite: CI (no code file in this diff)`.
-- Step 2: exit 1. stderr holds `the last test at this head is quick, not a gate: run \`ark test <run>\``. The remote branch tip is the tip of step 1, no `gh pr edit`call is recorded, and no second`merge_request.opened` event is written.
+- Step 2: exit 1. stderr holds ``the last test at this head is quick, not a gate: run `ark test <run>` ``. The remote branch tip is the tip of step 1, no `gh pr edit` call is recorded, and no second `merge_request.opened` event is written.
 - Step 3: exit 0; one `gh pr edit` call; its body has no `Full suite:` line and has the `- Tests: <n> passed` line of the full run; the remote branch tip is the head with `src/a.ts`.
 
 ## Screenshot checkpoints
