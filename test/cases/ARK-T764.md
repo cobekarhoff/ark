@@ -22,30 +22,30 @@ Authoring gate:
 
 ## Preconditions
 
-- As ARK-T677 and ARK-T678: a temp `ARK_HOME`, project `demo`, a ticket started with `ark run start` and evaluated (`recordEvaluation`) with no criteria, so the run waits in `awaiting_criteria`; cwd `<run folder>/workspace`. A `kind: bug` ticket `ARK-901`, and two more tickets that differ only in kind: `ARK-902` with `kind: refactor` and `ARK-903` with no `kind` line (a feature run).
+- As ARK-T677 and ARK-T678: a temp `ARK_HOME`, project `demo`, a ticket started with `ark run start` and evaluated (`recordEvaluation`) with no criteria, so the run waits in `awaiting_criteria`; cwd `<run folder>/workspace`. A `kind: bug` ticket `<ticket id>`, and two more tickets that differ only in kind: one with `kind: refactor` and one with no `kind` line (a feature run). Each run has its own ticket id; the criteria ids are `<ticket id>/AC<k>`.
 - Before each refused call: the bytes of `ticket_file` and `<run folder>/ticket.md`, the line count and bytes of `events.ndjson`, and the phase.
 - Criteria files in the run folder, each a mapping with `acceptance_criteria`:
   - `good.yml`: `AC1` `method: test` with `verified_by: [ARK-T10]` and no `guard`; `AC2` `method: test` with `verified_by: [ARK-T11]` and `guard: true`; `AC3` `method: inspection`.
-  - `false.yml`: as `good.yml` with `guard: false` on `AC2`.
+  - `false.yml`: `AC1` `method: test` with no `guard`, `AC2` `method: test` with `guard: false`. `no-key.yml`: the same two criteria with no `guard` key at all.
   - `on-inspection.yml`: as `good.yml` plus `guard: true` on `AC3`.
   - `string.yml`: as `good.yml` with `guard: "false"` on `AC2`; `yes.yml` with `guard: "yes"`.
 
 ## Steps
 
-1. Bug run `ARK-901`: run `ark gate record <run> criteria accept --criteria good.yml`. Read `ticket_file`, `<run folder>/ticket.md`, the last `criteria.updated`, and the criteria parsed from `ticket.md` with `frontmatter` and `parseCriteria` of `cli/ticket.ts`.
+1. Bug run: run `ark gate record <run> criteria accept --criteria good.yml`. Read `ticket_file`, `<run folder>/ticket.md`, the last `criteria.updated`, and the criteria parsed from `ticket.md` with `frontmatter` and `parseCriteria` of `cli/ticket.ts`.
 2. Fresh bug run: accept with `on-inspection.yml`.
-3. The refactor run `ARK-902` and the feature run `ARK-903`: accept with `good.yml`.
-4. Fresh bug runs: accept with `string.yml`, then with `yes.yml`; a fresh bug run with `false.yml`.
+3. The refactor run and the feature run: accept with `good.yml`.
+4. Fresh bug runs: accept with `string.yml`, then with `yes.yml`; a fresh bug run with `false.yml`, and another with `no-key.yml`.
 5. No-flag path, bug run: hand-edit the ticket file to the criteria of `good.yml` (block form, `guard: true` on `AC2`). Run `ark gate record <run> criteria accept` with no `--criteria`. Read the same files and event as step 1.
-6. No-flag path refusals: a bug run whose hand-edited ticket has `guard: true` on an `inspection` AC; another whose `AC2` has `manual: true` and `guard: true` (read as `demonstration`); another whose `AC2` has `guard: "false"` (a quoted string); the feature run `ARK-903` with the ticket of step 5. Run accept with no `--criteria` in each.
+6. No-flag path refusals: a bug run whose hand-edited ticket has `guard: true` on an `inspection` AC; another whose `AC2` has `manual: true` and `guard: true` (read as `demonstration`); another whose `AC2` has `guard: "false"` (a quoted string); the feature run with the ticket of step 5. Run accept with no `--criteria` in each.
 
 ## Expected results
 
-- Step 1: exit 0. `ticket_file` and `ticket.md` hold `guard: true` in the block of `AC2` only; `ticket.md` is byte for byte `ticket_file`; the lines outside the `acceptance_criteria` block are as ARK-T677 says. The parsed criteria give `AC2` guard true and `AC1`, `AC3` no guard. `criteria.updated` lists the three ids and names `ARK-901/AC2`, and only it, as a guard (`guards: ["ARK-901/AC2"]`). The phase is `planning`.
+- Step 1: exit 0. `ticket_file` and `ticket.md` hold `guard: true` in the block of `AC2` only; `ticket.md` is byte for byte `ticket_file`. The parsed criteria give `AC2` guard true and `AC1`, `AC3` no guard. `criteria.updated` lists the three ids and names `<ticket id>/AC2`, and only it, as a guard (`guards: ["<ticket id>/AC2"]`). The phase is `planning`.
 - Step 2: exit 1; one `ark: ` line that names `AC3`, `guard` and its method `inspection`; nothing written (snapshot unchanged, phase `awaiting_criteria`).
 - Step 3: exit 1 in both runs; the line names `AC2`, `guard` and the run's kind (`refactor`, `feature`); nothing written.
-- Step 4: `string.yml` and `yes.yml` exit 1 with a line that names `AC2` and `guard` and says it must be `true` or `false`; nothing written. `false.yml` exits 0 and `criteria.updated` names no guard; `AC2` parsed from `ticket.md` has no guard.
-- Step 5: exit 0; `ticket_file` is byte for byte what it was (the no-flag path writes nothing to it, as ARK-T679); `ticket.md` holds the `guard: true` line; `parseCriteria` gives `AC2` guard true; `criteria.updated` names `ARK-<id>/AC2` as the only guard.
+- Step 4: `string.yml` and `yes.yml` exit 1 with a line that names `AC2` and `guard` and says it must be `true` or `false`; nothing written. `false.yml` exits 0 and `criteria.updated` names no guard; `AC2` parsed from `ticket.md` has no guard. `no-key.yml` exits 0 with the same result and `ticket.md` holds no `guard:` line.
+- Step 5: exit 0; `ticket_file` is byte for byte what it was (the no-flag path writes nothing to it, as ARK-T679); `ticket.md` holds the `guard: true` line; `parseCriteria` gives `AC2` guard true; `criteria.updated` names `<ticket id>/AC2` as the only guard.
 - Step 6: each accept exits 1 with one `ark: ` line that names the AC and `guard` (with the method `inspection` or `demonstration`, the kind `feature`, or, for `guard: "false"`, that it must be `true` or `false`); `events.ndjson` gains no event and the phase stays `awaiting_criteria`.
 
 ## Screenshot checkpoints

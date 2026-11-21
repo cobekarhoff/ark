@@ -24,7 +24,7 @@ Authoring gate:
 
 - Fixture of ARK-T57 (`testedRun` of `test/merge-request.test.ts`, a fake `gh` that logs each create and edit with its body), changed to `kind: bug` with two criteria: `AC1` `method: test` (verified by `FAKE-T1`) and `AC2` `method: test` with `guard: true` (verified by `FAKE-T2`), the guard set through the real `ark gate record <run> criteria accept --criteria <file>`. The fixture meets every other `assertShippable` prerequisite, as ARK-T57 says, so no other refusal can hide the case.
 - A switch file makes the `FAKE-T2` test fail while it exists; `FAKE-T1` passes.
-- For step 5: the run fixture of `test/pr-writing.test.ts` (`makeRun`) with the same two criteria, the guard on `AC2`, and a last test that records `AC1` `passing` and `AC2` `failing`.
+- For step 5: the run fixture of `test/pr-writing.test.ts` (`makeRun`) with three criteria, `AC1`, `AC2` and `AC3`, the guard on `AC2`, and a last test that records `AC1` and `AC3` `passing` and `AC2` `failing`.
 
 ## Steps
 
