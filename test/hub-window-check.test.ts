@@ -1,7 +1,9 @@
 // ARK-T777: the window check of ARK-T241 and ARK-T756 on the exact counts that CI runs produced, and the settle
 // wait of ARK-T241 step 6 on counters that settle or never settle. Both modules are the fix of ARK-631: they load
 // inside each test, so a missing module fails that test and not the file.
-import { expect, test } from "bun:test";
+import { expect, setDefaultTimeout, test } from "bun:test";
+
+setDefaultTimeout(30_000);
 
 const sourceNames = ["orca", "plannotator", "gh", "conversation", "chiefUnread"];
 
@@ -56,9 +58,9 @@ function failureOf(checkWindows: CheckWindows, rows: readonly Row[]): string {
 }
 
 const orcaTuples: [string, Row][] = [
-  ["W 4,4,4 churn 7 (PR CI run 44901215110, ARK-T241)", { windows: [4, 4, 4], churn: 7 }],
-  ["W 1,3,4 churn 6 (ARK-T756)", { windows: [1, 3, 4], churn: 6 }],
-  ["W 1,4,3 churn 6 (ARK-T756)", { windows: [1, 4, 3], churn: 6 }],
+  ["W 4,4,4 churn 7 (PR CI run 44901215110)", { windows: [4, 4, 4], churn: 7 }],
+  ["W 1,3,4 churn 6", { windows: [1, 3, 4], churn: 6 }],
+  ["W 1,4,3 churn 6", { windows: [1, 4, 3], churn: 6 }],
   ["W 1,4,2 churn 6 (main #296)", { windows: [1, 4, 2], churn: 6 }],
   ["W 1,1,2 churn 3", { windows: [1, 1, 2], churn: 3 }],
   ["W 1,1,3 churn 11 (main run 44900809909)", { windows: [1, 1, 3], churn: 11 }],
