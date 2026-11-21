@@ -253,7 +253,13 @@ For each `repos` candidate, ask: "`<repo>` is on `<current branch>` but origin/H
 
 Checks question, once, for the whole list from the Checks part of step 2: "I found these checks: `<name>` (`<repo>`): `<command>`, ... Which should `ark test` run before the suites? Recommended: all of them, because each is read-only and the repo's CI or hooks run it." Skip it when step 2 found no check.
 
-Hook questions, for each repo whose Hooks part found a hook setup that is not installed. First the install, once: "`<repo>` has `<hook setup>` but its clone has no hook installed. Install it with `<install command>`? Recommended: yes, because run worktrees share the clone's hooks, so the repo's own checks run on each worker commit." Then, one question for each hook that the Hooks part marked as blocking, named with the reason: "`<hook>` of `<repo>` `<what it does>`, and an installed hook runs on every Ark commit and push. Install it anyway? Recommended: no, because `<the commit-msg format check rejects Ark's commit messages | the hook rewrites files in a worker's commit | the full suite runs on every commit | the full suite or slow check runs before every push>`." A hook manager installs by hook type, not by hook: "no" means the type that holds the hook is skipped (for example `commit-msg` for commitizen). When the blocking hook shares a type with other hooks, say so in the question. Bootstrap never edits the hook config.
+Hook questions, for each repo whose Hooks part found a hook setup that is not installed. First the install, once: "`<repo>` has `<hook setup>` but its clone has no hook installed. Install it with `<install command>`? Recommended: yes, because run worktrees share the clone's hooks, so the repo's own checks run on each worker commit." A "no" skips the whole repo. Then, for each install unit that holds a hook the Hooks part marked as blocking, one question that names the unit, the blocking hook with the reason, and every other hook that the same unit installs: "Installing `<unit>` of `<repo>` also installs `<other hooks of the unit | no other hook>`. `<hook>` `<what it does>`, and an installed hook runs on every Ark commit and push. Install `<unit>` anyway? Recommended: no, because `<the commit-msg format check rejects Ark's commit messages | the hook rewrites files in a worker's commit | the full suite runs on every commit | the full suite or slow check runs before every push>`." The install unit is what the install command acts on, not the single hook:
+
+- `pre-commit`: one hook type (`pre-commit install --hook-type <type>`), for example `commit-msg` for commitizen. A "no" skips that type and every other hook of that type; the other types still install.
+- hk, lefthook, `husky`: the whole install (`hk install`, `lefthook install`, the `prepare` script), because it installs every hook the config or the `.husky/` folder holds. A "no" skips the whole install of the repo, including its harmless hooks.
+- A hooks folder (`core.hooksPath`): the whole folder, because every executable in it runs. A "no" skips the `core.hooksPath` setting and so every hook of the folder. For Ark, `.githooks/` holds `pre-commit` and a "no" leaves out only it.
+
+Bootstrap never edits the hook config or the hook files, so it cannot split a unit.
 
 If nothing is unknown, ask nothing and go on.
 
@@ -343,9 +349,9 @@ Claude Code workers and Codex workers do not read OMP's setting. For those harne
 
 ## 8. Install the hooks
 
-Run this step for each repo whose Hooks part (step 2) found a hook setup that is not installed and whose install the human accepted in step 3. Skip a repo with no hook setup, with the hooks installed, or with a "no". Work in the clone, `<workspace>/<repo>`.
+Run this step for each repo whose Hooks part (step 2) found a hook setup that is not installed and whose install the human accepted in step 3. Skip a repo with no hook setup, with the hooks installed, or with a "no" to the install. Inside an accepted repo, skip each install unit that the human declined in step 3: a hook type for `pre-commit`, the whole install for hk, lefthook and `husky`, the whole folder for a hooks folder. A declined unit leaves out every hook it holds, not only the blocking one. Work in the clone, `<workspace>/<repo>`.
 
-Run worktrees share the clone's hooks (`git rev-parse --git-common-dir` is the same folder, and `core.hooksPath` is read from the shared config), so an installed hook runs on every commit of a worker and on every push of `ark merge-request open`. That is why step 3 named each hook that would block an Ark commit or push (a `commit-msg` format check, a hook that writes files, a `pre-commit` hook that runs a full suite, a `pre-push` hook that runs a full suite or a slow check). Install such a hook only on the human's answer. Install by the repo's own method:
+Run worktrees share the clone's hooks (`git rev-parse --git-common-dir` is the same folder, and `core.hooksPath` is read from the shared config), so an installed hook runs on every commit of a worker and on every push of `ark merge-request open`. That is why step 3 named each hook that would block an Ark commit or push (a `commit-msg` format check, a hook that writes files, a `pre-commit` hook that runs a full suite, a `pre-push` hook that runs a full suite or a slow check). Install the unit that holds such a hook only on the human's answer. Install by the repo's own method:
 
 | Hook setup                | Install                                                                                                                                                              |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -358,7 +364,7 @@ Run worktrees share the clone's hooks (`git rev-parse --git-common-dir` is the s
 - Check the tool with `command -v`. A tool that is not on PATH stops the install of that repo: name the command that installs the tool (for example `pipx install pre-commit` or `brew install lefthook`) in the report. Bootstrap does not fail.
 - Never overwrite an existing hook file or a `core.hooksPath` that is already set without the human's answer.
 - The install changes the clone's `.git` folder or config, never a file of the repo.
-- Check the result: the git common dir's `hooks/` folder holds the hook files, or `git config --get core.hooksPath` prints the folder. Write each repo's result (installed, skipped or declined, tool missing) down for step 12.
+- Check the result: the git common dir's `hooks/` folder holds the hook files, or `git config --get core.hooksPath` prints the folder. Write each repo's result (installed, skipped or declined, tool missing) down for step 12, and for a declined unit name the unit (the hook type, the whole install or the whole folder) and the hooks it leaves out.
 
 ## 9. Write `ark.yml`
 
@@ -442,7 +448,7 @@ Tell the human, in one short list:
 - The project name and the path of `ark.yml`.
 - What you detected: repos, suites with level and parser, compose command, ticket source.
 - The setup command, and the checks (`<name>` in `<repo>`: `<command>`), or that a repo has none.
-- The hooks of each repo: installed, skipped, declined, or not installed because the tool is missing (with the install command).
+- The hooks of each repo: installed, skipped, declined, or not installed because the tool is missing (with the install command). For a declined install unit, name the unit (the hook type, the whole install or the whole folder) and the other hooks it leaves out.
 - What the human answered.
 - What you registered in Orca, and what was already registered.
 - The nesting depth result.
