@@ -334,6 +334,11 @@ export function recordEvaluation(
   const waiting = deriveState(readEvents(runDirectory));
   if (blockers.length === 0 && waiting.phase === "awaiting_criteria" && waiting.criteria.length > 0)
     appendEvent(runDirectory, "gate.answered", { gate: "criteria", answer: "accept", by: "human" });
+  recordStrategy(runDirectory);
+}
+
+/** Records the only strategy when the run waits in planning for one. */
+export function recordStrategy(runDirectory: string): void {
   if (deriveState(readEvents(runDirectory)).phase !== "planning") return;
   appendEvent(runDirectory, "strategy.recorded", {
     count: 1,
@@ -342,6 +347,46 @@ export function recordEvaluation(
     reason: "the only approach fits",
     card_text: { S1: "### S1 Only" },
   });
+}
+
+export type CriteriaRow = {
+  id: string;
+  method?: string;
+  /** Any value, so a test can write a `guard` that is not a boolean. */
+  guard?: unknown;
+  verified_by?: string[];
+};
+
+/** The text of a criteria file (`ark gate record <run> criteria accept --criteria <file>`): a `test` criterion unless `method` says otherwise. */
+export function criteriaYaml(rows: CriteriaRow[]): string {
+  return [
+    "acceptance_criteria:",
+    ...rows.flatMap((row) => [
+      `  - id: ${row.id}`,
+      `    method: ${row.method ?? "test"}`,
+      ...(row.guard === undefined ? [] : [`    guard: ${JSON.stringify(row.guard)}`]),
+      `    verified_by: ${JSON.stringify(row.verified_by ?? (row.method === undefined || row.method === "test" ? ["ARK-T10"] : []))}`,
+      `    text: ${JSON.stringify(`criterion ${row.id}`)}`,
+    ]),
+    "",
+  ].join("\n");
+}
+
+/**
+ * The real criteria gate for a run that was started with no criteria and evaluated with `recordEvaluation`
+ * (so it waits in awaiting_criteria): writes `criteria.yml` in the run folder, runs
+ * `ark gate record <run> criteria accept --criteria`, and on success records the strategy as `recordEvaluation` does.
+ */
+export function acceptCriteriaFile(
+  runId: string,
+  runDirectory: string,
+  rows: CriteriaRow[] | string,
+): { code: number; out: string; err: string } {
+  const file = join(runDirectory, "criteria.yml");
+  writeFileSync(file, typeof rows === "string" ? rows : criteriaYaml(rows));
+  const result = ark("gate", "record", runId, "criteria", "accept", "--criteria", file);
+  if (result.code === 0) recordStrategy(runDirectory);
+  return result;
 }
 
 const evidenceBodies = {

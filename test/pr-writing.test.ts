@@ -123,6 +123,8 @@ type RunSpec = {
   kind?: string;
   summary?: string;
   criteria?: { id: string; status: string; verifiedBy?: string[] }[];
+  /** Ids of `criteria` that the criteria gate marked as guards (`criteria.updated` with `guards`). */
+  guards?: string[];
   gates?: { gate: string; answer: string; by?: string }[];
   /** Findings files by name, `findings/<name>`. */
   findings?: Record<string, string>;
@@ -243,6 +245,11 @@ function makeRun(spec: RunSpec = {}) {
       },
     },
   ];
+  if (spec.guards)
+    events.push({
+      type: "criteria.updated",
+      data: { criteria: criteria.map((criterion) => criterion.id), guards: spec.guards },
+    });
   if (spec.risks)
     events.push({
       type: "evaluation.recorded",
@@ -917,6 +924,30 @@ test("ARK-T37 the body has the sections in order, lists each gap under Not done 
   expect(checklist).toContain("[x] AC1 tested");
   expect(checklist).toContain("[ ] AC2 manual pending");
   expect(body).not.toContain("AC-TEXT-MARKER");
+});
+
+test("ARK-T765 the body lists a guard AC apart from the status groups, and a guard that is failing stays in Not done and the Verification row, and VAL03 holds", () => {
+  const ledger = gappyRun({
+    criteria: [
+      { id: "AC1", status: "passing", verifiedBy: ["ARK-T5"] },
+      { id: "AC2", status: "failing", verifiedBy: ["ARK-T6"] },
+      { id: "AC3", status: "passing", verifiedBy: ["ARK-T5"] },
+    ],
+    guards: ["AC2"],
+  }).ledger();
+  const body = buildBody(ledger);
+
+  const checklist = body.split("## Acceptance criteria")[1].trim().split("\n");
+  expect(checklist).toContain("- [x] AC1 AC3 tested");
+  const guardLines = checklist.filter((line) => line.includes("AC2"));
+  expect(guardLines).toHaveLength(1);
+  expect(guardLines[0]).toContain("guard");
+  expect(guardLines[0]).toStartWith("- [ ]");
+  expect(guardLines[0]).not.toMatch(/AC1|AC3/);
+
+  expect(body.split("## Not done")[1].split("## ")[0]).toContain("AC2 not proven: failing");
+  expect(body.split("## Risk and revert")[1].split("## ")[0]).toContain("AC2 failing");
+  expect(result(lintBody({ body, title: defaultTitle, ledger }), "VAL03").result).toBe("pass");
 });
 
 test("ARK-T37 a check that ran and passed leaves Not done, a failed check stays", () => {

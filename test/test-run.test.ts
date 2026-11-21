@@ -13,7 +13,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { deriveState, readEvents } from "../cli/events.ts";
 import {
+  acceptCriteriaFile,
   ark,
+  type CriteriaRow,
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
@@ -58,6 +60,8 @@ function buildingRun(options: {
   criteria: string[];
   /** The ACs as the ticket writes them (new scheme: local id, `verified_by`). Default: `criteria` as plain ACs. */
   ticketCriteria?: { id: string; method?: string; verified_by?: string[] }[];
+  /** The criteria gate of the run goes through the real `criteria accept --criteria` with these rows (the ticket then has no criteria of its own, so give `ticketCriteria: []`). */
+  gateRows?: CriteriaRow[];
   /** Plan test cases. Default: one old-shape e2e case for each non-manual criterion. */
   testCases?: Record<string, unknown>[];
   e2e?: string[];
@@ -134,6 +138,10 @@ function buildingRun(options: {
   const runDirectory = join(arkHome, "projects", "demo", "runs", runId);
   recordStartedRun({ runId, runDirectory });
   recordEvaluation(runDirectory);
+  if (options.gateRows !== undefined) {
+    const accepted = acceptCriteriaFile(runId, runDirectory, options.gateRows);
+    if (accepted.code !== 0) throw new Error(`criteria accept failed: ${accepted.err}`);
+  }
   const plan = {
     design: { interfaces: [{ name: "fixture plan", callers: ["ark test"] }] },
     summary: {
@@ -842,6 +850,52 @@ describe("ark test checks", () => {
       expect(readFileSync(join(outOfSet.runDirectory, "events.ndjson"), "utf8")).not.toContain(
         '"step.started"',
       );
+    });
+
+    test("ARK-T763 one full ark test with AC1 failing and the guard AC2 passing lets the bug run's implementer start, and the same run with no guard flag is refused with today's text", () => {
+      installFakeOrca();
+      const redRun = (guard: boolean) => {
+        const run = bugRun({
+          ...twoCriteria,
+          ticketCriteria: [],
+          gateRows: [
+            { id: "AC1", verified_by: ["FAKE-T1"] },
+            { id: "AC2", verified_by: ["FAKE-T2"], ...(guard ? { guard: true } : {}) },
+          ],
+          e2e: [],
+        });
+        commitFiles(run.runDirectory, {
+          "e2e.test.ts": suiteTests([failing("FAKE-T1 works"), passing("FAKE-T2 works")]),
+        });
+        const result = ark("test", run.runId);
+        expect(result.code).toBe(1);
+        expect(result.err).toContain("suite e2e failed");
+        expect(result.out).toContain("FAKE-1/AC1  failing");
+        expect(result.out).toContain("FAKE-1/AC2  passing");
+        expect(testCompleted(run.runDirectory).at(-1)).toMatchObject({
+          mode: "full",
+          criteria: { "FAKE-1/AC1": "failing", "FAKE-1/AC2": "passing" },
+        });
+        return run;
+      };
+
+      const guarded = redRun(true);
+      expect(deriveState(readEvents(guarded.runDirectory)).guards).toEqual(["FAKE-1/AC2"]);
+      const started = ark("run", "step", guarded.runId, "build", "start");
+      expect(started.code, started.err).toBe(0);
+      expect(
+        readEvents(guarded.runDirectory)
+          .filter((event) => event.type === "step.started")
+          .map((event) => event.data.step),
+      ).toEqual(["build"]);
+
+      const plain = redRun(false);
+      const eventsBefore = readEvents(plain.runDirectory).length;
+      const refused = ark("run", "step", plain.runId, "build", "start");
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain("bug run: record a failing ark test of the ACs before the fix");
+      expect(refused.err).not.toContain("every AC is a guard");
+      expect(readEvents(plain.runDirectory)).toHaveLength(eventsBefore);
     });
 
     test("ARK-T665 a refactor run stopped by a failed check runs no base suite and records no base result", () => {

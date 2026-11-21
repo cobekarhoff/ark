@@ -108,7 +108,8 @@ export type Ledger = {
   /** Ticket ids found in the branch name and the commit subjects (git source). */
   trackerRefs: string[];
   plan: { why: string; risks: string[]; interfaces: { name: string; callers: string[] }[] } | null;
-  criteria: { id: string; status: CriterionStatus; evidenced: boolean }[];
+  /** `guard`: the criterion holds before and after the fix (`guard: true` in the ticket); the body lists it apart. Absent in an old ledger. */
+  criteria: { id: string; status: CriterionStatus; evidenced: boolean; guard?: boolean }[];
   /** `null` when the run folder has no `results/evidence/`. */
   evidence: EvidenceEntry[] | null;
   /** Text of `results/evidence/<AC id>.md` for each AC with no test case. Absent in an old ledger. */
@@ -900,6 +901,7 @@ function runLedger(source: {
     id,
     status,
     evidenced: evidenced(id),
+    ...(state.guards.includes(id) && { guard: true }),
   }));
   const files = repos.flatMap((repo) => repo.files);
   const planWithWhere = plan
