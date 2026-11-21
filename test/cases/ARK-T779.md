@@ -38,7 +38,7 @@ Expected: When the repo is not private and every local image of the body is a ch
 
 1. Protects: the contract that Ark's own MR evidence (checkpoint screenshots, the only images `ark merge-request open` puts in a body) still posts to a public repo on both hosts.
 2. Regression: a checkpoint pattern that names `head` only, matches only one level below `screenshots/`, or realpaths the file and not the run folder; a GitLab branch that refuses all media when not private.
-3. Existing proof misses it: ARK-T284 and ARK-T285 post checkpoint screenshots but with no visibility answer, from a head side only, with no subfolder and no symlinked run folder; they would also pass if the fix treated an unknown visibility as private. ARK-T778 owns the refusal side.
+3. Existing proof misses it: ARK-T284 and ARK-T285 post checkpoint screenshots under the fake's default answer (PUBLIC on `gh`, `public` on `glab`; their decoy test sets PRIVATE or private), from a head side only, with no subfolder and no symlinked run folder; they would also pass if the fix treated an unknown visibility as private. ARK-T778 owns the refusal side.
 4. No test-only hook: the real `post_mr.ts` process with fake `gh` and `glab` on PATH.
 
 ## Screenshot checkpoints
