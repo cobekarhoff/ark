@@ -20,7 +20,13 @@ import {
   type OrcaRunRow,
   type WorkerRow,
 } from "./orca.ts";
-import { holdReasons, readHost, readOrphanedTestWorkers, sampleCpuPercent } from "./host.ts";
+import {
+  holdReasons,
+  loadHostOrDefaults,
+  readHost,
+  readOrphanedTestWorkers,
+  sampleCpuPercent,
+} from "./host.ts";
 import { hubLines, servicesStatusText } from "./services.ts";
 import { readTestLock } from "./test-lock.ts";
 import { projectDirectory, resolveProject, runsDirectory } from "./paths.ts";
@@ -289,9 +295,10 @@ export async function chiefState(inProject?: string): Promise<void> {
     cpuPercent: sampleCpuPercent,
     ...(fakeLoad === undefined ? {} : { loadAverages: () => [0, Number(fakeLoad), 0] }),
   });
+  const { settings, error: hostFileError } = loadHostOrDefaults();
   const reasons = holdReasons(host, {
-    minimumFreePercent: config.test_min_free_memory_percent,
-    maximumSwapGigabytes: config.test_max_swap_gb,
+    minimumFreePercent: settings.minimumFreeMemoryPercent,
+    maximumSwapGigabytes: settings.maximumSwapGigabytes,
   });
   const orphans = await readOrphanedTestWorkers();
   const reading = <value>(value: value | null, show: (value: value) => string) =>
@@ -299,6 +306,7 @@ export async function chiefState(inProject?: string): Promise<void> {
   sections.push(
     "## Host",
     [
+      ...(hostFileError === null ? [] : [`host file error: ${hostFileError}`]),
       `free memory: ${reading(host.freeMemoryPercent, (percent) => `${percent}%`)}`,
       `swap used: ${reading(host.swapUsedGigabytes, (used) => `${used.toFixed(1)} GB of ${host.swapTotalGigabytes?.toFixed(1) ?? "unavailable"} GB`)}`,
       `load (5 min): ${reading(host.load, (load) => load.toFixed(1))}`,

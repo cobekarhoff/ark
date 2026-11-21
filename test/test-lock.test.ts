@@ -33,6 +33,7 @@ import {
   setFakeHost,
   tempArkHome,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -143,10 +144,10 @@ function startRun(
   const config = (suites: Suite[]) => ({
     workspace,
     ticket_source: "local",
-    test_budget_cores: 6,
     suites,
     roles,
   });
+  writeHost({ test_budget_cores: 6 });
   writeProject(
     project,
     config([
@@ -973,25 +974,16 @@ describe("ark test memory admission", () => {
     },
   );
 
-  test.skipIf(!onMac)("ARK-T187 uses the ark.yml limits in place of the defaults", async () => {
-    const file = join(arkHome, "projects", projectA, "ark.yml");
-    const original = readFileSync(file, "utf8");
+  test.skipIf(!onMac)("ARK-T187 uses the host.yml limits in place of the defaults", async () => {
     try {
-      writeFileSync(
-        file,
-        JSON.stringify({
-          ...JSON.parse(original),
-          test_min_free_memory_percent: 10,
-          test_max_swap_gb: 12,
-        }),
-      );
+      writeHost({ test_budget_cores: 6, test_min_free_memory_percent: 10, test_max_swap_gb: 12 });
       setFakeHost({ freePercent: 15, swapGigabytes: 10 });
       const { code, out } = await runToEnd();
       expect(code).toBe(0);
       expect(logLines()).toContain(`start ${runA}`);
       expect(out).not.toContain("memory");
     } finally {
-      writeFileSync(file, original);
+      writeHost({ test_budget_cores: 6 });
     }
   });
 });

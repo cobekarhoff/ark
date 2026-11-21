@@ -1,7 +1,8 @@
 import { closeSync, openSync, realpathSync, statSync, writeSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
-import { loadConfig, type ProjectConfig } from "./config.ts";
+import { loadConfig } from "./config.ts";
+import { loadHostOrDefaults } from "./host.ts";
 import { isInside, listProjects, projectDirectory } from "./paths.ts";
 import { budgetHeldVariable, openTestBudget, runHoldsCores } from "./test-lock.ts";
 
@@ -51,20 +52,24 @@ function coresOfWholeSuite(commandLine: string): number | null {
   return Number.isInteger(cores) ? cores : 1;
 }
 
-/** The project named by `ARK_PROJECT`, else the one whose run folder or `workspace` holds `folder`. */
-function projectOfFolder(folder: string): ProjectConfig | null {
-  if (process.env.ARK_PROJECT) return loadConfig(process.env.ARK_PROJECT);
+/** Whether `folder` belongs to a project: the one named by `ARK_PROJECT`, else the one whose run folder or `workspace` holds it. */
+function isProjectFolder(folder: string): boolean {
+  if (process.env.ARK_PROJECT) {
+    loadConfig(process.env.ARK_PROJECT);
+    return true;
+  }
   for (const project of listProjects()) {
     try {
-      if (isInside(folder, join(realpathSync(projectDirectory(project)), "runs")))
-        return loadConfig(project);
-      const config = loadConfig(project);
-      if (isInside(folder, realpathSync(config.workspace))) return config;
+      if (isInside(folder, join(realpathSync(projectDirectory(project)), "runs"))) {
+        loadConfig(project);
+        return true;
+      }
+      if (isInside(folder, realpathSync(loadConfig(project).workspace))) return true;
     } catch {
       // the ark.yml of another project must not stop this run
     }
   }
-  return null;
+  return false;
 }
 
 /** A person at a terminal sees the line live; a --parallel worker's own output waits until its file ends. */
@@ -103,14 +108,15 @@ export async function holdTestBudget(): Promise<void> {
     const asked = coresOfWholeSuite(lines.get(coordinator) ?? "");
     // A run of test files is outside the budget and takes no marker: a whole suite its tests start waits like a bare run.
     if (asked === null) return;
-    const config = projectOfFolder(realpathSync(process.cwd()));
-    if (config === null) return;
-    const cores = Math.min(Math.max(1, asked), config.test_budget_cores);
+    if (!isProjectFolder(realpathSync(process.cwd()))) return;
+    // A bad host.yml gives the defaults: this hook never refuses a run.
+    const { settings } = loadHostOrDefaults();
+    const cores = Math.min(Math.max(1, asked), settings.testBudgetCores);
     let announced = false;
-    const budget = openTestBudget(ticketLabel, config.test_budget_cores, {
+    const budget = openTestBudget(ticketLabel, settings.testBudgetCores, {
       owner: coordinator,
-      minimumFreeMemoryPercent: config.test_min_free_memory_percent,
-      maximumSwapGigabytes: config.test_max_swap_gb,
+      minimumFreeMemoryPercent: settings.minimumFreeMemoryPercent,
+      maximumSwapGigabytes: settings.maximumSwapGigabytes,
       print: (line) => {
         const first = !announced && line.startsWith("waiting:");
         announced ||= first;

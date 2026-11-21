@@ -19,6 +19,7 @@ import {
   tempGitRepo,
   writeEvidenceFile,
   writeFakeCommand,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -93,11 +94,10 @@ function buildingRun(options: {
     ])
       Bun.spawnSync(["git", ...args]);
   }
+  writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    test_min_free_memory_percent: 0,
-    test_max_swap_gb: 1000,
     compose: options.compose,
     ...(options.checks === undefined ? {} : { checks: options.checks }),
     ...(options.roundBudget === undefined ? {} : { round_budget: options.roundBudget }),
@@ -1069,11 +1069,10 @@ describe("ark test on a refactor run", () => {
       join(workspace, "repos/a"),
     );
     renameSync(tempGitRepo({ "data.txt": "sibling" }), join(workspace, "repos/b"));
+    writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
     writeProject("demo", {
       workspace,
       ticket_source: "local",
-      test_min_free_memory_percent: 0,
-      test_max_swap_gb: 1000,
       suites: [
         {
           name: "e2e",
@@ -1622,11 +1621,10 @@ describe("ark test runs only the suites of the repos in the run (ARK-416)", () =
       join(workspace, "repos/b"),
     );
     const report = "--reporter=junit --reporter-outfile={report} ./e2e.test.ts";
+    writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
     writeProject("demo", {
       workspace,
       ticket_source: "local",
-      test_min_free_memory_percent: 0,
-      test_max_swap_gb: 1000,
       suites: [
         {
           name: "suite-a",

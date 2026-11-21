@@ -18,6 +18,7 @@ import {
   tempArkHome,
   tempGitRepo,
   writeEvidenceFile,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -127,11 +128,10 @@ function syncedRun(kind: "feature" | "refactor", options: SyncedRunOptions = {})
   ])
     Bun.spawnSync(["git", ...args]);
   const createdBase = git(workspace, "rev-parse", "HEAD");
+  writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    test_min_free_memory_percent: 0,
-    test_max_swap_gb: 1000,
     suites: [
       {
         name: "e2e",

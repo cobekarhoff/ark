@@ -1,10 +1,90 @@
-import { readFileSync, statfsSync } from "node:fs";
+import { existsSync, readFileSync, statfsSync } from "node:fs";
 import { availableParallelism, cpus, loadavg } from "node:os";
+import { join } from "node:path";
+import { hostKeys, integerField, nearestKey } from "./config.ts";
+import { ArkError, yamlQuoteHint } from "./errors.ts";
 import { exec } from "./exec.ts";
 import { arkHome } from "./paths.ts";
 
 export const defaultMinimumFreeMemoryPercent = 20;
 export const defaultMaximumSwapGigabytes = 8;
+
+/** The settings of the host that every project shares. They live in `host.yml` of ARK_HOME, never in an ark.yml. */
+export type HostSettings = {
+  /** CPU cores that the suites and checks of all `ark test` runs of the host share. */
+  testBudgetCores: number;
+  /** `ark test` starts no suite while free memory is below this percent. Inclusive: equal admits. */
+  minimumFreeMemoryPercent: number;
+  /** `ark test` starts no suite while swap used is above this many GB. Inclusive: equal admits. */
+  maximumSwapGigabytes: number;
+};
+
+const defaultHostSettings = (): HostSettings => ({
+  testBudgetCores: Math.max(1, Math.floor(0.6 * cpus().length)),
+  minimumFreeMemoryPercent: defaultMinimumFreeMemoryPercent,
+  maximumSwapGigabytes: defaultMaximumSwapGigabytes,
+});
+
+/**
+ * The settings in `ARK_HOME/host.yml`. A missing or empty file gives the defaults. An unknown key, a value that is
+ * not an integer at or above its minimum, and YAML that does not parse into a mapping throw an ArkError that names
+ * the file.
+ */
+export function loadHost(): HostSettings {
+  const file = join(arkHome(), "host.yml");
+  const defaults = defaultHostSettings();
+  if (!existsSync(file)) return defaults;
+  const fail = (message: string): never => {
+    throw new ArkError(`${file}: ${message}`);
+  };
+  let raw: unknown;
+  try {
+    raw = Bun.YAML.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    return fail(`not valid YAML: ${(err as Error).message} (${yamlQuoteHint})`);
+  }
+  if (raw === null || raw === undefined) return defaults;
+  if (typeof raw !== "object" || Array.isArray(raw))
+    return fail(`must be a mapping of ${hostKeys.join(", ")}`);
+  const fields = raw as Record<string, unknown>;
+  for (const key of Object.keys(fields)) {
+    if (hostKeys.includes(key)) continue;
+    const nearest = nearestKey(key, hostKeys);
+    fail(
+      `${key} is not a key; ${nearest ? `did you mean ${nearest}?` : `use ${hostKeys.join(", ")}`}`,
+    );
+  }
+  return {
+    testBudgetCores: integerField(fields, "test_budget_cores", 1, defaults.testBudgetCores, fail),
+    minimumFreeMemoryPercent: integerField(
+      fields,
+      "test_min_free_memory_percent",
+      0,
+      defaults.minimumFreeMemoryPercent,
+      fail,
+    ),
+    maximumSwapGigabytes: integerField(
+      fields,
+      "test_max_swap_gb",
+      0,
+      defaults.maximumSwapGigabytes,
+      fail,
+    ),
+  };
+}
+
+/**
+ * `loadHost` for a reader that must keep working on a bad file (`ark status`, `ark chief state`, the bare `bun test`
+ * preload): the defaults of all three keys and the error, never the valid keys of a bad file.
+ */
+export function loadHostOrDefaults(): { settings: HostSettings; error: string | null } {
+  try {
+    return { settings: loadHost(), error: null };
+  } catch (err) {
+    if (!(err instanceof ArkError)) throw err;
+    return { settings: defaultHostSettings(), error: err.message };
+  }
+}
 
 /** One reading of the host. A value that cannot be read is null, never a guess. */
 export type HostReading = {

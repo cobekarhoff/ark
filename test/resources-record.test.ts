@@ -7,6 +7,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -40,11 +41,10 @@ const maximumMegabytes = 400;
 function buildingRun(): { runId: string; runDirectory: string } {
   const arkHome = tempArkHome();
   const workspace = tempGitRepo({ "unit.test.ts": heavyTest, "e2e.test.ts": shortTest });
+  writeHost({ test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    test_min_free_memory_percent: 0,
-    test_max_swap_gb: 1000,
     suites: [
       { name: "unit", level: "unit", repo: ".", command: junit("unit.test.ts"), parser: "bun" },
       { name: "e2e", level: "e2e", repo: ".", command: junit("e2e.test.ts"), parser: "bun" },

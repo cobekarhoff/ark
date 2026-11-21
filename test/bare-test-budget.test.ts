@@ -22,6 +22,7 @@ import {
   recordEvaluation,
   tempArkHome,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -349,10 +350,10 @@ function makeFixture(
     Bun.spawnSync(["mkfifo", join(directory, name)]);
     heldDescriptors.push(openSync(join(directory, name), constants.O_RDWR));
   }
+  if (options.budget !== null) writeHost({ test_budget_cores: options.budget ?? 3 });
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    ...(options.budget === null ? {} : { test_budget_cores: options.budget ?? 3 }),
     suites: [{ name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles,
   });
@@ -792,12 +793,10 @@ function startArkTest(command: string) {
   const home = tempArkHome();
   const markers = realpathSync(mkdtempSync(join(tmpdir(), "bare-markers-")));
   const workspace = tempGitRepo(suiteFiles(markers));
+  writeHost({ test_budget_cores: 3, test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    test_budget_cores: 3,
-    test_min_free_memory_percent: 0,
-    test_max_swap_gb: 1000,
     suites: [{ name: "cli", level: "e2e", repo: ".", cores: 3, command, parser: "bun" }],
     roles,
   });
@@ -960,10 +959,10 @@ test("FAKE-1-AC1 spawn", async () => {
 });
 `,
   );
+  writeHost({ test_budget_cores: 3 });
   writeProject("demo", {
     workspace,
     ticket_source: "local",
-    test_budget_cores: 3,
     suites: [{ name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" }],
     roles,
   });
@@ -1017,13 +1016,13 @@ test.each([
     setup: () => (writeConfig("workspace: [unclosed\n  :"), {}),
   },
   {
-    title: "test_budget_cores 0",
+    title: "an ark.yml that sets test_budget_cores, which belongs to host.yml",
     setup: (fixture: Fixture) => (
       writeConfig(
         JSON.stringify({
           workspace: realpathSync(fixture.directory),
           ticket_source: "local",
-          test_budget_cores: 0,
+          test_budget_cores: 3,
           suites: [
             { name: "cli", level: "e2e", repo: ".", command: "true {report}", parser: "bun" },
           ],
@@ -1062,7 +1061,7 @@ test.each([
   },
 );
 
-test("ARK-T685 a serial bun test of a project with no test_budget_cores runs at once on the default budget", async () => {
+test("ARK-T685 a serial bun test of a project with no host.yml runs at once on the default budget", async () => {
   const fixture = makeFixture({ budget: null });
   const run = bunTest(fixture.directory, [], environment(fixture.home));
   expect(await run.child.exited, run.output.text).toBe(0);

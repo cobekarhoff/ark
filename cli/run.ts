@@ -23,6 +23,7 @@ import { buildSpec, reviewRangeStart } from "./spec.ts";
 import { watchSession } from "./usage/index.ts";
 import { loadConfig, mergeRequestsMode, type ProjectConfig } from "./config.ts";
 import { isDropped } from "./findings.ts";
+import { loadHostOrDefaults } from "./host.ts";
 import { ArkError } from "./errors.ts";
 import { checkRoles } from "./role-check.ts";
 import {
@@ -742,6 +743,8 @@ export function status(runId?: string, project?: string): void {
       invalidCount += 1;
     }
   }
+  const hostFileError = loadHostOrDefaults().error;
+  if (hostFileError !== null) console.log(`host file error: ${hostFileError}`);
   const lines: string[] = [];
   for (const project of projects) {
     const runsRoot = runsDirectory(project);

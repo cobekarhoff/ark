@@ -28,7 +28,7 @@ import { baseSide, oldIdsTouched, planMembership } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { checkStage } from "./merge-request.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
-import { sampleLoad, type LoadSampler } from "./host.ts";
+import { loadHost, sampleLoad, type LoadSampler } from "./host.ts";
 import { budgetHeldVariable, openTestBudget, type TestBudget } from "./test-lock.ts";
 import { sampleGroup, updateResources, type SideUse } from "./resources-file.ts";
 import { callTest, runnerMain } from "./test-runner.ts";
@@ -1221,9 +1221,10 @@ async function executeTest(
     throw new ArkError(entryProblems.map((problem) => `test case entry ${problem}`).join("; "));
 
   // The checks and suites of every ark test on the host share one CPU budget, held by this runner until it exits.
-  budget = openTestBudget(runId, config.test_budget_cores, {
-    minimumFreeMemoryPercent: config.test_min_free_memory_percent,
-    maximumSwapGigabytes: config.test_max_swap_gb,
+  const host = loadHost();
+  budget = openTestBudget(runId, host.testBudgetCores, {
+    minimumFreeMemoryPercent: host.minimumFreeMemoryPercent,
+    maximumSwapGigabytes: host.maximumSwapGigabytes,
     mode: quick ? "quick" : "full",
   });
   const started = Date.now();

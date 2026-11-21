@@ -8,6 +8,7 @@ import {
   recordEvaluation,
   setFakeHost,
   tempGitRepo,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -25,6 +26,7 @@ export type SuiteFixture = { start: (body: string) => StartedRun };
 
 const arkEntry = join(import.meta.dir, "..", "cli", "ark.ts");
 const configFile = () => join(process.env.ARK_HOME as string, "projects", "demo", "ark.yml");
+const hostFile = () => join(process.env.ARK_HOME as string, "host.yml");
 
 type ProcessEntry = { pid: number; parentPid: number; command: string };
 
@@ -91,7 +93,7 @@ const markerBody = (directory: string) =>
 
 /**
  * ARK-T235. With the host at 15 percent free and 12 GB of swap, the demo project of the suite's fixture writer runs a
- * fake `ark test` to its end, and the same project without the two keys waits for memory (the control).
+ * fake `ark test` to its end, and the same host with no host.yml keys waits for memory (the control).
  */
 export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promise<void> {
   setFakeHost({ freePercent: 15, swapGigabytes: 12 });
@@ -101,13 +103,10 @@ export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promis
     const run = fixture.start(markerBody(markers));
     started = run;
     const { runId } = run;
-    const fixtureConfig = readFileSync(configFile(), "utf8");
+    const fixtureHost = readFileSync(hostFile(), "utf8");
 
     // Control: the same project with the default limits waits and starts nothing.
-    const withDefaults = JSON.parse(fixtureConfig);
-    delete withDefaults.test_min_free_memory_percent;
-    delete withDefaults.test_max_swap_gb;
-    writeFileSync(configFile(), JSON.stringify(withDefaults));
+    writeHost({});
     Bun.spawn([process.execPath, arkEntry, "test", runId], {
       env: { ...process.env, ARK_FAKE_CPU_PERCENT: "0" },
       stdin: "ignore",
@@ -129,7 +128,7 @@ export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promis
     expect(await waitUntil(() => runnersOf(run).length === 0, 10_000)).toBe(true);
 
     // The fixture as written: the run starts at once and finishes.
-    writeFileSync(configFile(), fixtureConfig);
+    writeFileSync(hostFile(), fixtureHost);
     const caller = Bun.spawn([process.execPath, arkEntry, "test", runId], {
       env: { ...process.env, ARK_FAKE_CPU_PERCENT: "0" },
       stdout: "pipe",
@@ -146,9 +145,9 @@ export async function proveFixtureSkipsMemoryWait(fixture: SuiteFixture): Promis
     expect(finished, output).toBe(0);
     expect(output).not.toContain("waiting for memory");
     expect(readdirSync(markers).length, "the suite wrote no marker").toBeGreaterThan(0);
-    const config = JSON.parse(fixtureConfig);
-    expect(config.test_min_free_memory_percent).toBe(0);
-    expect(config.test_max_swap_gb).toBeGreaterThanOrEqual(1000);
+    const host = JSON.parse(fixtureHost);
+    expect(host.test_min_free_memory_percent).toBe(0);
+    expect(host.test_max_swap_gb).toBeGreaterThanOrEqual(1000);
   } finally {
     setFakeHost(healthyHost);
     for (const runner of started === undefined ? [] : runnersOf(started)) forceKill(runner.pid);
@@ -163,8 +162,6 @@ async function startControlRunner(markers: string): Promise<{ run: StartedRun; p
   writeProject("control", {
     workspace: tempGitRepo(),
     ticket_source: "local",
-    // The target takes the whole budget of the demo project: the control needs room beside it.
-    test_budget_cores: 1000,
     suites: [
       {
         name: "hold",
@@ -252,6 +249,11 @@ export async function holdRunners(fixture: SuiteFixture): Promise<void> {
   const run = fixture.start(
     `process.on("SIGTERM", () => {}); ${markerBody(markers)} await Bun.sleep(300_000);`,
   );
+  // The budget is one for the host: the suites of FAKE-1 take one core each, so the control suite has room beside them.
+  const demo = JSON.parse(readFileSync(configFile(), "utf8"));
+  demo.suites = demo.suites.map((suite: object) => ({ ...suite, cores: 1 }));
+  writeFileSync(configFile(), JSON.stringify(demo));
+  writeHost({ test_budget_cores: 1000, test_min_free_memory_percent: 0, test_max_swap_gb: 1000 });
   Bun.spawn([process.execPath, arkEntry, "test", run.runId], {
     stdin: "ignore",
     stdout: "ignore",
