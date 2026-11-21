@@ -1284,6 +1284,12 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
     /** No `base_files`, so a quick run runs the whole suite (and `test/other.test.ts` joins the base). */
     wholeSuite?: boolean;
     checks?: { name: string; repo: string; command: string }[];
+    /** Files every repo of the run holds at base: the repo of the workspace and, with two repos, `site`. */
+    baseFiles?: Record<string, string>;
+    /** false: the own commit holds no Markdown guide, so a `change` commit is the only one. */
+    ownMarkdown?: boolean;
+    /** The `generated` list of ark.yml; default `docs/reference/cli.md` with the command `true`. */
+    generated?: { path: string; command: string }[];
     /** Extra change on top of the own Markdown commit, in the mirrors of the run. */
     change?: (mirrors: Record<string, string>) => void;
   };
@@ -1337,6 +1343,7 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
             ].join("\n"),
           }
         : {}),
+      ...shape.baseFiles,
     };
     const layout = shape.repos ?? "one";
     let workspace: string;
@@ -1345,7 +1352,7 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
     else {
       workspace = mkdtempSync(join(tmpdir(), "ark-workspace-"));
       renameSync(tempGitRepo(files), join(workspace, "core"));
-      renameSync(tempGitRepo(), join(workspace, "site"));
+      renameSync(tempGitRepo(shape.baseFiles), join(workspace, "site"));
       repos = layout === "both" ? ["core", "site"] : ["core"];
     }
     const suiteRepo = layout === "one" ? "." : "core";
@@ -1365,7 +1372,7 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
       planCases: shape.planCases,
       manualAc: shape.manualAc,
       checks: shape.checks,
-      generated: [{ path: "docs/reference/cli.md", command: "true" }],
+      generated: shape.generated ?? [{ path: "docs/reference/cli.md", command: "true" }],
       repos,
     });
     if (shape.cases?.length === 0) {
@@ -1374,10 +1381,11 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
       const answered = ark("gate", "record", run.runId, "manual", "FAKE-1/AC1", "ok");
       if (answered.code !== 0) throw new Error(`manual ok failed: ${answered.err}${answered.out}`);
     }
-    commit(run.mirror, "own markdown", {
-      "docs/guide.md": "# Guide\n",
-      "skills/demo/SKILL.md": "# Demo\n",
-    });
+    if (shape.ownMarkdown !== false)
+      commit(run.mirror, "own markdown", {
+        "docs/guide.md": "# Guide\n",
+        "skills/demo/SKILL.md": "# Demo\n",
+      });
     shape.change?.(run.mirrors);
     return {
       ...run,
@@ -1532,6 +1540,114 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
     expect(run.remote()).toContain(git(run.mirror, "rev-parse", "HEAD"));
   });
 
+  // ARK-625: a run whose only own commit edits `docs/reference/cli.md`, a generated Markdown file. The base holds
+  // `scripts/gen-ref.sh`, which rewrites the block between the markers only, and the file in sync with it.
+  const generateCommand = "sh scripts/gen-ref.sh";
+  const generateCheck = `${generateCommand} && git diff --exit-code docs/reference/cli.md`;
+  const referenceDocument = (handLine: string, generatedLine = "generated line") =>
+    [
+      "# CLI",
+      "",
+      handLine,
+      "<!-- generated:start -->",
+      generatedLine,
+      "<!-- generated:end -->",
+      "",
+    ].join("\n");
+  const generatedBase = {
+    "scripts/gen-ref.sh": [
+      "awk '/<!-- generated:end -->/ { skip = 0 } !skip { print } /<!-- generated:start -->/ { print \"generated line\"; skip = 1 }' docs/reference/cli.md > docs/reference/cli.md.tmp",
+      "mv docs/reference/cli.md.tmp docs/reference/cli.md",
+      "",
+    ].join("\n"),
+    "scripts/gen-schema.sh": "printf '{}\\n' > docs/schema.json\n",
+    "docs/reference/cli.md": referenceDocument("hand line"),
+  };
+  /**
+   * The accepted head of ARK-T758 as a `Shape`: the only own commit edits `docs/reference/cli.md` (`outside`: the
+   * hand line; `inside`: the generated block) in the repo `.`, or in `site` of two repos, and the check
+   * `cli-reference` runs the generate command and compares the file in `checkRepo` (default: the repo of the edit).
+   */
+  function generatedHead(
+    options: Omit<Shape, "baseFiles" | "ownMarkdown"> & {
+      edit?: "outside" | "inside";
+      checkRepo?: string;
+    } = {},
+  ): Shape {
+    const { edit = "outside", checkRepo, change, ...shape } = options;
+    const repo = shape.repos === "both" ? "site" : ".";
+    return {
+      baseFiles: generatedBase,
+      ownMarkdown: false,
+      generated: [{ path: "docs/reference/cli.md", command: generateCommand }],
+      checks: [{ name: "cli-reference", repo: checkRepo ?? repo, command: generateCheck }],
+      ...shape,
+      change: (mirrors) => {
+        commit(mirrors[repo]!, "own edit", {
+          "docs/reference/cli.md":
+            edit === "outside"
+              ? referenceDocument("hand line, edited")
+              : referenceDocument("hand line", "generated line, edited"),
+        });
+        change?.(mirrors);
+      },
+    };
+  }
+
+  for (const layout of ["one", "both"] as const) {
+    test(`ARK-T758 a passing quick test whose check regenerates a hand-edited generated Markdown file opens the MR${layout === "both" ? " (the edit and its check in the second repo)" : ""}, check --stage final agrees, and the body says the full suite is CI's`, () => {
+      const run = noCodeRun(generatedHead({ repos: layout }));
+      const quick = ark("test", run.runId, "--quick");
+      expect(quick.code, quick.err + quick.out).toBe(0);
+      expect(lastQuick(run.runDirectory)).toMatchObject({
+        mode: "quick",
+        passed: true,
+        checks: expect.arrayContaining([{ name: "cli-reference", passed: true }]),
+        criteria: { "FAKE-1/AC1": "not run" },
+      });
+
+      const check = ark("merge-request", "check", run.runId, "--stage", "final");
+      expect(check.code, check.err + check.out).toBe(0);
+      expect(check.err + check.out).toBe("");
+
+      const opened = ark("merge-request", "open", run.runId);
+      expect(opened.code, opened.err + opened.out).toBe(0);
+      noRefusal(opened.err + opened.out);
+      expect(openedCount(run.runDirectory)).toBe(1);
+      expect(run.remote(run.mirrors[layout === "both" ? "site" : "."])).toContain(
+        "refs/heads/ark/",
+      );
+      expect(created()).toHaveLength(1);
+      expectFullSuiteBody(created()[0]!.body);
+    });
+  }
+
+  test("ARK-T759 an own edit inside the generated block fails ark test --quick on the generated check, and merge-request open refuses it and pushes nothing", () => {
+    const run = noCodeRun(generatedHead({ edit: "inside" }));
+    const quick = ark("test", run.runId, "--quick");
+    expect(quick.code, quick.err + quick.out).toBe(1);
+    expect(quick.out).toContain("check cli-reference failed");
+    expect(quick.err).toContain("check cli-reference failed");
+    expect(lastQuick(run.runDirectory)).toMatchObject({
+      mode: "quick",
+      passed: false,
+      checks: expect.arrayContaining([{ name: "cli-reference", passed: false }]),
+      suites: [],
+    });
+
+    const check = ark("merge-request", "check", run.runId, "--stage", "final");
+    expect(check.code, check.err + check.out).toBe(1);
+    expect(check.err + check.out).toContain(quickRefusal(run.runId));
+    expect(check.err + check.out).toContain(notPassedRefusal);
+
+    const refused = ark("merge-request", "open", run.runId);
+    expect(refused.code, refused.err + refused.out).toBe(1);
+    expect(refused.err.split("\n")[0]).toStartWith(`ark: ${quickRefusal(run.runId)}`);
+    expect(openedCount(run.runDirectory)).toBe(0);
+    expect(run.remote()).not.toContain("refs/heads/ark/");
+    expect(created()).toEqual([]);
+  });
+
   type NoCodeRun = {
     runId: string;
     runDirectory: string;
@@ -1567,8 +1683,16 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
       refusal: quickRefusal,
     },
     {
-      label: "changes the generated docs/reference/cli.md",
-      shape: own("docs/reference/cli.md", "# cli\n"),
+      label: "a generated docs/reference/cli.md has no passed check that runs its generate command",
+      shape: generatedHead({
+        checks: [
+          {
+            name: "cli-reference",
+            repo: ".",
+            command: "git diff --exit-code docs/reference/cli.md",
+          },
+        ],
+      }),
       refusal: quickRefusal,
     },
     {
@@ -1649,6 +1773,42 @@ describe("ark merge-request open on a quick test of a run with no code file", ()
       label: "adds the Markdown eval input skills/pr-writing/evals/pr-200.md",
       shape: own("skills/pr-writing/evals/pr-200.md", "# pr 200\n"),
       refusal: quickRefusal,
+    },
+    {
+      label: "the check that runs the generate command is in repo core and the edit is in site",
+      shape: generatedHead({ repos: "both", checkRepo: "core" }),
+      refusal: quickRefusal,
+    },
+    {
+      label:
+        "a generated docs/schema.json (not Markdown) is added beside the edit and a passed check regenerates it",
+      shape: generatedHead({
+        generated: [
+          { path: "docs/reference/cli.md", command: generateCommand },
+          { path: "docs/schema.json", command: "sh scripts/gen-schema.sh" },
+        ],
+        checks: [
+          { name: "cli-reference", repo: ".", command: generateCheck },
+          {
+            name: "schema",
+            repo: ".",
+            command: "sh scripts/gen-schema.sh && git diff --exit-code docs/schema.json",
+          },
+        ],
+        change: (mirrors) => commit(mirrors["."]!, "own schema", { "docs/schema.json": "{}\n" }),
+      }),
+      refusal: quickRefusal,
+    },
+    {
+      label: "the check that runs the generate command is added to ark.yml after the quick run",
+      shape: generatedHead({ checks: [] }),
+      refusal: quickRefusal,
+      afterQuick: () => {
+        const file = join(process.env.ARK_HOME!, "projects", "demo", "ark.yml");
+        const config = JSON.parse(readFileSync(file, "utf8"));
+        config.checks = [{ name: "cli-reference", repo: ".", command: generateCheck }];
+        writeFileSync(file, JSON.stringify(config, null, 2));
+      },
     },
   ];
 

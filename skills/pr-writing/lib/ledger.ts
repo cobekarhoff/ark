@@ -13,6 +13,7 @@ import { deriveState, readEvents, type ArkEvent } from "../../../cli/events.ts";
 import type { CriterionStatus } from "../../../cli/lifecycle.ts";
 import { projectDirectory } from "../../../cli/paths.ts";
 import { loadPlan, repoGraph } from "../../../cli/plan.ts";
+import { noCodeRun } from "../../../cli/merge-request.ts";
 import { hashBody } from "./lint.ts";
 
 export type Rating = "good" | "decent" | "poor";
@@ -758,7 +759,11 @@ function readEvidence(directory: string): EvidenceEntry[] | null {
     return { status: status ?? "missing", sha: sha ?? "" };
   };
   return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter(
+      (entry) =>
+        entry.isDirectory() &&
+        ["base", "head"].some((side) => existsSync(join(root, entry.name, side))),
+    )
     .map((entry) => {
       const base = sideResult(entry.name, "base");
       const head = sideResult(entry.name, "head");
@@ -968,8 +973,11 @@ function runLedger(source: {
             ...(Array.isArray(lastTest.data.deleted) ? { deleted: lastTest.data.deleted } : {}),
           }
         : null,
-    // A quick last test passed: only the no-code path ships on it (`noCodeRun`, `ark merge-request open`), so the full suite is CI's.
-    ...(lastTest?.data.mode === "quick" && lastTest.data.passed === true
+    // A quick last test passed on a run with no code file (`noCodeRun`, the rule of `ark merge-request open`): the full suite is CI's. `gather.ts --run-dir` also reads a run that `open` would refuse.
+    ...(lastTest?.data.mode === "quick" &&
+    lastTest.data.passed === true &&
+    config !== null &&
+    noCodeRun(directory, state, config, recordedChecks)
       ? { fullSuiteIsCi: true }
       : {}),
     reviewer,
