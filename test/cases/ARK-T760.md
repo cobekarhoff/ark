@@ -15,14 +15,14 @@ Prove that when a Playwright suite fails and every failed test passes when it ru
 
 ## Preconditions
 
-- A temp `ARK_HOME`, a git repo and a run, as in the fixture of ARK-T164 (`test/detached-runner.test.ts`, `makeFixture` with `forge: true`, so `ark merge-request open` uses the fake host of `test/merge-request.test.ts`). The real `ark` process runs. Nothing in the runner, the parser or Playwright is mocked.
-- One suite `pw` (level `e2e`, parser `bun`, as the project's `playwright` suite) that runs the real Playwright of this repo (1.64) with its JUnit reporter, through a small Playwright config like the one at `test/test-run.test.ts:1545` (imports `@playwright/test` and the repo config by absolute path, `testDir` holds the specs below, one worker):
-  - `command`: `echo run >> <dir>/invocations; PLAYWRIGHT_JUNIT_OUTPUT_FILE={report} bunx playwright test --reporter=junit --config <config>`
-  - `base_command`: the same, followed by ` {files}`, as in the project `ark.yml`. It contains the text `playwright test`, which is how S1 recognizes a Playwright suite.
-  - Each start of the suite command or of a retry appends one line to `invocations`.
-- Specs. On each head start, each test appends one line to a counter file of its own, so starts are counted per test and per side (a base start does not count, as in ARK-T164):
-  - `first.pw.ts`: `test("ARK-T1 first flake", …)` fails on its first head start and passes after it; `test("stable sibling", …)` always passes.
-  - `second.pw.ts`: `test("ARK-T2 second flake", …)` fails on its first head start and passes after it.
+- A temp `ARK_HOME`, a git repo and a run, as in the fixture of ARK-T164 (`test/detached-runner.test.ts`, `makeFixture` with `forge: true`, so `ark merge-request open` uses the fake host of `test/merge-request.test.ts`). The run commits one plain file, as ARK-T164's run commits its test files, so the run has a commit. The real `ark` process runs. Nothing in the runner, the parser or Playwright is mocked.
+- One suite `pw` (level `e2e`, parser `bun`, as the project's `playwright` suite, no `base_files`) that runs this repo's Playwright 1.64.1 by the absolute path of its binary, `<repo>/node_modules/.bin/playwright`, never through `bunx` (from the fixture repo, which has no `node_modules`, `bunx` downloads another version). Its JUnit reporter writes the report. A small Playwright config like the one at `test/test-run.test.ts:1545` imports `@playwright/test` and the repo config by absolute path, sets one worker and a `testDir` that holds the specs below.
+  - `command`: a side prefix, then `PLAYWRIGHT_JUNIT_OUTPUT_FILE={report} <repo>/node_modules/.bin/playwright test --reporter=junit --config <config>`.
+  - `base_command`: the same, followed by ` {files}`, as in the project `ark.yml`. It holds the text `playwright test`, which is how S1 recognizes a Playwright suite.
+  - The side prefix applies the side rule of `count.sh` in ARK-T164: the side is `base` when `$PWD` holds `ark-base-`, `census` when `{report}` holds `/census/`, and `head` otherwise. It appends one line to `invocations` only on the head side and exports the side to Playwright as `PW_SIDE`. The suite has no `base_files`, so the base run and the census start `command` too (`cli/test-run.ts` `baseSuitesPassed`); those starts write no line.
+- Specs. They live in the fixture folder, outside the git repo, so no committed file holds them, and no title holds a case id (the ARK-431 plan-membership scan has nothing to read). On each start where `PW_SIDE` is `head`, each test appends one line to a counter file of its own, so starts are counted per test at head only:
+  - `first.pw.ts`: `test("first flake", …)` fails on its first head start and passes after it; `test("stable sibling", …)` always passes.
+  - `second.pw.ts`: `test("second flake", …)` fails on its first head start and passes after it.
   - No title is a substring of another title, so a correct rerun starts no other test.
 - The report is the real Playwright JUnit shape: `<testcase name=… classname="first.pw.ts">` with no `file` attribute. A hand-written report with `file=` would take the file path and hide the gap.
 - The expected names are the `name` attributes of the two failed `testcase` elements in `results/pw.report` (the first report, on disk). The test reads them from that file and never takes them from the code under test.
@@ -38,7 +38,7 @@ Prove that when a Playwright suite fails and every failed test passes when it ru
 ## Expected results
 
 - Step 1: exit 0, and stderr has no `suite pw failed`. The `suite      pw (e2e)  passed` line holds `flaky:`, each of the two report names and `(failed once, passed on retry)`. The output has no `not retried` line for `pw`.
-- Step 2: `invocations` has exactly 2 lines: the suite, then one retry for both titles. `ARK-T1 first flake` and `ARK-T2 second flake` each start exactly twice at head. `stable sibling` starts exactly once: a whole-suite or whole-file rerun starts it twice.
+- Step 2: `invocations` has exactly 2 head lines: the suite, then one retry for both titles. `first flake` and `second flake` each start exactly twice at head. `stable sibling` starts exactly once at head: a whole-suite or whole-file rerun starts it twice.
 - Step 3: `passed` is `true`. The `pw` suite row has `passed: true` and no `failed_files`. The event's `flaky` list holds `{ suite: "pw", file: <name> }` for each of the two report names (in any order) and nothing for `stable sibling`.
 - Step 4: `tests.flaky_files` holds `pw: <name>` for each of the two names.
 - Step 5: the body names each of the two report names and the suite `pw` in its flaky lines, and says they failed once and passed on retry.

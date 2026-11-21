@@ -15,7 +15,7 @@ Prove that before a failed bun test file runs again alone, `ark test` waits unti
 
 ## Preconditions
 
-- The fixture of ARK-T164 (`test/detached-runner.test.ts`: `makeFixture`, `bunSuite`, `countedFile`), with a real `ark` process. The fixture's `ark.yml` has `test_budget_cores: 3` and no `test_max_load`, so admission ignores the load (ARK-T710) and only the retry reads it.
+- The fixture of ARK-T164 (`test/detached-runner.test.ts`: `makeFixture`, `bunSuite`, `countedFile`), with a real `ark` process. The fixture's `ark.yml` has `test_budget_cores: 3`. Admission ignores the 1-minute load in every config (ARK-T710), so only the retry reads it.
 - One suite `loaded` (parser `bun`, a `base_command` with `{files}`) with two files:
   - `flaky`: fails on its first head start and passes after it. On each head start it appends to its counter the text of the load file as it reads it at that start.
   - `stable`: always passes.
@@ -26,15 +26,15 @@ Prove that before a failed bun test file runs again alone, `ark test` waits unti
 
 1. Below the budget: `ARK_FAKE_LOAD_ONE=file:<load file>` with the file holding `2.9`, and `ARK_RETRY_LOAD_WAIT_S=120`. Run `ark test <run>` to its end.
 2. At the budget, then the load drops: the load file holds `3`, and `ARK_RETRY_LOAD_WAIT_S=120`. Start `ark test <run>` in the background and read its stdout as it comes. Wait, with a limit, for the line that says the retry of suite `loaded` waits for the load. Then read the `flaky` counter. Write `2.9` to the load file and wait for the process to exit.
-3. The load never drops: `ARK_FAKE_LOAD_ONE=50` and `ARK_RETRY_LOAD_WAIT_S=1`. Run `ark test <run>` to its end.
-4. The reading fails: `ARK_FAKE_LOAD_ONE=unreadable` and `ARK_RETRY_LOAD_WAIT_S=120`. Run `ark test <run>` to its end, with a test timeout well below 120 s.
+3. The load never drops: `ARK_FAKE_LOAD_ONE=50` and `ARK_RETRY_LOAD_WAIT_S=1`. Start `ark test <run>` with a limit of 90 s on the process, read its stdout as it comes, and note the time at which the wait line arrives and the time at which the process exits.
+4. The reading fails: `ARK_FAKE_LOAD_ONE=unreadable` and `ARK_RETRY_LOAD_WAIT_S=120`. Run `ark test <run>` to its end, with a limit of 60 s on the process, half the 120 s wait limit.
 
 ## Expected results
 
 - Step 1: exit 0. `flaky` starts twice at head, and its second start read `2.9`. No line says the retry waits for the load, and no line holds `under load`. The suite line lists `test/flaky.test.ts` as flaky.
 - Step 2: a line names the suite `loaded`, the load and the budget `3`, and says the retry waits for the load. At that moment the `flaky` counter has 1 start. After the drop, exit 0. `flaky` starts exactly twice, and its second start read `2.9`, not `3`: the retry ran after the drop. No line holds `under load`, and the file is listed as flaky.
-- Step 3: the wait line is printed. Then the retry runs: `flaky` starts twice and the process exits 0 with the file listed as flaky. A line after the wait line names `loaded` and holds `under load`. The process ends: with no bound, or with one that `ARK_RETRY_LOAD_WAIT_S` does not set, it would wait its default of 3 minutes and pass the test timeout.
-- Step 4: the retry runs and `flaky` starts twice. Exit 0 with the file listed as flaky, before the test timeout: an unreadable load does not hold the retry, as it does not hold admission (ARK-T692 step 6).
+- Step 3: the wait line is printed. Then the retry runs: `flaky` starts twice and the process exits 0, within the 90 s limit, with the file listed as flaky. A line after the wait line names `loaded` and holds `under load`. The process exits less than 60 s after the wait line. The default wait of 3 minutes (180 s) passes both bounds, so a wait with no bound, or with a bound that the code does not read from `ARK_RETRY_LOAD_WAIT_S`, fails this step.
+- Step 4: the retry runs and `flaky` starts twice. Exit 0 with the file listed as flaky, within the 60 s limit: an unreadable load is no reason to wait, so the retry does not hold for the 120 s limit.
 
 ## Screenshot checkpoints
 
