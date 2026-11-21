@@ -58,7 +58,16 @@ const nextNumber = () => {
 if (word === "run-list") reply({ runs: config.runs, nextCursor: null });
 else if (word === "worker-list") {
   const wanted = flag("--terminal-state");
-  const rows = [...liveRows(), ...config.leads].filter((row) => !wanted || (row.terminalState ?? "active") === wanted);
+  let leadRows = config.leads;
+  if (config.leadsOnRead) {
+    // The call log already holds this call, so its worker-list count minus one is the index of this read.
+    const readIndex = readFileSync(join(directory, "calls.jsonl"), "utf8")
+      .split("\\n").filter(Boolean).map((line) => JSON.parse(line)).filter((call) => call[1] === "worker-list").length - 1;
+    const scripted = config.leadsOnRead[Math.min(readIndex, config.leadsOnRead.length - 1)];
+    if (!Array.isArray(scripted)) fail(scripted.fail);
+    leadRows = scripted;
+  }
+  const rows = [...liveRows(), ...leadRows].filter((row) => !wanted || (row.terminalState ?? "active") === wanted);
   reply({ workers: flag("--run") === config.chiefRunId ? rows : [], nextCursor: null });
 } else if (word === "task-list") reply({ tasks: [] });
 else if (word === "worker-start") {
@@ -109,7 +118,11 @@ else if (word === "worker-start") {
 } else if (word === "send") {
   const to = flag("--to");
   pause(config.delayMilliseconds ?? 0);
-  if ((config.failSendTo ?? []).includes(to)) fail("send refused for " + to);
+  if ((config.hangSendTo ?? []).includes(to)) {
+    pause(config.hangMilliseconds ?? 8000);
+    appendFileSync(join(directory, "hung-done.jsonl"), JSON.stringify(args) + "\\n");
+  }
+  if ((config.failSendTo ?? []).includes(to)) fail("send refused for " + to + (config.failSendError ? ": " + config.failSendError : ""));
   if (config.failSendOnce) {
     writeFileSync(configFile, JSON.stringify({ ...config, failSendOnce: false }));
     fail("send failed once");
@@ -143,7 +156,7 @@ export type WorkerRowOfFake = {
 };
 
 /** The `orca orchestration` rows a test lists for Master Chief's Run. */
-export type FakeLead = { dispatchId: string; terminal: string; workspace: string };
+export type FakeLead = { dispatchId: string; terminal?: string; workspace: string };
 
 export type FakeCompanionConfig = {
   /** `run-list --full` rows. Default: Master Chief's Run `Master Chief: <project> tickets`. */
@@ -152,6 +165,8 @@ export type FakeCompanionConfig = {
   chiefRunId: string;
   /** Run leads: rows of Master Chief's Run that the fake did not start. */
   leads: FakeLead[];
+  /** One answer for each `worker-list` read, counted from the call log: the lead rows (a structured lead has no `terminal`) or `{ fail }`, which exits 1 with that text. The last entry answers every later read. Off by default: `leads` answers. */
+  leadsOnRead?: (FakeLead[] | { fail: string })[];
   /** `terminal list` rows. Default: the connected Master Chief terminal in the workspace. */
   terminals: { handle: string; connected: boolean; worktreePath: string }[];
   /** The worktrees `worker-start` accepts. Any other path fails like real Orca: selector_not_found. */
@@ -168,6 +183,10 @@ export type FakeCompanionConfig = {
   failStartFor?: string[];
   /** `send --to` values whose send exits 1. */
   failSendTo?: string[];
+  /** Text that a refused `send` adds to its error (for example `task_not_found`). */
+  failSendError?: string;
+  /** `send --to` values whose send hangs for `hangMilliseconds` first, while a send to any other recipient answers at once. */
+  hangSendTo?: string[];
   /** The next `send` exits 1, then sends work again. */
   failSendOnce?: boolean;
   /** `worker-start`, `worker-stop` and `send` each take this long, so processes overlap in the fake. */
