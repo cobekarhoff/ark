@@ -25,7 +25,7 @@ Expected: If the visibility read fails or prints no visibility and the body name
   - no field: exit 0, stdout `{"path_with_namespace":"org/a"}`;
   - empty: exit 0, no stdout.
 - The fake `gh` answers `gh repo view --json visibility` from its env var, keyed on the argv `--json visibility` (ARK-T778), plus two variants:
-  - failed: exit 1, stderr `HTTP 401: Bad credentials (https://api.github.com/graphql)`, empty stdout, the shape gh 2.103.3 printed with a bad token (evaluation.md);
+  - failed: exit 1, empty stdout, stderr `HTTP 401: Bad credentials (https://api.github.com/graphql)`. This is the first of the two stderr lines that gh 2.103.3 printed for `GH_TOKEN=bad gh repo view --json visibility` (evaluation.md records this line; the second line, `Try authenticating with:  gh auth login -h github.com`, is from the run in findings/test-case-review-2.md). The fake leaves out the second line;
   - empty: exit 0, no stdout. This is a fake shape, not printed by gh 2.103.3; it is also what the fake `gh` prints today for `repo view`.
 - The new env vars are in the `FAKE_*` scrub list of `test/pr-writing.test.ts`.
 - The dry run goes through `test/fixtures/pr-writing/driver.ts` with `dryRun: true` (neither `post_mr.ts` nor `ark merge-request open` has a dry-run flag).
