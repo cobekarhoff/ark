@@ -8,9 +8,11 @@ import {
   expect,
   setDefaultTimeout,
   setSystemTime,
+  spyOn,
   test,
 } from "bun:test";
 import type { FSWatcher } from "node:fs";
+import * as nodeFs from "node:fs";
 import {
   existsSync,
   mkdirSync,
@@ -681,6 +683,7 @@ budget.close();`;
         ...pauses: string[]
       ) => void;
       waitFor: (...names: string[]) => Promise<void>;
+      waitForWithin: (limitMs: number, ...names: string[]) => Promise<void>;
       has: (name: string) => boolean;
       go: (name: string, point: string) => void;
       stop: (name: string) => void;
@@ -704,6 +707,17 @@ budget.close();`;
         }),
       );
     };
+    const waitFor = (...names: string[]) => {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      const check = () => {
+        if (!names.every(has)) return;
+        watcher.close();
+        resolve();
+      };
+      const watcher = watch(home, check);
+      check();
+      return promise;
+    };
     try {
       await steps({
         home,
@@ -714,17 +728,9 @@ budget.close();`;
             { cores, settings: { mode, minimumFreeMemoryPercent: 0, maximumSwapGigabytes: 1000 } },
             pauses,
           ),
-        waitFor: (...names) => {
-          const { promise, resolve } = Promise.withResolvers<void>();
-          const check = () => {
-            if (!names.every(has)) return;
-            watcher.close();
-            resolve();
-          };
-          const watcher = watch(home, check);
-          check();
-          return promise;
-        },
+        waitFor,
+        // ponytail: ARK-618 red-proof delegate, it ignores the limit; the implementer replaces it with the polling waitForMarkers.
+        waitForWithin: (_limitMs, ...names) => waitFor(...names),
         has,
         go: (name, point) => writeFileSync(join(home, `${name}-go-${point}`), ""),
         stop: (name) => {
@@ -895,6 +901,54 @@ await budget.take(6).catch(() => {});`;
       }
     });
   });
+
+  // ARK-618: the scenario waits poll the marker files and give up with a named error long before the 90 s test timeout.
+  const defaultWaitLimitMs = 20_000;
+  const defaultWaitTestTimeoutMs = 25_000;
+  const timerSlackMs = 100; // a timer may fire a little early against the performance clock
+
+  test(
+    "ARK-T774 a scenario wait for a marker that never appears gives up at its 20 s default limit, before the test timeout, and its error names the missing marker and lists the files in the scenario home",
+    async () => {
+      await scenario(async ({ home, waitFor }) => {
+        writeFileSync(join(home, "present-running"), "");
+        const started = performance.now();
+        const error = await waitFor("ghost-running").then(
+          () => undefined,
+          (rejection: unknown) => rejection as Error,
+        );
+        const elapsedMs = performance.now() - started;
+        expect(error).toBeInstanceOf(Error);
+        expect(elapsedMs).toBeGreaterThanOrEqual(defaultWaitLimitMs - timerSlackMs);
+        expect(error!.message).toContain("ghost-running");
+        expect(error!.message).toContain("present-running");
+      });
+    },
+    defaultWaitTestTimeoutMs,
+  );
+
+  const lostEventTestTimeoutMs = 5_000;
+
+  test(
+    "ARK-T775 a scenario wait sees a marker file created while the fs.watch of the scenario home delivers no event, within a 1 s limit",
+    async () => {
+      // A watcher whose listener never runs: only a poll of the home can end the wait.
+      const lostWatch = spyOn(nodeFs, "watch").mockImplementation(
+        () => ({ close() {}, on() {} }) as unknown as FSWatcher,
+      );
+      try {
+        await scenario(async ({ home, waitForWithin }) => {
+          const wait = waitForWithin(1000, "late-running");
+          expect(Bun.peek.status(wait)).toBe("pending");
+          writeFileSync(join(home, "late-running"), "");
+          await wait;
+        });
+      } finally {
+        lostWatch.mockRestore();
+      }
+    },
+    lostEventTestTimeoutMs,
+  );
 });
 
 const onMac = process.platform === "darwin"; // the fake host reading of test/tmpdir-preload.ts reaches macOS only
