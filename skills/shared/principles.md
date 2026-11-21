@@ -11,6 +11,12 @@ One line for each principle that Ark already uses, with a link to the rule that 
 - One contract has one owning test, at the strongest practical boundary. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
 - Never mock the thing a test proves, and never take the expected value from the code under test. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
 - Add no export, flag or hook that only a test calls: test at the real boundary. [Test authoring gate](../../rules/test-audit.md#test-authoring-gate)
+- Log each fixed test failure as a caught regression or a change detector; delete a change detector, and never delete a test of authorization, privacy, migrations or concurrency. [Engineering: Tests](engineering.md#tests)
+- Checks only grow: a change never removes or loosens a lint rule, a required check, or a test of authorization, privacy, migrations or concurrency to pass. [Engineering: Checks and CI](engineering.md#checks-and-ci)
+- A step that a tool can enforce goes into a hook that runs the same command as CI, not into a line of `AGENTS.md`. [Engineering: Checks and CI](engineering.md#checks-and-ci)
+- A changed-tests selection lists the inputs that force a full run, and a test shows that it fails when a real change is hidden from it. [Engineering: Checks and CI](engineering.md#checks-and-ci)
+- Before a tool switch, run the old and the new tool side by side, list what the new tool misses, and give before and after numbers for a speed change. [Engineering: Checks and CI](engineering.md#checks-and-ci)
+- Split a slow pipeline's time into waiting, setup and running at p50 and p95, and fix the largest part first. [Engineering: Checks and CI](engineering.md#checks-and-ci)
 
 ## Code
 
