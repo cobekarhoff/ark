@@ -293,8 +293,11 @@ function evidenceBlock(ledger: Ledger, keep = logLines, collapsed = false): Bloc
   if (ledger.evidence === null && kind !== "perf")
     lines.push("- No base and head evidence recorded: the run has no `results/evidence/`.");
   lines.push(...testLines(ledger, collapsed));
+  // A flaky entry is a test file or, in a Playwright suite, a test title: one line, no backtick that ends the code span.
   for (const { suite, file } of ledger.flaky)
-    lines.push(`- Flaky: \`${file}\` in suite \`${suite}\` failed once and passed on retry.`);
+    lines.push(
+      `- Flaky: \`${file.replace(/\s+/g, " ").replaceAll("`", "'")}\` in suite \`${suite}\` failed once and passed on retry.`,
+    );
   return { key: "evidence", title: "Evidence", lines };
 }
 
