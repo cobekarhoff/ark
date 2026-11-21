@@ -157,10 +157,14 @@ export function tempGitRepo(
   return directory;
 }
 
-/** An ark process gets a reader limit of 30 s, so a loaded host does not decide a reader; a test can hold it lower in `process.env`. */
+/**
+ * An ark process gets a reader limit of 30 s and an Orca limit of 60 s, so a loaded host does not
+ * decide a read. A test holds either lower with a value in `process.env`; an empty value keeps the
+ * production limit.
+ */
 function spawnArk(arkArguments: string[], timeout?: number) {
   return Bun.spawnSync(["bun", join(repositoryRoot, "cli", "ark.ts"), ...arkArguments], {
-    env: { ARK_READER_TIMEOUT_MS: "30000", ...process.env },
+    env: { ARK_READER_TIMEOUT_MS: "30000", ARK_ORCA_TIMEOUT_MS: "60000", ...process.env },
     timeout,
   });
 }
