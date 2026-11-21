@@ -639,6 +639,8 @@ export function createSnapshotReader() {
     ark: async () => {
       await read("ark", async () => {
         const value = await arkReader.read();
+        // The watchers open before the first push, so a change made after it is seen at once, not at the next tick (ARK-T243).
+        if (running) await syncWatchers(arkReader.watchPaths());
         // What `compose()` would read on its first call is read here, a few runs at a time, so no publish holds the loop for it (ARK-533).
         const open = value.runs.filter((run) => run.state.phase !== "closed");
         await usage.remember(open.map((run) => run.directory));
@@ -650,7 +652,6 @@ export function createSnapshotReader() {
         return value;
       });
       if (!running) return;
-      await syncWatchers(arkReader.watchPaths());
       // A gate that this read saw wakes the Plannotator read at once, not at its next tick.
       const open = gateOpen();
       if (armed && open && !gateWasOpen) void readers.plannotator();
