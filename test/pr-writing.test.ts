@@ -1283,19 +1283,47 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
     ),
   ).toMatchObject({ result: "fail", reason: expect.stringContaining("not a provenance variant") });
 
-  // PROV02: Generated with in the body, and a trailer only in a commit of the range.
-  expect(lintLine(good, "PROV02", `${good.body}\nGenerated with Claude Code\n`).reason).toContain(
-    'the body has "Generated with Claude Code"',
-  );
-  const trailer = "ARK-316: fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>";
-  const inRange = lintOf({
-    ...good,
-    input: {
-      ...good.input,
-      ledger: baseLedger({
-        repos: [{ commits: [{ sha: head, subject: "ARK-316: fix", message: trailer }] }],
-      }),
-    },
+  // PROV02: a Generated with trailer line fails in the body and in a commit of the range, in
+  // each shape the tools write it, and its reason names the whole line without its indent.
+  const modelTrailerLine = "Co-Authored-By: Claude <noreply@anthropic.com>";
+  const trailerLines: [string, string, string][] = [
+    ["plain", "Generated with Claude Code", "Generated with Claude Code"],
+    [
+      "emoji",
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+    ],
+    [
+      "emoji with a variation selector",
+      "🤖\uFE0F Generated with [Claude Code](https://claude.com/claude-code)",
+      "🤖\uFE0F Generated with [Claude Code](https://claude.com/claude-code)",
+    ],
+    ["indented", "  Generated with Claude Code", "Generated with Claude Code"],
+  ];
+  const rangeOf = (message: string) =>
+    lintOf({
+      ...good,
+      input: {
+        ...good.input,
+        ledger: baseLedger({
+          repos: [{ commits: [{ sha: head, subject: "ARK-316: fix", message }] }],
+        }),
+      },
+    });
+  for (const [shape, line, named] of trailerLines) {
+    expect({ shape, ...lintLine(good, "PROV02", `${good.body}\n${line}\n`) }).toMatchObject({
+      result: "fail",
+      reason: `the body has "${named}"`,
+    });
+    expect({ shape, ...result(rangeOf(`ARK-316: fix\n\n${line}\n`), "PROV02") }).toMatchObject({
+      result: "fail",
+      reason: `commit abc1234 in the range has "${named}"`,
+    });
+  }
+  // The trailer as the last line of the body and of a commit message, with no final newline.
+  expect(lintLine(good, "PROV02", `${good.body}\nGenerated with Claude Code`)).toMatchObject({
+    result: "fail",
+    reason: 'the body has "Generated with Claude Code"',
   });
   expect(result(rangeOf("ARK-316: fix\n\nGenerated with Claude Code"), "PROV02")).toMatchObject({
     result: "fail",
