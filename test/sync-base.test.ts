@@ -688,6 +688,11 @@ const stringsLine = (...strings: string[]) =>
   `AC string in no tracked file at head: ${strings.map((text) => `FAKE-1/AC1 \`${text}\``).join("; ")}`;
 const absentLine = stringsLine("no-such-string-405", "no-such-other-405");
 const seventyThree = `FAKE-1: ${"s".repeat(65)}`;
+/** The line of a missing evidence file: the path is relative to the run folder and has the local criterion id. */
+const missingLine = (id: string, method: string, found?: string) =>
+  `evidence missing: ${id} (${method}): expected results/evidence/${id}.md${
+    found === undefined ? "" : `; found ${found}: move it to results/evidence/${id}.md`
+  }`;
 
 test("ARK-T379 ark merge-request check lists the problems of stage head, step and final, one line each, and changes nothing", () => {
   useFakeHost();
@@ -706,7 +711,7 @@ test("ARK-T379 ark merge-request check lists the problems of stage head, step an
     ],
   );
   // The step that serves the analysis AC owns the missing file; a step without it does not.
-  const stepLines = [absentLine, manualLine, "evidence missing: AC2 (analysis)"];
+  const stepLines = [absentLine, manualLine, missingLine("AC2", "analysis")];
   expectStage(problem, ["--stage", "step", "--step", "check"], stepLines);
   expectStage(problem, ["--stage", "step"], stepLines);
   expectStage(
@@ -754,7 +759,7 @@ test("ARK-T379 ark merge-request check lists the problems of stage head, step an
     "AC3",
     demonstration.replace("## What the human saw\n\nThe feature.\n\n", ""),
   );
-  const evidenceLines = ["evidence missing: AC2 (analysis)", manualLine];
+  const evidenceLines = [missingLine("AC2", "analysis"), manualLine];
   expectStage(control, ["--stage", "final"], evidenceLines);
   let before = readOnlyRecord(control);
   const refused = arkIn(control, "merge-request", "open", control.runId);
@@ -776,6 +781,113 @@ test("ARK-T379 ark merge-request check lists the problems of stage head, step an
   const refusedString = arkIn(control, "merge-request", "open", control.runId);
   expect(refusedString.err).toBe(`ark: ${absent}\n`);
   expect(readOnlyRecord(control)).toEqual(before);
+});
+
+// --- ARK-626: the evidence missing line names the file it looked for and the file it found ---------------------------
+
+/** An analysis, an inspection and a demonstration criterion with no file, and a test criterion that needs none. */
+const evidenceKinds: FixtureCriterion[] = [
+  { id: "FAKE-1-AC1", method: "analysis", text: "analysis criterion" },
+  { id: "FAKE-1-AC2", method: "inspection", text: "inspection criterion" },
+  { id: "FAKE-1-AC3", method: "demonstration", text: "demonstration criterion" },
+  { id: "FAKE-1-AC4", method: "test", verified_by: ["FAKE-T1"], text: "test criterion" },
+];
+const kindIds = evidenceKinds.map(({ id }) => id);
+const kindRun = () =>
+  syncedRun("feature", {
+    verified: true,
+    criteria: evidenceKinds,
+    steps: [
+      { id: "build", role: "implementer", needs: [], criteria: kindIds },
+      { id: "check", role: "validator", needs: ["build"], criteria: kindIds },
+    ],
+  });
+const kindMethods = [
+  ["AC1", "analysis"],
+  ["AC2", "inspection"],
+  ["AC3", "demonstration"],
+] as const;
+const stepArgs = ["--stage", "step", "--step", "check"];
+
+test("ARK-T789 merge-request check names results/evidence/<AC id>.md for a missing analysis, inspection and demonstration file, and keeps evidence malformed free of it", () => {
+  useFakeHost();
+  const run = kindRun();
+  const lines = [
+    "evidence missing: AC1 (analysis): expected results/evidence/AC1.md",
+    "evidence missing: AC2 (inspection): expected results/evidence/AC2.md",
+    "evidence missing: AC3 (demonstration): expected results/evidence/AC3.md",
+  ];
+  // Stage step: exactly these lines, with the local id, no ticket folder and no line for the test criterion.
+  expectStage(run, stepArgs, lines);
+  // Stage final adds other lines: these three are among them, with the same text.
+  expectStage(run, ["--stage", "final"], lines, false);
+
+  // A written file clears its line; a malformed file prints the malformed line, never the expected text.
+  writeEvidenceFile(run.runDirectory, "AC1", "analysis");
+  writeEvidence(run, "AC2", "## Files\n\n- cli/a.ts:1-10\n\n## Checked against\n\nThe AC text.\n");
+  const printed = expectStage(run, stepArgs, [lines[2]!], false);
+  const malformedLine = outputLines(printed).find((line) => line.includes("AC2"))!;
+  expect(malformedLine).toStartWith("evidence malformed: AC2: ");
+  expect(malformedLine).not.toContain("expected");
+});
+
+test("ARK-T790 merge-request check adds the found path and the move text when the file sits under results/evidence/<ticket id>/, adds it for no other layout, and moves nothing", () => {
+  useFakeHost();
+  const run = kindRun();
+  const evidenceRoot = join(run.runDirectory, "results", "evidence");
+  const place = (name: string, text = "misplaced\n") => {
+    mkdirSync(dirname(join(evidenceRoot, name)), { recursive: true });
+    writeFileSync(join(evidenceRoot, name), text);
+  };
+  const reset = () => rmSync(evidenceRoot, { recursive: true, force: true });
+  /** Each missing line, with the found path of the criteria in `found` (a path under results/evidence/). */
+  const expectedLines = (found: Record<string, string> = {}) =>
+    kindMethods.map(([id, method]) => missingLine(id, method, found[id]));
+
+  // All three files under the ticket's folder: each line names its own file, on stage step and final.
+  for (const [id] of kindMethods) place(`FAKE-1/${id}.md`);
+  const hinted = expectedLines({
+    AC1: "results/evidence/FAKE-1/AC1.md",
+    AC2: "results/evidence/FAKE-1/AC2.md",
+    AC3: "results/evidence/FAKE-1/AC3.md",
+  });
+  expect(hinted[0]).toBe(
+    "evidence missing: AC1 (analysis): expected results/evidence/AC1.md; found results/evidence/FAKE-1/AC1.md: move it to results/evidence/AC1.md",
+  );
+  expectStage(run, stepArgs, hinted);
+  expectStage(run, ["--stage", "final"], hinted, false);
+  // The check moved nothing: the files are where they were and it refuses again with the same lines.
+  expect(readdirSync(evidenceRoot, { recursive: true }).map(String).sort()).toEqual([
+    "FAKE-1",
+    "FAKE-1/AC1.md",
+    "FAKE-1/AC2.md",
+    "FAKE-1/AC3.md",
+  ]);
+  expectStage(run, stepArgs, hinted);
+
+  // Another ticket's folder gives no hint.
+  reset();
+  place("OTHER-9/AC1.md");
+  expectStage(run, stepArgs, expectedLines());
+  // A folder named like the file gives no hint.
+  reset();
+  place("FAKE-1/AC1.md/note.txt");
+  expectStage(run, stepArgs, expectedLines());
+  // Another AC's file gives a hint to its own line only.
+  reset();
+  place("FAKE-1/AC2.md");
+  expectStage(run, stepArgs, expectedLines({ AC2: "results/evidence/FAKE-1/AC2.md" }));
+  // The move that the line asks for clears the line, also while the old file is still there.
+  reset();
+  for (const [id] of kindMethods) place(`FAKE-1/${id}.md`);
+  writeEvidenceFile(run.runDirectory, "AC1", "analysis");
+  const stillMisplaced = expectedLines({
+    AC2: "results/evidence/FAKE-1/AC2.md",
+    AC3: "results/evidence/FAKE-1/AC3.md",
+  }).slice(1);
+  expectStage(run, stepArgs, stillMisplaced);
+  rmSync(join(evidenceRoot, "FAKE-1", "AC1.md"));
+  expectStage(run, stepArgs, stillMisplaced);
 });
 
 const headBlock = (text: string) =>
@@ -821,7 +933,7 @@ test("ARK-T380 ark test prints the head problems under merge-request check, keep
   expect(fullTest(problem).out).not.toContain("merge-request check");
   const refused = arkIn(problem, "merge-request", "open", problem.runId);
   expect(refused.err).toBe(
-    "ark: refused: evidence is not complete\nevidence missing: AC2 (analysis)\n",
+    `ark: refused: evidence is not complete\n${missingLine("AC2", "analysis")}\n`,
   );
 });
 
