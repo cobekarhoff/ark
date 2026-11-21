@@ -94,7 +94,7 @@ export async function readTerminals(timeoutMilliseconds = orcaTimeout(10_000)): 
 /** The result of an Orca read: the value, or the reason it failed. */
 export type OrcaRead<T> = { ok: true; value: T } | { ok: false; reason: string };
 
-/** ARK_ORCA_TIMEOUT_MS overrides every Orca read timeout, and wins over ARK_READER_TIMEOUT_MS, so a test can force a timeout. */
+/** ARK_ORCA_TIMEOUT_MS overrides every Orca read timeout, and wins over ARK_READER_TIMEOUT_MS, so a test can force a timeout; an empty value means use the production limit. */
 export function orcaTimeout(fallbackMilliseconds: number): number {
   const forced = Number(process.env.ARK_ORCA_TIMEOUT_MS);
   return forced > 0 ? forced : fallbackMilliseconds;
