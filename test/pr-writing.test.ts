@@ -1497,6 +1497,7 @@ test("ARK-T783 lint PROV02 passes a body or commit that has `regenerated with` o
   const baseline = others(lintOf(control));
   expect(result(lintOf(control), "PROV02").result).toBe("pass");
 
+  // AC1 of ARK-629: a body whose only match is docs/reference/cli.md regenerated with `bun scripts/cli-reference.ts` inside a criterion line, and for a body with `generated with` in the middle of a sentence, passes PROV02.
   const falseMatches = [
     "- AC1: `docs/reference/cli.md` regenerated with `bun scripts/cli-reference.ts`",
     "The cache file is generated with bun at build time.",
