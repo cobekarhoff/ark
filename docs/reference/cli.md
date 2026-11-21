@@ -660,25 +660,26 @@ refuses, before any push, when a criterion with `manual: true` has no manual ok,
 A quick last test is a gate only for a run with no code file: every `test_cases` entry of plan.yml
 is `reuse` (or there is none) and, in every run worktree, `git diff <base or synced>...HEAD` (three
 dots, the run's own commits) lists only hand-written Markdown, that is a `.md` file (any case)
-outside `test/` that is not a symlink and not in the `generated` list of ark.yml. A missing or
-invalid plan.yml and a failed git diff read as code. The quick run must have passed with every
-check; on that path a criterion that reads `not run` counts as passing, `failing` does not, a manual
-AC still needs its ok, and the test evidence of a `test` AC and the `refactor` base rule are
-skipped, because the full suite is CI's. The body then has the line `Full suite: CI (no code file in
-this diff)` in place of the Tests line. The refresh of an open MR applies the same rule at the
-pushed head. Any other quick last test refuses with `the last test at this head is quick, not a
-gate: run ark test <run>`. `ark run close <run> handed_off` keeps its full-test rule. The MR targets
-`repos.<repo>.base` when ark.yml sets it (`--base <base>` on GitHub, `--target-branch <base>` on
-GitLab), else the branch origin/HEAD names. No command merges. For a project with `merge_requests:
-none` in ark.yml it exits 1 before any command runs and prints `project <project> has
-merge_requests: none: close the run with ark run close <run> handed_off`. It also refuses, before
-any push, when a non-manual AC is not `passing` in the last test (it names each), when a string in
-backticks in an AC text is in no tracked file of a run worktree at HEAD (it names the AC and the
-string; Only a string a file can hold counts: not one with a placeholder (`<`), a `*`, `...`, a
-`:<line>` suffix or the id of its own AC, and no string of a manual AC. A string also passes when it
-names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty path never counts). A
-string that starts with `not:` is a removed string: it must be in no tracked file and name no
-tracked path, and the refusal names it without the prefix.), for `kind: perf` when
+outside a test or fixture folder (a folder named `test`, `tests`, `__tests__`, `fixtures`,
+`__fixtures__`, `__snapshots__`, `testdata` or `evals`) that is not a symlink and not in the
+`generated` list of ark.yml. A missing or invalid plan.yml and a failed git diff read as code. The
+quick run must have passed with every check; on that path a criterion that reads `not run` counts as
+passing, `failing` does not, a manual AC still needs its ok, and the test evidence of a `test` AC
+and the `refactor` base rule are skipped, because the full suite is CI's. The body then has the line
+`Full suite: CI (no code file in this diff)` in place of the Tests line. The refresh of an open MR
+applies the same rule at the pushed head. Any other quick last test refuses with `the last test at
+this head is quick, not a gate: run ark test <run>`. `ark run close <run> handed_off` keeps its
+full-test rule. The MR targets `repos.<repo>.base` when ark.yml sets it (`--base <base>` on GitHub,
+`--target-branch <base>` on GitLab), else the branch origin/HEAD names. No command merges. For a
+project with `merge_requests: none` in ark.yml it exits 1 before any command runs and prints
+`project <project> has merge_requests: none: close the run with ark run close <run> handed_off`. It
+also refuses, before any push, when a non-manual AC is not `passing` in the last test (it names
+each), when a string in backticks in an AC text is in no tracked file of a run worktree at HEAD (it
+names the AC and the string; Only a string a file can hold counts: not one with a placeholder (`<`),
+a `*`, `...`, a `:<line>` suffix or the id of its own AC, and no string of a manual AC. A string
+also passes when it names a tracked file or folder at HEAD (one trailing `/` is dropped; an empty
+path never counts). A string that starts with `not:` is a removed string: it must be in no tracked
+file and name no tracked path, and the refusal names it without the prefix.), for `kind: perf` when
 `results/baseline.md` or `results/compare.md` is missing or empty, and for a `kind: refactor` run
 with a `method: test` AC unless `base_passed` is true. Last, it checks the evidence and refuses,
 before any push and before any event, with `refused: evidence is not complete` and one line for each

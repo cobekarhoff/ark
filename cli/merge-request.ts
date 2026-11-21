@@ -363,11 +363,23 @@ function evidenceProblems(
   return lines;
 }
 
+/** Folder names whose Markdown a program reads as test data: a fixture, an eval input, a snapshot. Such a file is code. */
+const dataFolders = [
+  "test",
+  "tests",
+  "__tests__",
+  "fixtures",
+  "__fixtures__",
+  "__snapshots__",
+  "testdata",
+  "evals",
+];
+
 /**
  * ARK-604: a run with no code file may open its MR on a passing quick test, because CI runs the whole suite on every push.
  * True when the plan has only `reuse` test cases (none, or all) and, in every run worktree, `git diff <base or synced>...HEAD`
  * (three dots: the run's own commits, not what a sync brought in) lists only hand-written Markdown: a path ending `.md` (any
- * case), outside a `test` folder, not in the `generated` list of ark.yml, a plain file on both sides (no symlink). A repo
+ * case), outside a test or fixture folder (`dataFolders`), not in the `generated` list of ark.yml, a plain file on both sides (no symlink). A repo
  * with no run worktree, or with no own commit, lists no file. A missing or invalid plan.yml and a failed git diff read as code.
  */
 export function noCodeRun(directory: string, state: RunState, config: ProjectConfig): boolean {
@@ -396,7 +408,10 @@ export function noCodeRun(directory: string, state: RunState, config: ProjectCon
         !plain.has(oldMode!) ||
         !plain.has(newMode!) ||
         !path.toLowerCase().endsWith(".md") ||
-        path.split("/").slice(0, -1).includes("test") ||
+        path
+          .split("/")
+          .slice(0, -1)
+          .some((folder) => dataFolders.includes(folder)) ||
         generated.has(path)
       )
         return false;
@@ -636,9 +651,8 @@ export function assertShippable(
   heads: Map<string, string>;
   cleanSyncs: CleanSync[];
   security: Map<string, string[]>;
-  quickNoCode: boolean;
 } {
-  const { problems, evidence, heads, cleanSyncs, quickNoCode } = checkStage(
+  const { problems, evidence, heads, cleanSyncs } = checkStage(
     runId,
     project,
     directory,
@@ -651,7 +665,7 @@ export function assertShippable(
   if (evidence.length > 0)
     throw new ArkError(`refused: evidence is not complete\n${evidence.join("\n")}`);
   const security = scanWorktrees(project, events);
-  return { heads, cleanSyncs, security, quickNoCode };
+  return { heads, cleanSyncs, security };
 }
 
 /**
@@ -713,18 +727,9 @@ export function mergeRequestOpen(
     throw new ArkError(`cannot open merge requests while the run is in phase ${state.phase}`);
   }
 
-  const { heads, cleanSyncs, security, quickNoCode } = assertShippable(
-    runId,
-    project,
-    directory,
-    events,
-    state,
-  );
+  const { heads, cleanSyncs, security } = assertShippable(runId, project, directory, events, state);
 
-  const ledger = {
-    ...buildLedger({ runFolder: directory, heads: Object.fromEntries(heads) }),
-    ...(quickNoCode ? { fullSuiteIsCi: true } : {}),
-  };
+  const ledger = buildLedger({ runFolder: directory, heads: Object.fromEntries(heads) });
   const worktrees = worktreeMap(events);
   const plan = loadPlan(directory);
   const { order: graphOrder, upstream } = repoGraph(plan);
