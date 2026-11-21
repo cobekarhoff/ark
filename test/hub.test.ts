@@ -195,6 +195,25 @@ const readDoc = (path: string) => readFileSync(join(root, path), "utf8");
 
 // ---------------------------------------------------------------- ARK-T662 (ARK-480: the write rule of ADR 0009, amended)
 
+/** Asks GET /api/run/<run> until the answer is not 503 (the hub's first Ark read has ended). Each 503 `loading` already waited for the hub's bound, so there is no sleep. */
+async function waitForFirstRead(baseUrl: string, run: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  let last = "no answer";
+  while (Date.now() < deadline) {
+    try {
+      const answer = await fetch(`${baseUrl}/api/run/${run}`, {
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      });
+      const body = await answer.text();
+      if (answer.status !== 503) return;
+      last = `${answer.status} ${body}`;
+    } catch (error) {
+      last = `${last} (then ${String(error)})`;
+    }
+  }
+  throw new Error(`GET /api/run/${run} still answered ${last} after 10 s`);
+}
+
 const companionRoutes = ["approve", "dismiss", "ask"].map((action) => `/api/companions/${action}`);
 
 test("ARK-T662 every route of the hub but open-in-orca and the three companion routes answers POST, PUT, PATCH and DELETE with 404 or 405, and each of those four answers every other method with 405", async () => {
@@ -229,6 +248,8 @@ test("ARK-T662 every route of the hub but open-in-orca and the three companion r
     "/assets/nope.js",
     "/api/companions/nope",
   ];
+
+  await waitForFirstRead(baseUrl, run);
 
   // The routes are live: a GET gets 200, so the write methods below are tried on real routes.
   for (const route of served) {
@@ -285,8 +306,14 @@ test("ARK-T776 while the hub's first Ark read of a large home takes longer than 
   let answers = 1;
   while (answer.status === 503 && Date.now() < deadline) {
     expect(body, `answer ${answers}`).toBe("loading");
-    answer = await fetch(`${baseUrl}/api/run/${run}`);
-    body = await answer.text();
+    try {
+      answer = await fetch(`${baseUrl}/api/run/${run}`, {
+        signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+      });
+      body = await answer.text();
+    } catch {
+      break; // the hub hung past the bound: the check below reports the last answer
+    }
     answers += 1;
   }
   expect(
@@ -1081,15 +1108,7 @@ test("ARK-T662 with orca down the hub keeps serving, open-in-orca answers 400 an
     orcaMode: "down",
   });
   const { baseUrl } = await start();
-  let snapshot: Snapshot;
-  do {
-    await Bun.sleep(100);
-    snapshot = (await (await fetch(`${baseUrl}/api/snapshot`)).json()) as Snapshot;
-  } while (
-    snapshot.sources.orca.ok === false &&
-    snapshot.runs === "unknown" &&
-    !snapshot.sources.ark.ok
-  );
+  await waitForFirstRead(baseUrl, run);
 
   for (const route of ["/", "/nope", "/api/snapshot", `/api/run/${run}`])
     expect((await fetch(`${baseUrl}${route}`)).status, route).toBe(route === "/nope" ? 404 : 200);

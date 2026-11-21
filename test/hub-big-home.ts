@@ -452,7 +452,7 @@ let built: string | undefined;
  * 3,030 tickets read for 13 s at host load 19 on 10 cores (above the 10 s poll bound of ARK-T662), 800 and 1,500 read for
  * 4 s there, and the read grows faster than the size (400 runs and 600 tickets: 1.1 s; 100 and 200: 0.2 s).
  */
-export function bigProjectDirectory(): string {
+function bigProjectDirectory(): string {
   if (!built) {
     built = mkdtempSync(join(tmpdir(), "ark-big-project-"));
     writeBigProject(built, runModels().slice(0, 800), ticketModels().slice(0, 1500));
