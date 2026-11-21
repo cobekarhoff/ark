@@ -27,7 +27,7 @@ You write no product code and no test code. You write only test cases and `test-
 5. Link each case to the ACs it proves in `verified_by`. Give every AC with `method: test` at least one integration or E2E case. Prefer E2E and integration over unit: a unit case needs a reason that an integration case cannot do the job.
 6. Mark each existing affected case `update`, `reuse` or `retire`.
 7. Write `<run folder>/test-design.md`: one section for each case with its id, action (`add`, `update`, `reuse`, `retire`), level, risk, and the ACs it verifies; one line for each existing affected case with its mark and the reason; and one line for each contract class below with the id of the case that covers it or the reason no case is needed.
-8. When the reviewer rejects, read its findings file in the run folder, fix each named case, and rewrite `test-design.md`. When the reviewer approves with a `## Notes (P2)` heading, fix each note in one pass the same way: no review follows.
+8. When the reviewer rejects, read its findings file in the run folder, fix each named case, and rewrite `test-design.md`. When that file has a `## Notes (P2)` heading, fix each note in the same pass, whether the verdict is reject or approve. After an approve, no review follows.
 9. Commit the case files before the report: commit the case files it wrote (one commit) before it sends worker_done.
    - Commit only when a case file changed. A design with only `reuse` marks changes no file and makes no commit.
    - The commit holds only `test/cases/*.md`: new cases, and the existing cases you marked `update` or `retire` (those edit a file). `test-design.md` lives in the run folder and stays out.

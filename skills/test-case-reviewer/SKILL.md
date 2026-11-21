@@ -35,7 +35,7 @@ A sentence of a case is each sentence in its objective, preconditions, steps, ex
 
 - **First review of a case:** check every sentence of the case once against the rules above and list every false one in this review. Do not stop at the first finding.
 - **Later review of the same case:** reject only for a sentence that the last change made false, or for a listed sentence that is still false, and only when that sentence names a wrong exit code, count, test title, file path or AC link. The last change is what changed after the latest earlier findings file of the same pass: in pass 1 what the writer changed, in pass 2 what the diff changed (its `Reviewed head:` line, when that file has one, names the commit). A sentence that the earlier review read and did not list is not a finding now.
-- **Notes in a later review:** List every other false or too-wide sentence of a later review under `## Notes (P2)`. A note does not change the verdict. The writer fixes it before the validator starts, and no further review follows. In pass 2 the case has no writer: the validator fixes the notes, in the same round as any rejection, or in one fix pass when the review approves, and no further review follows.
+- **Notes in a later review:** List every other false or too-wide sentence of a later review under `## Notes (P2)`. A note does not change the verdict. The writer fixes it before the validator starts, in the same pass as any rejection of that review. When the review approves, no further review follows. In pass 2 the case has no writer: the validator fixes the notes, in the same round as any rejection, or in one fix pass when the review approves, and no further review follows.
 - **What a later review keeps:** Rules 1 to 4 of pass 1 and the structure checks still reject in a later review. A note listed in an earlier file never rejects in a later review, also when the sentence is still false.
 - Find the earlier review in `findings/test-case-review-<n-1>.md` and the files before it, in the same run folder. They are the only record of which sentences were listed: a case of `test_case_source: zephyr` is a draft with no other record. A case is in its first review of a pass only when no earlier findings file of that pass exists in the run folder, or when it was added, or rewritten from scratch, after the latest such file. Every other case is in a later review, whether or not an earlier file names it: a case that an earlier review read and did not list passed that review. The fix pass of notes starts no review.
 
@@ -82,12 +82,12 @@ Each rejection names the case id (or the test file and title in pass 2), the rul
 - ARK-T21: no real risk (rule 1). Evidence: risk says "check the config", names no defect.
 ```
 
-Each note, in a later review, is one list line under the heading `## Notes (P2)`: the case id (or the test file and title in pass 2), the false sentence and what is false. It does not name a rule. Example:
+Each note, in a later review, is one list line under the heading `## Notes (P2)`: the case id (or the test file and title in pass 2), the false text copied verbatim as one span in double quotes, and what is false. It does not name a rule. The run lead greps the span in the case file to check the fix, so copy it character for character from one line of the case, never paraphrase or quote it from memory, and take a span that has no `"`, `$`, backtick or backslash (a `'` is fine). Example:
 
 ```
 ## Notes (P2)
 
-- ARK-T7: the objective says the negative control "fails on the empty file"; `bun test test/x.test.ts -t 'empty'` prints 0 tests run. Fix the sentence; this does not change the verdict.
+- ARK-T7: "the negative control fails on the empty file" is false: `bun test test/x.test.ts -t 'empty'` prints 0 tests run. Fix the sentence; this does not change the verdict.
 ```
 
 End the file with exactly one verdict line:
