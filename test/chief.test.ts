@@ -714,7 +714,7 @@ test("ARK-244-AC2 chief handover refuses and starts nothing when no Master Chief
   expect(callsTo("agent", "launch")).toHaveLength(0);
 });
 
-test("ARK-T687 chief handover through spawnArk starts the new Master Chief when terminal list answers after 2.5 s, and fails with Orca did not answer when the test holds the limit at 2 s", () => {
+test("ARK-T687 ark chief handover started through spawnArk starts the new Master Chief when the fake orca answers its terminal list after 2.5 s, and fails with Orca did not answer when the test sets the Orca limit to 2 s", () => {
   setScenario({
     runs: [chiefOrcaRun],
     terminals: [{ handle: "term_chief", worktreePath: workspace, connected: true }],
@@ -722,6 +722,7 @@ test("ARK-T687 chief handover through spawnArk starts the new Master Chief when 
     delay: { verb: "terminal list", seconds: 2.5 },
   });
   expect(process.env.ARK_READER_TIMEOUT_MS).toBeUndefined();
+  expect(process.env.ARK_ORCA_TIMEOUT_MS).toBeUndefined();
 
   const start = performance.now();
   const late = ark("chief", "handover", "--project", project);
@@ -733,7 +734,7 @@ test("ARK-T687 chief handover through spawnArk starts the new Master Chief when 
   expect(callsTo("agent", "launch")).toHaveLength(1);
 
   // The test's own value wins over the one spawnArk sets, and the delay is real: 2 s cuts the read.
-  process.env.ARK_READER_TIMEOUT_MS = "2000";
+  process.env.ARK_ORCA_TIMEOUT_MS = "2000";
   const cut = ark("chief", "handover", "--project", project);
   expect(cut.code).not.toBe(0);
   expect(cut.err).toContain("Orca did not answer");
