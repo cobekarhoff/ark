@@ -164,19 +164,22 @@ is pending, never while the newest reviewer findings file holds a P0 or P1 findi
 line and no dropped line for it under `## Run lead decision` (a --merge start too), and the refusal
 past the cap is the usual one. For a `bug` run with a `method: test` AC it refuses an implementer
 start with `bug run: record a failing ark test of the ACs before the fix` until a `test.completed`
-has every non-manual AC `failing`; a bug run with no `method: test` AC has no such rule. A `finish`
-of a validator step, without --failed and after the refusal for uncommitted changes, runs stage
-`step` of `ark merge-request check` for the ACs of the step and is refused, with no event written,
-when it lists a problem: an AC string in no tracked file (counted once every implementer step that
-serves the AC has finished), a malformed evidence file, or a missing evidence file of an `analysis`
-AC. A `finish` of an implementer step, without --failed and after the refusal for uncommitted
-changes, runs the plan membership check of `ark test` on the run's diff for the bun suites of the
-step's repo and is refused, with no event written, when a changed test holds a case id that
-`test_cases` of plan.yml does not list: it prints each missing case id with its test file and the
-hint to add the ids to `test_cases`, run `ark plan check <run>` and finish again. `--failed`,
-`--not-started`, a step that started with --merge, a missing or invalid plan.yml and a scan that
-fails are not refused. It never refuses for the MR title, a manual criterion with no answer, the
-last line `human: ok` or `reviewer:`, or an AC the step does not serve.
+has every non-manual AC `failing`, except the guard ACs (`guard: true` in `criteria.yml`, or `ark
+criteria amend <run> <AC id> --guard`), which need no status; it refuses an implementer start with
+`bug run: every AC is a guard; mark the AC that shows the bug` when every `method: test` AC is a
+guard. A bug run with no `method: test` AC has no such rule. A `finish` of a validator step, without
+--failed and after the refusal for uncommitted changes, runs stage `step` of `ark merge-request
+check` for the ACs of the step and is refused, with no event written, when it lists a problem: an AC
+string in no tracked file (counted once every implementer step that serves the AC has finished), a
+malformed evidence file, or a missing evidence file of an `analysis` AC. A `finish` of an
+implementer step, without --failed and after the refusal for uncommitted changes, runs the plan
+membership check of `ark test` on the run's diff for the bun suites of the step's repo and is
+refused, with no event written, when a changed test holds a case id that `test_cases` of plan.yml
+does not list: it prints each missing case id with its test file and the hint to add the ids to
+`test_cases`, run `ark plan check <run>` and finish again. `--failed`, `--not-started`, a step that
+started with --merge, a missing or invalid plan.yml and a scan that fails are not refused. It never
+refuses for the MR title, a manual criterion with no answer, the last line `human: ok` or
+`reviewer:`, or an AC the step does not serve.
 ```
 
 ### run close
@@ -251,8 +254,8 @@ change.
 ### criteria amend
 
 ```text
-ark criteria amend <run> <criterion id> (<file> [--carry-manual <words>] | --verified-by <case ids>)
-    --reason <text> [--project <name>]
+ark criteria amend <run> <criterion id> (<file> [--carry-manual <words>] | --verified-by <case ids>
+    | --guard | --no-guard) --reason <text> [--project <name>]
 
 Writes the text in <file> as the new text of one criterion in the run's ticket.md (frontmatter and
 table row) and records criteria.amended with the criterion, the old text, the new text, `by: human`
@@ -269,11 +272,18 @@ of the criterion in ticket.md and records criteria.amended with `verified_by_old
 It refuses an id that has no active `test/cases/<id>.md` at HEAD of the run's worktree (a file only
 in the working tree or the index, or a retired case, is refused; the message names the id), an empty
 entry, a repeated id and the same phase, criterion and --reason cases as the text form, and it
-writes nothing on a refusal. Use it when test case ids are renumbered. Before the plan is approved
-it also clears the plan check: run ark plan check again so plan.md lists the amendment. After plan
-approval the run keeps its phase and approval and the next ark test judges the new text: do not run
-ark plan check again, it can change the plan hash and reset the approval. ark status lists each
-amendment with its reason.
+writes nothing on a refusal. Use it when test case ids are renumbered. Third form: `--guard` adds
+`guard: true` to the criterion in ticket.md and `--no-guard` removes it, and each records
+criteria.amended with the criterion, `guard: true` or `guard: false`, `by: human` and --reason; a
+guard needs no failing proof in a bug run's red proof (`ark run step <run> <implementer step>
+start`). The text and every manual answer stay. It refuses `--guard` on a criterion whose method is
+not `test` and in a run whose kind is not `bug`, with the message naming the AC, `--guard` on a
+criterion that is a guard, `--no-guard` on one that is not, and the same phase, criterion and
+--reason cases as the text form, and it writes nothing on a refusal. Before the plan is approved the
+text and `--verified-by` forms also clear the plan check: run ark plan check again so plan.md lists
+the amendment. After plan approval the run keeps its phase and approval and the next ark test judges
+the new text: do not run ark plan check again, it can change the plan hash and reset the approval.
+ark status lists each text amendment with its reason.
 ```
 
 ### strategy record
@@ -615,15 +625,20 @@ state does not allow, and refuses plan approve while the plan has an open decisi
 id>/AC<k>` and `<ticket id>-AC<k>` name a criterion. `criteria accept` re-reads the ticket and
 refuses a new-scheme AC with `method: test` and an empty `verified_by` list, and names the AC.
 `criteria accept --criteria <file>` reads the criteria from a YAML file instead: a mapping with one
-key, `acceptance_criteria`, a list of `{id, text, method, verified_by}`; a relative path is read
-from the run folder, an absolute path as it is. It refuses, with an `ark: <reason>` line and no
-write, a file that is missing or not YAML, an unknown key at the top level or in a criterion
-(`manual: true` too: write `method: demonstration`), a duplicate id, an unknown method, an empty
-list and a `method: test` criterion with an empty `verified_by` list. Otherwise it replaces the
-`acceptance_criteria` block of the ticket file (every other line and the body stay, the table in the
-body too), then copies the ticket to the run folder and records the gate as `criteria accept` does.
-It works only with `criteria accept`, in the phase `awaiting_criteria`; with any other gate, answer
-or phase it refuses and writes nothing.
+key, `acceptance_criteria`, a list of `{id, text, method, verified_by, guard}`; a relative path is
+read from the run folder, an absolute path as it is. `guard: true` marks a guard: a `method: test`
+AC of a bug run that holds before and after the fix, so the bug run's red proof (`ark run step <run>
+<implementer step> start`) does not need it `failing`; the key is optional, `guard: false` writes
+nothing, and a value that is not `true` or `false` is refused. `criteria accept` records the guard
+ids in `criteria.updated` (`guards`). It refuses `guard: true` on a criterion whose method is not
+`test` and in a run whose kind is not `bug`, and names the AC, on both `criteria accept` paths. It
+refuses, with an `ark: <reason>` line and no write, a file that is missing or not YAML, an unknown
+key at the top level or in a criterion (`manual: true` too: write `method: demonstration`), a
+duplicate id, an unknown method, an empty list and a `method: test` criterion with an empty
+`verified_by` list. Otherwise it replaces the `acceptance_criteria` block of the ticket file (every
+other line and the body stay, the table in the body too), then copies the ticket to the run folder
+and records the gate as `criteria accept` does. It works only with `criteria accept`, in the phase
+`awaiting_criteria`; with any other gate, answer or phase it refuses and writes nothing.
 ```
 
 ### escalate
