@@ -921,7 +921,6 @@ await budget.take(6).catch(() => {});`;
   // ARK-618: the scenario waits poll the marker files and give up with a named error long before the 90 s test timeout.
   const defaultWaitLimitMs = 20_000;
   const defaultWaitTestTimeoutMs = 25_000;
-  const timerSlackMs = 100; // a timer may fire a little early against the performance clock
 
   test(
     "ARK-T774 a scenario wait for a marker that never appears gives up at its 20 s default limit, before the test timeout, and its error names the missing marker and lists the files in the scenario home",
@@ -935,7 +934,7 @@ await budget.take(6).catch(() => {});`;
         );
         const elapsedMs = performance.now() - started;
         expect(error).toBeInstanceOf(Error);
-        expect(elapsedMs).toBeGreaterThanOrEqual(defaultWaitLimitMs - timerSlackMs);
+        expect(elapsedMs).toBeGreaterThanOrEqual(defaultWaitLimitMs);
         expect(error!.message).toContain("ghost-running");
         expect(error!.message).toContain("present-running");
       });
@@ -944,24 +943,26 @@ await budget.take(6).catch(() => {});`;
   );
 
   const lostEventTestTimeoutMs = 5_000;
+  // Restored in afterEach, not in a finally: a test that times out never runs its finally, and the stub would break every later test that uses watch.
+  let lostWatch: { mockRestore(): void } | undefined;
+  afterEach(() => {
+    lostWatch?.mockRestore();
+    lostWatch = undefined;
+  });
 
   test(
     "ARK-T775 a scenario wait sees a marker file created while the fs.watch of the scenario home delivers no event, within a 1 s limit",
     async () => {
       // A watcher whose listener never runs: only a poll of the home can end the wait.
-      const lostWatch = spyOn(nodeFs, "watch").mockImplementation(
+      lostWatch = spyOn(nodeFs, "watch").mockImplementation(
         () => ({ close() {}, on() {} }) as unknown as FSWatcher,
       );
-      try {
-        await scenario(async ({ home, waitForWithin }) => {
-          const wait = waitForWithin(1000, "late-running");
-          expect(Bun.peek.status(wait)).toBe("pending");
-          writeFileSync(join(home, "late-running"), "");
-          await wait;
-        });
-      } finally {
-        lostWatch.mockRestore();
-      }
+      await scenario(async ({ home, waitForWithin }) => {
+        const wait = waitForWithin(1000, "late-running");
+        expect(Bun.peek.status(wait)).toBe("pending");
+        writeFileSync(join(home, "late-running"), "");
+        await wait;
+      });
     },
     lostEventTestTimeoutMs,
   );
