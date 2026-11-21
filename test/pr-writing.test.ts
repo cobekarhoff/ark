@@ -1297,7 +1297,11 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
       }),
     },
   });
-  expect(result(inRange, "PROV02")).toMatchObject({
+  expect(result(rangeOf("ARK-316: fix\n\nGenerated with Claude Code"), "PROV02")).toMatchObject({
+    result: "fail",
+    reason: 'commit abc1234 in the range has "Generated with Claude Code"',
+  });
+  expect(result(rangeOf(`ARK-316: fix\n\n${modelTrailerLine}`), "PROV02")).toMatchObject({
     result: "fail",
     reason: expect.stringMatching(/commit abc1234 in the range has "Co-Authored-By/),
   });
@@ -1454,6 +1458,50 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
   expect(lintLine(good, "STALE01", good.body, { bodyHash: hashBody(good.body) }).result).toBe(
     "pass",
   );
+});
+
+test("ARK-T783 lint PROV02 passes a body or commit that has `regenerated with` or a mid-sentence `generated with`, and still fails the same body once it holds a `Generated with` trailer line", () => {
+  const control = loadFixture("PROV02", "control");
+  const bullet = "- The body is rebuilt from the run on every new head.";
+  expect(control.body).toContain(bullet);
+  const withLine = (line: string) => control.body.replace(bullet, line);
+  const others = (results: LintResult[]) => results.filter((entry) => entry.id !== "PROV02");
+  const baseline = others(lintOf(control));
+  expect(result(lintOf(control), "PROV02").result).toBe("pass");
+
+  const falseMatches = [
+    "- AC1: `docs/reference/cli.md` regenerated with `bun scripts/cli-reference.ts`",
+    "The cache file is generated with bun at build time.",
+    "Regenerated with bun scripts/cli-reference.ts",
+    "generated with bun",
+    "The page is Generated with care.",
+    "Generated without review",
+  ];
+  for (const line of falseMatches) {
+    const results = lintOf(control, { body: withLine(line) });
+    expect({ line, ...result(results, "PROV02") }).toMatchObject({ line, result: "pass" });
+    expect(others(results)).toEqual(baseline);
+  }
+
+  const commitMessage =
+    "ARK-316: fix\n\ndocs/reference/cli.md regenerated with `bun scripts/cli-reference.ts`";
+  const inRange = lintOf({
+    ...control,
+    input: {
+      ...control.input,
+      ledger: baseLedger({
+        repos: [{ commits: [{ sha: head, subject: "ARK-316: fix", message: commitMessage }] }],
+      }),
+    },
+  });
+  expect(result(inRange, "PROV02").result).toBe("pass");
+
+  // Negative control: the same false-match line plus a trailer line fails and names the trailer.
+  const trailerBody = `${withLine(falseMatches[0]!)}\nGenerated with Claude Code\n`;
+  expect(result(lintOf(control, { body: trailerBody }), "PROV02")).toMatchObject({
+    result: "fail",
+    reason: 'the body has "Generated with Claude Code"',
+  });
 });
 
 const judgment: [string, RegExp][] = [
