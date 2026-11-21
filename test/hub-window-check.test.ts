@@ -123,9 +123,10 @@ test("ARK-T777 a window of 25 fails", async () => {
   failureOf(checkWindows, sourcesWith(healthy(20), { 0: { windows: [25, 20, 20], churn: 20 } }));
 });
 
-test("ARK-T777 the baseline is the largest of the three windows, not the first or the mean", async () => {
+test("ARK-T777 the baseline is the largest of the three windows, not the last, the smallest or the mean", async () => {
   const checkWindows = await loadWindowCheck();
-  // W 1,1,3 churn 11 (the AC1 row above) owns the first, smallest and mean baselines. The large window first owns the last-window baseline: limit 12 for the largest, 4 for the last or smallest, 6.67 for the mean.
+  // The large window comes first: limit 12 for the largest, 4 for the last or smallest, 6.67 for the mean.
+  // W 1,1,3 churn 11 (the AC1 row above) owns the first-window baseline.
   check(checkWindows, sourcesWith(healthy(4), { 0: { windows: [3, 1, 1], churn: 11 } }));
 });
 
@@ -169,5 +170,6 @@ test("ARK-T241 the settle wait fails at its bound with the counts it sampled whe
     (error: Error) => error,
   );
   expect(failure, "the wait must fail").toBeInstanceOf(Error);
+  expect(failure!.message).toContain("within 400 ms");
   expect(failure!.message).toContain("counts sampled: 1000");
 });
