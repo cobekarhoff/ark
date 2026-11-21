@@ -8,6 +8,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,6 +43,8 @@ const hostVariables = [
   "FAKE_TOKEN_OWNERS",
   "FAKE_GH_NO_ATTACH",
   "FAKE_GLAB_UPLOAD_FAIL",
+  "FAKE_GH_VISIBILITY",
+  "FAKE_GLAB_VISIBILITY",
 ];
 
 // A token made at run time, so no file of the repo holds a string a secret scanner would flag.
@@ -3084,7 +3087,13 @@ const shotPath = (testCase: string, name = "a.png") =>
 /** A one-repo run with real PNG bytes in 2 screenshots, gathered and linted by the scripts in the repo worktree. */
 function uploadRun(
   host: HostName,
-  options: { shots?: boolean; log?: string; mutateBody?: (body: string) => string } = {},
+  options: {
+    shots?: boolean;
+    log?: string;
+    mutateBody?: (body: string) => string;
+    /** Gather with the run folder reached through a symlink, so its path in the ledger is not its real path. */
+    viaSymlink?: boolean;
+  } = {},
 ) {
   const withShots = options.shots !== false;
   const run = makeRun({
@@ -3102,7 +3111,12 @@ function uploadRun(
   }
   if (options.log !== undefined)
     writeFileSync(join(run.directory, "results/evidence/ARK-T1/head/command.log"), options.log);
-  expect(runScript("gather", repo, "--run-dir", run.directory).code).toBe(0);
+  let runFolder = run.directory;
+  if (options.viaSymlink) {
+    runFolder = join(realpathSync(mkdtempSync(join(tmpdir(), "pr-writing-link-"))), "run-link");
+    symlinkSync(run.directory, runFolder);
+  }
+  expect(runScript("gather", repo, "--run-dir", runFolder).code).toBe(0);
   const bodyFile = join(repo, ".pr-writing", "body.md");
   if (options.mutateBody)
     writeFileSync(bodyFile, options.mutateBody(readFileSync(bodyFile, "utf8")));
@@ -3128,7 +3142,7 @@ function uploadRun(
     join(run.directory, shotPath("ARK-T1")),
     join(run.directory, shotPath("ARK-T2", "b.png")),
   ];
-  return { ...run, repo, bodyFile, post, openMergeRequest, shots, title };
+  return { ...run, runFolder, repo, bodyFile, post, openMergeRequest, shots, title };
 }
 
 const hostWrites = () => writeCalls().filter((call) => !call.argv.includes("--help"));
@@ -3272,6 +3286,359 @@ test("ARK-T286 post_mr exits 2 and posts nothing when gh has no --attach, and on
   expect(none.post().code).toBe(0);
   expect(hostWrites()).toHaveLength(1);
 });
+
+// --- ARK-T778, ARK-T779, ARK-T780: post_mr reads the repo visibility before it uploads ----------
+
+type HostState = { number: number; body: string }[];
+const hostState = (): HostState =>
+  existsSync(`${logFile}.state`) ? JSON.parse(readFileSync(`${logFile}.state`, "utf8")) : [];
+const lastJson = (stdout: string) => JSON.parse(stdout.trim().split("\n").at(-1)!);
+/** What the fake `gh` or `glab` answers to the visibility read (see test/fixtures/merge-request). */
+function setVisibility(host: HostName, answer: string) {
+  process.env[host === "github" ? "FAKE_GH_VISIBILITY" : "FAKE_GLAB_VISIBILITY"] = answer;
+}
+
+/** A file that the run folder holds and that the body names (unless `named` is false); `linkTo` makes it a symlink. */
+type Media = { target: string; linkTo?: string; named?: boolean };
+
+/** An `uploadRun` whose body also names each of `media`, written with real PNG bytes (or a symlink) under the run folder. */
+function mediaRun(host: HostName, media: Media[], options: { viaSymlink?: boolean } = {}) {
+  const images = media
+    .filter((item) => item.named !== false)
+    .map((item) => `![${item.target.split("/").at(-1)}](${item.target})`)
+    .join("\n\n");
+  const run = uploadRun(host, {
+    viaSymlink: options.viaSymlink,
+    mutateBody: (body) => body.replace(/^(!\[.*)$/m, (line) => `${line}\n\n${images}`),
+  });
+  const files: string[] = [];
+  for (const item of media) {
+    const file = resolve(run.runFolder, item.target);
+    mkdirSync(dirname(file), { recursive: true });
+    if (item.linkTo) symlinkSync(resolve(run.runFolder, item.linkTo), file);
+    else writeFileSync(file, pngBytes(9));
+    if (item.named !== false) files.push(file);
+  }
+  return { ...run, files };
+}
+
+/**
+ * A refused post: exit 2, the message names each group of files (one name of each group) and matches `visibility`,
+ * and nothing was sent or written on the host.
+ */
+function expectRefused(
+  posted: { code: number | null; stdout: string; stderr: string },
+  expected: { context: string; named: string[][]; visibility: RegExp },
+) {
+  const { context } = expected;
+  expect({ context, code: posted.code, err: posted.stderr }).toMatchObject({ context, code: 2 });
+  for (const group of expected.named)
+    expect({ context, named: group.some((name) => posted.stderr.includes(name)) }).toEqual({
+      context,
+      named: true,
+    });
+  expect({ context, err: posted.stderr }).toEqual({
+    context,
+    err: expect.stringMatching(expected.visibility),
+  });
+  expect(lastJson(posted.stdout)).toMatchObject({ posted: false });
+  expect({
+    context,
+    attached: loggedCalls().filter((call) => call.argv.includes("--attach")),
+  }).toEqual({
+    context,
+    attached: [],
+  });
+  expect({ context, writes: hostWrites() }).toEqual({ context, writes: [] });
+  expect({ context, uploads: uploads() }).toEqual({ context, uploads: [] });
+}
+
+const checkpointNames = [shotPath("ARK-T1"), shotPath("ARK-T2", "b.png")];
+
+for (const update of [false, true])
+  test(`ARK-T778 post_mr on a public GitHub repo exits 2 and sends no file for a screenshot outside a checkpoint folder on ${update ? "update" : "create"}, and a private repo uploads the same body`, () => {
+    const context = update ? "update" : "create";
+    const run = mediaRun("github", [
+      { target: "results/screenshots/demo.png" },
+      { target: "notes/live.png" },
+    ]);
+    if (update) run.openMergeRequest();
+    setVisibility("github", "PUBLIC");
+    const refused = run.post();
+    expectRefused(refused, {
+      context,
+      named: [["demo.png"], ["live.png"]],
+      visibility: /public/i,
+    });
+    // A refusal about the visibility is not a refusal about a token.
+    expect(lastJson(refused.stdout).error).not.toBe("not authenticated");
+    for (const name of checkpointNames) expect(refused.stderr).not.toContain(name);
+    expect(hostState()).toEqual(
+      update ? [expect.objectContaining({ body: "Hand written intro.\n" })] : [],
+    );
+
+    // The control: the same body posts on a private repo, so the refusal above is the visibility rule.
+    setVisibility("github", "PRIVATE");
+    const posted = run.post();
+    expect({ context, code: posted.code, err: posted.stderr }).toMatchObject({ context, code: 0 });
+    expect(hostWrites()).toHaveLength(1);
+    const [write] = hostWrites();
+    expect(write.argv.slice(0, 2)).toEqual(["pr", update ? "edit" : "create"]);
+    expect(attachedFiles(write).sort()).toEqual([...run.shots, ...run.files].sort());
+    for (const file of attachedFiles(write)) expect(write.body).toContain(file);
+  });
+
+// Each variant is one file with real bytes that the body names beside the two checkpoint images.
+const checkpointBoundaries: {
+  label: string;
+  named: string[];
+  media: () => Media[];
+  /** Whether a private repo attaches it (a file outside the run folder is not uploaded to any repo). */
+  attached: boolean;
+}[] = [
+  {
+    label: "(a) a symlink in screenshots/ to a demonstration screenshot",
+    named: ["link.png", "demo.png"],
+    media: () => [
+      { target: "results/screenshots/demo.png", named: false },
+      { target: shotPath("ARK-T1", "link.png"), linkTo: "results/screenshots/demo.png" },
+    ],
+    attached: true,
+  },
+  {
+    label: "(b) a .. segment from screenshots/ to a demonstration screenshot",
+    named: ["demo.png"],
+    media: () => [
+      { target: "results/evidence/ARK-T1/head/screenshots/../../../../screenshots/demo.png" },
+    ],
+    attached: true,
+  },
+  {
+    label: "(c) a video in screenshots/",
+    named: ["clip.mp4"],
+    media: () => [{ target: shotPath("ARK-T1", "clip.mp4") }],
+    attached: true,
+  },
+  {
+    label: "(d) a file beside screenshots/",
+    named: ["x.png"],
+    media: () => [{ target: "results/evidence/ARK-T1/head/x.png" }],
+    attached: true,
+  },
+  {
+    label: "(e) screenshots/ under a side that is not head or base",
+    named: ["c.png"],
+    media: () => [{ target: "results/evidence/ARK-T1/demo/screenshots/c.png" }],
+    attached: true,
+  },
+  {
+    label: "(f) an existing image outside the run folder, named by its absolute path",
+    named: ["outside.png"],
+    media: () => [
+      {
+        target: join(
+          realpathSync(mkdtempSync(join(tmpdir(), "pr-writing-outside-"))),
+          "outside.png",
+        ),
+      },
+    ],
+    attached: false,
+  },
+];
+
+for (const variant of checkpointBoundaries) {
+  test(`ARK-T778 post_mr on a public GitHub repo refuses ${variant.label}, and a private repo posts the same body`, () => {
+    const run = mediaRun("github", variant.media());
+    setVisibility("github", "PUBLIC");
+    expectRefused(run.post(), {
+      context: variant.label,
+      named: [variant.named],
+      visibility: /public/i,
+    });
+    expect(hostState()).toEqual([]);
+
+    setVisibility("github", "PRIVATE");
+    const posted = run.post();
+    expect({ code: posted.code, err: posted.stderr }).toMatchObject({ code: 0 });
+    const [write] = hostWrites();
+    expect(attachedFiles(write).sort()).toEqual(
+      (variant.attached ? [...run.shots, ...run.files] : run.shots).sort(),
+    );
+  });
+}
+
+test("ARK-T778 post_mr outside an Ark run sends no local image to a public repo, even at a checkpoint-shaped path", () => {
+  const run = makeRun({
+    host: "github",
+    repos: [{ name: "repos/a", changes: { "cli/a.ts": "from a\n" } }],
+  });
+  const repo = realpathSync(run.paths["repos/a"]);
+  mkdirSync(join(repo, "results/evidence/ARK-T1/head/screenshots"), { recursive: true });
+  writeFileSync(join(repo, shotPath("ARK-T1")), pngBytes(1));
+  git(repo, "add", "-A");
+  git(repo, "commit", "-m", "ARK-9: add a screenshot");
+  const gathered = runScript("gather", repo, "--base", "main");
+  expect({ code: gathered.code, out: gathered.stdout, err: gathered.stderr }).toMatchObject({
+    code: 0,
+  });
+  const bodyFile = join(repo, ".pr-writing", "body.md");
+  writeFileSync(
+    bodyFile,
+    readFileSync(bodyFile, "utf8").replace(
+      /^(## .*)$/m,
+      (line) => `${line}\n\n![a](${shotPath("ARK-T1")})`,
+    ),
+  );
+  const title = "ARK-9: Show units";
+  const linted = runScript("lint_body", repo, "--title", title);
+  expect({ code: linted.code, out: linted.stdout }).toMatchObject({ code: 0 });
+
+  setVisibility("github", "PUBLIC");
+  expectRefused(runScript("post_mr", repo, "--confirmed", "--title", title), {
+    context: "no run folder",
+    named: [["a.png"]],
+    visibility: /public/i,
+  });
+  expect(hostState()).toEqual([]);
+});
+
+const nestedCheckpoint: Media[] = [{ target: "results/evidence/ARK-T2/base/screenshots/x/c.png" }];
+
+for (const update of [false, true])
+  test(`ARK-T779 post_mr on a public GitHub repo attaches head, base and nested checkpoint screenshots of a symlinked run folder on ${update ? "update" : "create"}`, () => {
+    setVisibility("github", "PUBLIC");
+    const context = update ? "update" : "create";
+    const run = mediaRun("github", nestedCheckpoint, { viaSymlink: true });
+    expect(run.runFolder).not.toBe(realpathSync(run.runFolder));
+    if (update) run.openMergeRequest();
+    const posted = run.post();
+    expect({ context, code: posted.code, err: posted.stderr }).toMatchObject({ context, code: 0 });
+    expect(hostWrites()).toHaveLength(1);
+    const [write] = hostWrites();
+    expect(write.argv.slice(0, 2)).toEqual(["pr", update ? "edit" : "create"]);
+    const real = (files: string[]) => files.map((file) => realpathSync(file)).sort();
+    expect(real(attachedFiles(write))).toEqual(real([...run.shots, ...run.files]));
+    expect(attachedFiles(write)).toHaveLength(3);
+    const [stored] = hostState();
+    for (const file of attachedFiles(write)) expect(stored.body).toContain(file);
+  });
+
+/** A GitLab post that uploaded `expected` (by file name) before it wrote the MR, and whose description names each upload URL. */
+function expectGitlabUploads(files: string[], expected: string[]) {
+  expect(
+    uploads()
+      .map((call) => String(call.body))
+      .sort(),
+  ).toEqual(expected);
+  const [write] = hostWrites();
+  expect(write.argv.slice(0, 2)).toEqual(["mr", "create"]);
+  const calls = loggedCalls().map((call) => call.argv.join(" "));
+  expect(calls.findLastIndex((call) => call.includes("projects/:fullpath/uploads"))).toBeLessThan(
+    calls.indexOf(write.argv.join(" ")),
+  );
+  const description = write.argv[write.argv.indexOf("--description") + 1];
+  for (const file of files) {
+    const sha = new Bun.CryptoHasher("sha256")
+      .update(readFileSync(file))
+      .digest("hex")
+      .slice(0, 12);
+    expect(description).toContain(`](/uploads/${sha}/${file.split("/").at(-1)})`);
+  }
+  expect(description).not.toContain("results/");
+}
+
+test("ARK-T779 post_mr on a public GitLab project uploads head, base and nested checkpoint screenshots of a symlinked run folder and posts their URLs", () => {
+  setVisibility("gitlab", "public");
+  const run = mediaRun("gitlab", nestedCheckpoint, { viaSymlink: true });
+  const posted = run.post();
+  expect({ code: posted.code, err: posted.stderr }).toMatchObject({ code: 0 });
+  expectGitlabUploads([...run.shots, ...run.files], ["a.png", "b.png", "c.png"]);
+});
+
+const video: Media[] = [{ target: "results/screenshots/flow.mp4" }];
+
+for (const answer of ["internal", "public"])
+  test(`ARK-T780 post_mr on a ${answer} GitLab project exits 2 and uploads nothing for a video outside a checkpoint folder`, () => {
+    setVisibility("gitlab", answer);
+    const run = mediaRun("gitlab", video);
+    expectRefused(run.post(), {
+      context: answer,
+      named: [["flow.mp4"]],
+      visibility: new RegExp(answer, "i"),
+    });
+    expect(hostState()).toEqual([]);
+  });
+
+// The control of the refusals above: the same body posts on a private project, so they are the visibility rule.
+test("ARK-T780 post_mr on a private GitLab project uploads a video outside a checkpoint folder and posts", () => {
+  setVisibility("gitlab", "private");
+  const run = mediaRun("gitlab", video);
+  const posted = run.post();
+  expect({ code: posted.code, err: posted.stderr }).toMatchObject({ code: 0 });
+  expectGitlabUploads([...run.shots, ...run.files], ["a.png", "b.png", "flow.mp4"]);
+});
+
+for (const [host, answers] of [
+  ["gitlab", ["<fail>", "<nofield>", "<empty>"]],
+  ["github", ["<fail>", "<empty>"]],
+] as [HostName, string[]][])
+  for (const answer of answers)
+    test(`ARK-T780 post_mr on ${host} refuses a non-checkpoint video and says the visibility is unknown when the read answers ${answer}`, () => {
+      setVisibility(host, answer);
+      const run = mediaRun(host, video);
+      expectRefused(run.post(), {
+        context: `${host} ${answer}`,
+        named: [["flow.mp4"]],
+        visibility: /unknown/i,
+      });
+      expect(hostState()).toEqual([]);
+    });
+
+test("ARK-T780 post_mr on GitLab posts a body of checkpoint screenshots when the visibility read fails", () => {
+  setVisibility("gitlab", "<fail>");
+  const run = uploadRun("gitlab");
+  const posted = run.post();
+  expect({ code: posted.code, err: posted.stderr }).toMatchObject({ code: 0 });
+  expect(uploads()).toHaveLength(2);
+});
+
+for (const [host, answer, shown] of [
+  ["gitlab", "internal", /internal/i],
+  ["github", "<fail>", /unknown/i],
+] as [HostName, string, RegExp][])
+  test(`ARK-T780 a dry run on ${host} reads the visibility, prints it and each file it would refuse, and sends and posts nothing`, () => {
+    setVisibility(host, answer);
+    const run = mediaRun(host, video);
+    const driven = drive<{ action: string }>("post", {
+      host,
+      directory: run.repo,
+      branch: "ark/ARK-9-x",
+      base: "main",
+      title: run.title,
+      bodyFile: run.bodyFile,
+      ledger: run.ledger(),
+      reviewers: [],
+      dryRun: true,
+    });
+    // The `dry-run:` lines echo the host calls, body included; the report is everything else, and the refusal message.
+    const report = [
+      ...driven.out.filter((entry) => !entry.startsWith("dry-run:")),
+      ...driven.err,
+      driven.error ?? "",
+    ].join("\n");
+    expect(report).toMatch(shown);
+    expect(report).toContain("flow.mp4");
+    for (const name of checkpointNames) expect(report).not.toContain(name);
+    const reads = loggedCalls().filter((call) =>
+      host === "gitlab"
+        ? call.argv[0] === "api" && call.argv.at(-1) === "projects/:fullpath"
+        : call.argv.join(" ") === "repo view --json visibility",
+    );
+    expect(reads.length).toBeGreaterThan(0);
+    expect(hostWrites()).toEqual([]);
+    expect(uploads()).toEqual([]);
+    expect(hostState()).toEqual([]);
+  });
 
 // --- ARK-T287, ARK-T293 -----------------------------------------------------------------------
 
