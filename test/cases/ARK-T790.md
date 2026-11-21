@@ -4,7 +4,7 @@ title: "ARK-T790 when the evidence file sits under results/evidence/<ticket id>/
 level: integration
 technique: equivalence classes over where a file sits (ticket folder of this ticket, ticket folder of another ticket, a folder named like the file, another AC's file, the file moved to the right path) with a state check that nothing moved
 priority: high
-risk: "the line does not name the misplaced file, so the worker is refused again (the ARK-419 file sat at `results/evidence/ARK-419/AC3.md`); or the hint names a path that is not a file (a folder `AC2.md/`, another ticket's folder, another AC's file), so the worker is sent to move nothing; or the hint shows when the file at the right path exists (after the move); or the check moves, copies or deletes the file, or writes an event, so a refusal changes the run"
+risk: "the line does not name the misplaced file, so the worker is refused again (the ARK-419 file sat at `results/evidence/ARK-419/AC3.md`); or the hint names a path that is not a file (a folder `AC2.md/`, another ticket's folder, another AC's file), so the worker is sent to move nothing; or the check moves, copies or deletes the file, or writes an event, so a refusal changes the run"
 status: active
 changed_by: 2026-11-21-ARK-626-1
 ---
@@ -30,7 +30,7 @@ Prove that when `results/evidence/<AC id>.md` is missing and the file `results/e
 ## Expected results
 
 - When `results/evidence/<AC id>.md` is missing and `results/evidence/<ticket id>/<AC id>.md` is a file, the system shall add `; found results/evidence/<ticket id>/<AC id>.md: move it to results/evidence/<AC id>.md` to the same line, after the `expected` text of ARK-T789.
-- The system shall add the hint for no folder, no other ticket's folder, no other AC's file and no layout where the file at the right path exists; the move that the line asks for clears the line.
+- The system shall add the hint for no folder, no other ticket's folder and no other AC's file; the move that the line asks for clears the line.
 - The check shall refuse as it did and shall move, copy, delete or write nothing: the files, the listing and `events.ndjson` are unchanged.
 - The line shall be the same on `check`, on `ark run step ... finish` and on `ark merge-request open`.
 

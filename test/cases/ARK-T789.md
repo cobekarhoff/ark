@@ -11,7 +11,7 @@ changed_by: 2026-11-21-ARK-626-1
 
 ## Objective
 
-Prove that every `evidence missing` line of an `analysis`, `inspection` or `demonstration` criterion ends with `: expected results/evidence/<AC id>.md` (the path relative to the run folder, with the local AC id), on `ark merge-request check` and on `ark run step <run> <step> finish`. Serves ARK-626 AC1. `ark merge-request open` and `ark run close <run> handed_off` read the same line: ARK-T7 owns their text. This case owns the `expected` text of the line; ARK-T379, ARK-T380 and ARK-T7 quote it only because their whole-line comparisons need the new text, and ARK-T381 keeps its prefix assertion (`toContain`) and owns the finish refusal, not the text.
+Prove that every `evidence missing` line of an `analysis`, `inspection` or `demonstration` criterion ends with `: expected results/evidence/<AC id>.md` (the path relative to the run folder, with the local AC id), on `ark merge-request check` and on `ark run step <run> <step> finish`. Serves ARK-626 AC1. `ark merge-request open` and `ark run close <run> handed_off` read the same line: ARK-T7 owns their text. This case owns the `expected` text of the line; ARK-T379 and ARK-T380 quote it because their whole-line comparisons need the new text, ARK-T7 quotes it because it owns the text on `open` and `close handed_off` (its `toContain` on the old prefix would still pass), and ARK-T381 keeps its prefix assertion (`toContain`; its step 11 says "a line that starts with") and owns the finish refusal, not the text.
 
 ## Preconditions
 
