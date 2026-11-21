@@ -114,7 +114,7 @@ changed=$(git diff --name-only --diff-filter=d {base} -- '*.py' | grep test); py
 
 It selects the changed test files only, not the tests that a change to a source file reaches. When no changed file has `test` in its path, `$changed` is empty and pytest runs the whole suite. The pytest parser refuses an empty report, so exit 0 with no report is no way out; to run a cheap test file instead, add `[ -n "$changed" ] || changed=<that file>;` before `pytest`.
 
-Jest and Vitest have no parser of their own: use `parser: bun` on their JUnit report. Selection is by import graph or by changed files, so a quick run is not proof: the full run is the gate. See `docs/how-to/project-checks.md`, "Run only the affected tests in a quick run".
+Jest and Vitest have no parser of their own: use `parser: bun` on their JUnit report. Selection is by import graph or by changed files, so a quick run is not proof: the full run is the gate, except for a run with no code file, where `ark merge-request open` accepts a passing quick test (see `docs/how-to/project-checks.md#a-quick-test-as-the-gate-for-a-run-with-no-code-file`). See `docs/how-to/project-checks.md`, "Run only the affected tests in a quick run".
 
 A suite may also have a time limit. Ask the human before you add any of the three keys; the choice is the project's, and `on_over: fail` makes an `ark test` run fail:
 
