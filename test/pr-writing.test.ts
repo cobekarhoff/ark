@@ -1490,10 +1490,14 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
 
 test("ARK-T783 lint PROV02 passes a body or commit that has `regenerated with` or a mid-sentence `generated with`, and still fails the same body once it holds a `Generated with` trailer line", () => {
   const control = loadFixture("PROV02", "control");
-  const bullet = "- The body is rebuilt from the run on every new head.";
-  expect(control.body).toContain(bullet);
-  const withLine = (line: string) => control.body.replace(bullet, line);
-  const others = (results: LintResult[]) => results.filter((entry) => entry.id !== "PROV02");
+  // Each input adds one line under How to verify and replaces nothing, so no check but PROV02
+  // may change its result against the control body.
+  const verifyItem = "- [ ] `bun test test/pr-writing.test.ts`. Expect: exits 0.";
+  expect(control.body).toContain(verifyItem);
+  const withLine = (line: string) =>
+    control.body.replace(verifyItem, () => `${verifyItem}\n\n${line}`);
+  const others = (results: LintResult[]) =>
+    results.filter((entry) => entry.id !== "PROV02").map(({ id, result }) => ({ id, result }));
   const baseline = others(lintOf(control));
   expect(result(lintOf(control), "PROV02").result).toBe("pass");
 
@@ -1526,7 +1530,7 @@ test("ARK-T783 lint PROV02 passes a body or commit that has `regenerated with` o
   expect(result(inRange, "PROV02").result).toBe("pass");
 
   // Negative control: the same false-match line plus a trailer line fails and names the trailer.
-  const trailerBody = `${withLine(falseMatches[0]!)}\nGenerated with Claude Code\n`;
+  const trailerBody = withLine(`${falseMatches[0]!}\nGenerated with Claude Code`);
   expect(result(lintOf(control, { body: trailerBody }), "PROV02")).toMatchObject({
     result: "fail",
     reason: 'the body has "Generated with Claude Code"',
