@@ -1016,10 +1016,15 @@ ark companion advise <name> <run> <text> [--project <name>]
 Sends the run lead of an open run one message of type `status` whose subject starts with `Advice
 from companion <name>:` and whose body says it is advice and not a gate answer, then sends Master
 Chief a copy with the run id. The lead is the worker of Master Chief's Run that leads the run, found
-as `ark chief state` finds it. Nothing is sent unless both the lead and the live Master Chief are
-found. It exits 1 with an `ark: ` line when the name is not in ark.yml, the run does not exist or is
-closed, the run has no live lead, or a send fails; when the send to the lead fails no copy goes out,
-and when only the copy fails the lead keeps the advice. --project falls back to ARK_PROJECT.
+as `ark chief state` finds it, and it is addressed by its terminal handle, never by dispatch: a lead
+row with no terminal makes one more `worker-list` read. Advice the lead cannot get (the run has no
+live lead or no terminal, a read fails, or the send to the lead fails or times out) goes to Master
+Chief in one message whose subject starts `Companion <name> advice for <run> (not delivered to the
+lead)` and whose body holds the reason and the text; the command prints `advice for <run> went to
+Master Chief: <reason>` and exits 0. It exits 1 with an `ark: ` line when the name is not in
+ark.yml, the run does not exist or is closed, no live Master Chief is found (the advice then went
+nowhere), or both sends fail (the line names both failures); when only the copy fails the lead keeps
+the advice. --project falls back to ARK_PROJECT.
 ```
 
 ### companion propose
