@@ -3829,6 +3829,8 @@ test("ARK-T284 ARK-T285 a screenshot with a space and parentheses is uploaded on
     const outside = join(run.directory, "..", "private.png");
     writeFileSync(outside, pngBytes(4));
     const decoy = "../private.png";
+    // The decoy lies outside the run folder: a repo that is not private refuses it (ARK-T778), a private one skips it.
+    setVisibility(host, host === "github" ? "PRIVATE" : "private");
     writeFileSync(
       run.bodyFile,
       `${readFileSync(run.bodyFile, "utf8")}\n<details><summary>shots</summary>\n\n![ARK-T1 head](<${named}>)\n\n\`\`\`\n![x](${shotPath("ARK-T1", name).replace(/ .*/, "")})\n![x](<${named}>)\n\`\`\`\n\nInline \`![x](<${named}>)\` and ![out](${decoy}).\n\n</details>\n`,
