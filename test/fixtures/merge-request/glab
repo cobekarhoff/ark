@@ -2,6 +2,9 @@
 // Fake `glab`: records each call, keeps open MRs in the fake host state, and answers the calls `ark merge-request open` makes.
 // The blocks call fails when FAKE_GLAB_BLOCK_FAIL is set. An upload answers a url made from the bytes of the file it reads;
 // FAKE_GLAB_UPLOAD_FAIL=<n> fails the n-th upload.
+// `glab api projects/:fullpath` answers a project object whose `visibility` is FAKE_GLAB_VISIBILITY (default public, as on
+// gitlab.com/gitlab-org/cli). FAKE_GLAB_VISIBILITY=<fail> fails as glab 1.82.0 did for an unknown project; <nofield> answers a
+// project object with no `visibility` and <empty> answers nothing (these two are made-up shapes, not printed by glab).
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { creates, logged, editAfterFirstProbe, nextNumber, option, owner, raceAfterFirstProbe, readState, record, repo, writeState } from "./fake-host.ts";
@@ -36,7 +39,17 @@ if (argv[0] === "mr" && argv[1] === "create") {
   console.log(JSON.stringify({ url: `/uploads/${sha}/${file}` }));
 } else if (argv[0] === "api") {
   const path = argv.at(-1)!;
-  if (path === "user") {
+  if (path === "projects/:fullpath") {
+    const visibility = process.env.FAKE_GLAB_VISIBILITY ?? "public";
+    if (visibility === "<fail>") {
+      console.log(JSON.stringify({ message: "404 Project Not Found" }));
+      console.error("glab: 404 Project Not Found (HTTP 404)");
+      process.exit(1);
+    }
+    const project = { path_with_namespace: `org/${repo}` };
+    if (visibility === "<nofield>") console.log(JSON.stringify(project));
+    else if (visibility !== "<empty>") console.log(JSON.stringify({ ...project, visibility }));
+  } else if (path === "user") {
     console.log(JSON.stringify({ username: owner }));
   } else if (path.includes("/blocks")) {
     if (process.env.FAKE_GLAB_BLOCK_FAIL) {

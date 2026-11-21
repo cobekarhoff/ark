@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ArkError } from "../../../cli/errors.ts";
 import { readLedgerFile } from "../lib/ledger.ts";
-import { LintRefusal, postMergeRequest, ProbeFailure } from "../lib/post.ts";
+import { LintRefusal, MediaRefusal, postMergeRequest, ProbeFailure } from "../lib/post.ts";
 import { currentBranch, emit, ledgerForRepo, repoRoot, runCli, say, titleOf } from "./cli.ts";
 
 const name = "post_mr";
@@ -37,7 +37,7 @@ await runCli(
     exits: [
       "MR created or updated",
       "refused: no --confirmed, lint fail, STALE01 (stale head or body), bad argument",
-      "environment: not authenticated, host unreachable, unknown host, git or gh/glab missing, an image upload failed, gh older than 2.99.0 (no --attach), a body over 65,536 characters on GitHub",
+      "environment: a repo that is not private (or whose visibility cannot be read) and a body that names a media file that is not a checkpoint screenshot of the run's test cases (exit 2, nothing uploaded or posted), not authenticated, host unreachable, unknown host, git or gh/glab missing, an image upload failed, gh older than 2.99.0 (no --attach), a body over 65,536 characters on GitHub",
     ],
     schema: {
       title: "post_mr output",
@@ -46,7 +46,14 @@ await runCli(
         action: { enum: ["created", "updated", "unchanged"] },
         url: { type: "string" },
         draft: { type: "boolean" },
-        refused: { type: "string", description: "why nothing was posted" },
+        refused: {
+          type: "string",
+          description: "why nothing was posted; a media refusal also sets detail",
+        },
+        detail: {
+          type: "string",
+          description: "the host error, or the refused files and the visibility",
+        },
         posted: { const: false },
         checks: { type: "array", description: "the failed lint checks of a lint refusal" },
         error: { type: "string" },
@@ -125,6 +132,15 @@ await runCli(
         return 1;
       }
       const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof MediaRefusal) {
+        say(name, `refused. ${message}`);
+        emit({
+          refused: "media not allowed for the repo visibility",
+          posted: false,
+          detail: message,
+        });
+        return 2;
+      }
       say(name, `${message} Not posted.`);
       const unauthenticated = /401|403|auth|log ?in|token/i.test(message);
       emit({
