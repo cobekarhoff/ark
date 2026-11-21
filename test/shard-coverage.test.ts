@@ -17,7 +17,10 @@ type CiJob = {
   steps: CiStep[];
 };
 type CiWorkflow = {
-  on: { push?: { branches?: string[] }; pull_request?: Record<string, unknown> | null };
+  on: {
+    push?: { branches?: string[] };
+    pull_request?: Record<string, unknown> | null;
+  };
   jobs: Record<string, CiJob>;
 };
 
@@ -297,7 +300,10 @@ test("ARK-T697 the required check test exits 0 only when every needed job succee
       (_, job: string) => results[job] ?? `UNKNOWN-${job}`,
     );
     expect(script, "an expression the test does not replace").not.toContain("${{");
-    return Bun.spawnSync(["bash", "-e", "-c", script], { stderr: "pipe", stdout: "pipe" }).exitCode;
+    return Bun.spawnSync(["bash", "-e", "-c", script], {
+      stderr: "pipe",
+      stdout: "pipe",
+    }).exitCode;
   };
   const allSuccess = Object.fromEntries(neededJobs.map((job) => [job, "success"]));
   expect(exitOf(allSuccess)).toBe(0);
