@@ -26,6 +26,7 @@ import {
   findChiefRun,
   findLiveChief,
   orcaPages,
+  orcaTimeout,
   orcaTimeoutMilliseconds,
   readTerminals,
   runOfLead,
@@ -165,9 +166,10 @@ export const isRunning = (worker: WorkerRow): boolean => worker.liveness === "li
 async function readChiefWorkers(
   project: string,
   runs?: OrcaRead<OrcaRunRow[]>,
+  timeoutMilliseconds = orcaTimeoutMilliseconds,
 ): Promise<ChiefWorkers> {
   const runList =
-    runs ?? (await orcaPages<OrcaRunRow>("run-list", "runs", ["--full"], orcaTimeoutMilliseconds));
+    runs ?? (await orcaPages<OrcaRunRow>("run-list", "runs", ["--full"], timeoutMilliseconds));
   if (!runList.ok) throw new ArkError(`orca orchestration run-list failed: ${runList.reason}`);
   const chiefRun = findChiefRun(project, runList.value);
   if (!chiefRun.ok) throw new ArkError(`${chiefRun.reason}: nothing was started or stopped`);
@@ -175,7 +177,7 @@ async function readChiefWorkers(
     "worker-list",
     "workers",
     ["--run", chiefRun.value, "--include-remote"],
-    orcaTimeoutMilliseconds,
+    timeoutMilliseconds,
   );
   if (!workers.ok) throw new ArkError(`orca orchestration worker-list failed: ${workers.reason}`);
   return { chiefRunId: chiefRun.value, runs: runList.value, workers: workers.value };
@@ -192,8 +194,9 @@ function listedCompanion(configuration: ProjectConfig, name: string): CompanionC
 async function liveChiefOf(
   project: string,
   configuration: ProjectConfig,
+  timeoutMilliseconds?: number,
 ): Promise<{ handle: string; runs: OrcaRunRow[] }> {
-  const snapshot = await readTerminals();
+  const snapshot = await readTerminals(timeoutMilliseconds);
   if (!snapshot) throw new ArkError("Orca did not answer");
   const chief = findLiveChief(snapshot, project, resolve(configuration.workspace));
   if (!chief) throw new ArkError(`no live Master Chief for project ${project}`);
@@ -211,11 +214,12 @@ async function liveChiefOf(
 function senderOf(
   project: string,
   configuration: ProjectConfig,
+  timeoutMilliseconds?: number,
 ): () => Promise<string | undefined> {
   let handle: Promise<string | undefined> | undefined;
   return () => {
     if (process.env.ORCA_AGENT_SESSION_ID) return Promise.resolve(undefined);
-    handle ??= liveChiefOf(project, configuration).then(
+    handle ??= liveChiefOf(project, configuration, timeoutMilliseconds).then(
       (chief) => chief.handle,
       () => undefined,
     );
@@ -304,13 +308,14 @@ type Step = { wake?: Wake; apply: (cursor: Cursor) => void };
  * The moves that bring `previous` up to the runs and CI now. With no `previous` (a first sync) the
  * moves carry no wake: the companion starts at the present and hears nothing of older events.
  * A CI failure is keyed by run, MR number and check name; a key leaves the cursor once the check no
- * longer fails, so a check that fails again wakes the companion again.
+ * longer fails, so a check that fails again wakes the companion again. A null `ci` is a call for the
+ * runs alone (`wakeCompanions`): it reads no CI and leaves `cursor.ci` as it is.
  */
 function stepsOf(
   companion: CompanionConfig,
   previous: Cursor | null,
   runs: ScannedRun[],
-  ci: CiRead[],
+  ci: CiRead[] | null,
 ): Step[] {
   const steps: Step[] = [];
   for (const run of runs) {
@@ -329,7 +334,7 @@ function stepsOf(
       });
     }
   }
-  if (!companion.on.includes("ci.failed")) return steps;
+  if (ci === null || !companion.on.includes("ci.failed")) return steps;
   const states = new Map(runs.map((run) => [run.name, run.state]));
   for (const read of ci) {
     if (read.failed === null) continue;
@@ -376,6 +381,9 @@ function wakeBody(wake: Wake): string {
   ].join("\n");
 }
 
+const notSent = (name: string, trigger: string, run: string, reason: string): string =>
+  `companion ${name}: wake ${trigger} for ${run} not sent: ${reason}`;
+
 /**
  * Sends each wake of `steps` in order and moves the cursor after each send worked, so a failed send
  * is sent again by the next sync (at least once). The first failure stops this companion.
@@ -383,11 +391,12 @@ function wakeBody(wake: Wake): string {
 async function applySteps(
   name: string,
   directory: string,
-  worker: WorkerRecord,
+  dispatch: string,
   previous: Cursor | null,
   steps: Step[],
   problems: string[],
   sender: () => Promise<string | undefined>,
+  timeoutMilliseconds?: number,
 ): Promise<void> {
   const cursor: Cursor = {
     updated: "",
@@ -402,15 +411,14 @@ async function applySteps(
   for (const step of steps) {
     if (step.wake) {
       const sent = await sendMessage({
-        to: `dispatch:${worker.dispatch}`,
+        to: `dispatch:${dispatch}`,
         subject: `Companion wake: ${step.wake.trigger} ${step.wake.run}`,
         body: wakeBody(step.wake),
         from: await sender(),
+        timeoutMilliseconds,
       });
       if (!sent.ok) {
-        problems.push(
-          `companion ${name}: wake ${step.wake.trigger} for ${step.wake.run} not sent: ${sent.reason}`,
-        );
+        problems.push(notSent(name, step.wake.trigger, step.wake.run, sent.reason));
         break;
       }
       logWake(directory, step.wake.trigger, step.wake.run, step.wake.detail.join("; "));
@@ -568,7 +576,7 @@ export async function syncCompanions(
         await applySteps(
           companion.name,
           directory,
-          worker,
+          worker.dispatch,
           previous,
           stepsOf(companion, previous, scan.runs, ci ?? []),
           result.problems,
@@ -624,6 +632,98 @@ export async function companionsSync(inProject?: string): Promise<void> {
   if (result.lines.length > 0) console.log(result.lines.join("\n"));
   for (const problem of result.problems) console.error(`ark: ${problem}`);
   if (result.problems.length > 0) process.exitCode = 1;
+}
+
+/**
+ * The wake that `ark run start` and `ark evaluation record` send for their own event, to each live
+ * companion that lists its trigger, before they exit. It is the narrow twin of a sync: it sends the
+ * unseen events of `run` through `stepsOf` and `applySteps` (so message, `wake.log` line and cursor
+ * are the ones of a sync) and never starts, stops or releases a worker, never reads CI and never
+ * moves the CI part of a cursor. A companion with no `cursor.json` is skipped: a sync starts it at the
+ * present. It never waits for a lock and never retries: a wake it cannot send is one stderr line,
+ * `companion <name>: wake <trigger> for <run> not sent: <reason>`, and the next sync sends it. It never
+ * throws after the event is appended. A lock held by a running sync also prints the line, even when
+ * that sync then sends the wake: the line is harmless, the sync moved the cursor.
+ * ponytail: no Orca call when ark.yml lists no companion; a recorded worker of a removed companion is
+ * left to the sync that stops it.
+ * ponytail: each Orca call has its own 3 s bound, so a hung send costs 3 s for each listed companion;
+ * upgrade path: one deadline for the whole wake.
+ */
+export async function wakeCompanions(project: string, run: string): Promise<void> {
+  const configuration = loadConfig(project);
+  const companions = configuration.companions ?? [];
+  if (companions.length === 0) return;
+  // Each Orca call of the wake gives up after 3 s; ARK_ORCA_TIMEOUT_MS overrides it (tests).
+  const timeoutMilliseconds = orcaTimeout(3_000);
+  const sender = senderOf(project, configuration, timeoutMilliseconds);
+  let chiefWorkers: Promise<ChiefWorkers> | undefined;
+  const firstWake = (steps: Step[]) => steps.find((step) => step.wake)?.wake;
+  for (const companion of companions) {
+    const directory = companionDirectory(project, companion.name);
+    if (!existsSync(join(directory, "cursor.json"))) continue;
+    const problems: string[] = [];
+    let trigger: string | undefined;
+    let release: (() => void) | undefined;
+    try {
+      const events = readEvents(join(runsDirectory(project), run));
+      const scanned: ScannedRun = { name: run, events, state: deriveState(events) };
+      const stepsFor = (cursor: Cursor) => stepsOf(companion, cursor, [scanned], null);
+      // Before the lock: the trigger that a refused lock or a failed read names.
+      let unlocked: Cursor | null = null;
+      try {
+        unlocked = readJson<Cursor>(join(directory, "cursor.json"));
+      } catch {
+        // A cursor that is not JSON is reported below, once the lock is held.
+      }
+      trigger = firstWake(stepsFor(unlocked ?? { updated: "", runs: {}, ci: [] }))?.trigger;
+      release = acquireLock(directory);
+      // Under the lock: a sync that ran in between has moved the cursor already.
+      const previous = readJson<Cursor>(join(directory, "cursor.json"));
+      if (previous === null) continue;
+      const steps = stepsFor(previous);
+      const wake = firstWake(steps);
+      trigger = wake?.trigger;
+      const worker = readWorker(directory);
+      if (wake) {
+        let reason: string | undefined;
+        if (worker === null) reason = "no live worker";
+        else {
+          chiefWorkers ??= readChiefWorkers(project, undefined, timeoutMilliseconds);
+          const { workers } = await chiefWorkers;
+          if (!workers.some((row) => row.dispatchId === worker.dispatch && isRunning(row)))
+            reason = "no live worker";
+        }
+        if (reason !== undefined) {
+          problems.push(notSent(companion.name, wake.trigger, run, reason));
+          continue;
+        }
+      }
+      // The dispatch is read only by a step with a wake, and then the worker is live.
+      await applySteps(
+        companion.name,
+        directory,
+        worker?.dispatch ?? "",
+        previous,
+        steps,
+        problems,
+        sender,
+        timeoutMilliseconds,
+      );
+    } catch (error) {
+      if (trigger)
+        problems.push(
+          notSent(
+            companion.name,
+            trigger,
+            run,
+            error instanceof Error ? error.message : String(error),
+          ),
+        );
+    } finally {
+      release?.();
+      for (const problem of problems) console.error(problem);
+    }
+  }
 }
 
 // ------------------------------------------------------------------ the commands of a companion

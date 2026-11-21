@@ -26,7 +26,9 @@ import {
   expectRefusal,
   isoNow,
   mergedRows,
+  openMergeRequestRun,
   project,
+  pullRequest,
   rawRun,
   readCursor,
   runId,
@@ -335,25 +337,12 @@ const mergerAndStarter = () => [
   entry("merger", ["run.merged", "escalation"]),
   entry("starter", ["run.started", "criteria.opened", "ci.failed"]),
 ];
-const pullRequest = "https://github.com/example/app/pull/7";
 
 /** The bodies of the wake messages delivered to the live worker of `name`. */
 const wakesTo = (sent: { to: string; body: string }[], folder: string, name: string): string[] =>
   sent
     .filter((message) => message.to === `dispatch:${dispatchOf(folder, name)}`)
     .map((m) => m.body);
-
-/** An open run in `merge_requests_open` whose MR is `pullRequest`, with its worktree at `workspace`. */
-function openMergeRequestRun(run: string, workspace: string): void {
-  writeRun({
-    project,
-    run,
-    ticket: { id: run.slice(11, -2), title: `Ticket of ${run}` },
-    phase: "merge_requests_open",
-    mergeRequests: [{ repo: ".", url: pullRequest, number: 7 }],
-    worktrees: [{ repo: ".", path: workspace, branch: "ark/test" }],
-  });
-}
 
 test("ARK-T657 the first sync sends no wake for older events, records a cursor from the test clock, names an unreadable run and a repeat sync sends nothing", () => {
   const { folder, workspace, fake } = scenario(mergerAndStarter());

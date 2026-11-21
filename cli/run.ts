@@ -9,6 +9,7 @@ import {
   statSync,
 } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
+import { wakeCompanions } from "./companions.ts";
 import { releaseSettledWorkers } from "./orca-release.ts";
 import {
   bindTerminal,
@@ -78,7 +79,7 @@ function formatAge(milliseconds: number): string {
   return hours < 48 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
 }
 
-export function runStart(ticketFile: string, project?: string): void {
+export async function runStart(ticketFile: string, project?: string): Promise<void> {
   if (!existsSync(ticketFile)) throw new ArkError(`ticket file not found: ${ticketFile}`);
   const absoluteTicketFile = resolve(ticketFile);
   const projectName = resolveProject(absoluteTicketFile, project);
@@ -122,6 +123,7 @@ export function runStart(ticketFile: string, project?: string): void {
       `warning: kind ${ticket.kind} has no method: test AC, so its red-test or base-pass rule does not apply`,
     );
   console.log(run);
+  await wakeCompanions(projectName, run);
 }
 
 /**
