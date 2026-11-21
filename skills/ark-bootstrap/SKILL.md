@@ -288,6 +288,8 @@ Claude Code workers and Codex workers do not read OMP's setting. For those harne
 
 Write `~/.ark/projects/<project>/ark.yml` in the contract schema. Create the directory first (`mkdir -p ~/.ark/projects/<project>/tickets`). Never write over an existing file unless the human answered "replace" or "edit" in step 1.
 
+Write no `test_budget_cores`, `test_min_free_memory_percent` or `test_max_swap_gb` in it: they describe the host, not the project, and live in the host file `~/.ark/host.yml`, which every project on the host shares. With no host file the defaults apply (floor(0.6 x cores), 20 and 8), so a new project needs nothing. Ark refuses an `ark.yml` that has one of the three keys.
+
 ```yaml
 workspace: <absolute workspace path>
 ticket_source: <local | github | jira>
@@ -295,9 +297,6 @@ repos: # only for repos where step 3 got a base; key is the repo path, exactly
   repos/app: { base: release/9.1.0 }
 merge_requests: none # only when the human says the project must not push; omit otherwise
 compose: <compose command> # omit when the project has no compose file
-test_budget_cores: <cores all ark test runs of the host share; omit for floor(0.6 x cores)>
-test_min_free_memory_percent: <percent of memory that must be free before ark test starts a suite; omit for 20>
-test_max_swap_gb: <GB of swap used above which ark test starts no suite; omit for 8>
 suites:
   - name: <unique name>
     level: <integration | e2e>
