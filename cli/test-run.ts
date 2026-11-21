@@ -28,7 +28,7 @@ import { baseSide, oldIdsTouched, planMembership } from "./test-audit.ts";
 import { findRun } from "./paths.ts";
 import { checkStage } from "./merge-request.ts";
 import { cacheKey, hasCached, hashFiles, loadCached, storeCached } from "./test-cache.ts";
-import { loadHost, sampleLoad, type LoadSampler } from "./host.ts";
+import { loadHost, sampleLoad, waitForLoadBelow, type LoadSampler } from "./host.ts";
 import { budgetHeldVariable, openTestBudget, type TestBudget } from "./test-lock.ts";
 import { sampleGroup, updateResources, type SideUse } from "./resources-file.ts";
 import { callTest, runnerMain } from "./test-runner.ts";
@@ -434,10 +434,74 @@ function failedFilesOfLastTest(events: ArkEvent[]): Map<string, string[]> {
   return failed;
 }
 
+/** The test budget of this ark test in cores (host.yml `test_budget_cores`): a retry waits for the 1-minute load to fall below it. */
+let budgetCores = 0;
+
+/**
+ * The `--grep` pattern of one failed Playwright test: Playwright matches the titles of the describe blocks and
+ * the test joined with a space, each describe title followed by its tags (a report name joins them with ` › ` and
+ * has no tags), and the title is the end of what it matches, apart from tags, so a title that is the start of
+ * another title does not match it.
+ */
+function playwrightGrepOf(name: string): string {
+  const title = name
+    .split(" › ")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("(?: @\\S+)* ");
+  return `(?:^| )${title}(?: @\\S+)*$`;
+}
+
+/**
+ * Before the first retry of a suite: waits for a load below the budget, for a bounded time, once for the whole suite
+ * (every later retry starts at once). Returns the lines it printed, for the suite log.
+ */
+async function waitForRetryLoad(suite: Suite): Promise<string> {
+  const stillHigh = await waitForLoadBelow(budgetCores, (load) =>
+    console.log(
+      `suite      ${suite.name} head  retry waits for load  (load ${load} is not below the budget ${budgetCores})`,
+    ),
+  );
+  if (stillHigh === null) return "";
+  const line = `suite      ${suite.name} head  reran under load  (load ${stillHigh} is not below the budget ${budgetCores} after the wait limit)`;
+  console.log(line);
+  return `${line}\n`;
+}
+
+/** The retry command of one suite: `{files}` is replaced by `filesArgument` as it stands. */
+async function retryOnce(
+  suite: Suite,
+  label: string,
+  filesArgument: string,
+  cwd: string,
+  reportPath: string,
+  scratch: string,
+  tmp: string,
+  cores: number,
+): Promise<{ again: TestResult[]; code: number; log: string }> {
+  const command = suite
+    .base_command!.replaceAll("{files}", () => filesArgument)
+    .replaceAll("{report}", reportPath)
+    .replaceAll("<cores>", String(cores));
+  const outcome = await run(["sh", "-c", command], cwd, {
+    ARK_EVIDENCE_DIR: scratch,
+    TMPDIR: tmp,
+  });
+  const output = outcome.stdout + outcome.stderr;
+  const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
+  const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
+  const separator = output === "" || output.endsWith("\n") ? "" : "\n";
+  const log = `retry ${label}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
+  return { again, code: outcome.code, log };
+}
+
 /**
  * Runs each failed test file once more through `base_command` with that one file. A file that passes the second
- * time is flaky: its second results replace the failed ones. No retry (null) when the suite has no
- * `base_command`, or a failed test has no `file` (the report does not name it), so the failure stands.
+ * time is flaky: its second results replace the failed ones. A Playwright suite (`playwright test` in its
+ * `base_command`) writes no `file` in its report, so there every failed test runs once more by its title, all in one
+ * process through `--grep`; a title that passes is flaky and is listed by its report name where a file would be.
+ * The retries of a suite wait once, before the first, for a load below the test budget (`waitForLoadBelow`). No
+ * retry (null) when the suite has no `base_command`, or a failed test has no `file` in a suite that is not a
+ * Playwright one, so the failure stands.
  */
 async function retryFailedFiles(
   suite: Suite,
@@ -451,35 +515,65 @@ async function retryFailedFiles(
   const failed = results.filter((result) => result.status === "failed");
   if (failed.length === 0 || suite.base_command === undefined) return null;
   if (failed.some((result) => result.file === undefined)) {
-    console.log(`suite      ${suite.name} head  not retried  (a failed test names no file)`);
-    return null;
+    if (!suite.base_command.includes("playwright test")) {
+      console.log(`suite      ${suite.name} head  not retried  (a failed test names no file)`);
+      return null;
+    }
+    const names = [...new Set(failed.map((result) => result.name))];
+    console.log(
+      `suite      ${suite.name} head  retry by title: ${names.length} failed test${names.length === 1 ? "" : "s"}, one process`,
+    );
+    const grep = `--grep ${shellQuote(names.map(playwrightGrepOf).join("|"))}`;
+    const waitLog = await waitForRetryLoad(suite);
+    const { again, code, log } = await retryOnce(
+      suite,
+      "by title",
+      grep,
+      cwd,
+      `${reportBase}.retry-0`,
+      scratch,
+      tmp,
+      cores,
+    );
+    // a title is flaky when its second run holds a passed result and no failed one (a title shared by two tests
+    // fails when either copy fails). When every title is back, the second run must also exit 0: an error outside
+    // every test (a teardown) fails the suite. A title that fails again stays failed beside the ones that passed.
+    const back = names.filter(
+      (name) =>
+        again.some((result) => result.name === name && result.status === "passed") &&
+        !again.some((result) => result.name === name && result.status === "failed"),
+    );
+    const flaky = back.length === names.length && code !== 0 ? [] : back;
+    const kept = [
+      ...results.filter((result) => !flaky.includes(result.name)),
+      ...again.filter((result) => flaky.includes(result.name)),
+    ];
+    return { results: kept, flaky, failedFiles: names, log: waitLog + log };
   }
   const failedFiles = [...new Set(failed.map((result) => result.file!))];
   let kept = results;
-  let log = "";
+  let log = await waitForRetryLoad(suite);
   const flaky: string[] = [];
   for (const [index, file] of failedFiles.entries()) {
-    const reportPath = `${reportBase}.retry-${index}`;
-    const command = suite.base_command
-      .replaceAll("{files}", shellQuote(file))
-      .replaceAll("{report}", reportPath)
-      .replaceAll("<cores>", String(cores));
-    const outcome = await run(["sh", "-c", command], cwd, {
-      ARK_EVIDENCE_DIR: scratch,
-      TMPDIR: tmp,
-    });
-    const output = outcome.stdout + outcome.stderr;
-    const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8") : "";
-    const again = parsers[suite.parser]({ report, stdout: outcome.stdout });
-    const separator = output === "" || output.endsWith("\n") ? "" : "\n";
-    log += `retry ${file}\n${command}\n${output}${separator}exit ${outcome.code}\n`;
+    const retry = await retryOnce(
+      suite,
+      file,
+      shellQuote(file),
+      cwd,
+      `${reportBase}.retry-${index}`,
+      scratch,
+      tmp,
+      cores,
+    );
+    const { again } = retry;
+    log += retry.log;
     // every test that failed in this file must be back and passed: a skipped or missing result keeps the failure
     const recovered = failed
       .filter((result) => result.file === file)
       .every((original) =>
         again.some((result) => result.name === original.name && result.status === "passed"),
       );
-    if (outcome.code === 0 && recovered && again.every((result) => result.status !== "failed")) {
+    if (retry.code === 0 && recovered && again.every((result) => result.status !== "failed")) {
       kept = [...kept.filter((result) => result.file !== file), ...again];
       flaky.push(file);
     }
@@ -1222,6 +1316,7 @@ async function executeTest(
 
   // The checks and suites of every ark test on the host share one CPU budget, held by this runner until it exits.
   const host = loadHost();
+  budgetCores = host.testBudgetCores;
   budget = openTestBudget(runId, host.testBudgetCores, {
     minimumFreeMemoryPercent: host.minimumFreeMemoryPercent,
     maximumSwapGigabytes: host.maximumSwapGigabytes,

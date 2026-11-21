@@ -21,6 +21,7 @@ import {
   tempArkHome,
   writeEvidenceFile,
   workspaceWithRepos,
+  writeHost,
   writeProject,
   writeTicket,
 } from "./helpers.ts";
@@ -42,7 +43,7 @@ const roles = {
 
 type Suite = {
   name: string;
-  level: "integration";
+  level: "integration" | "e2e";
   repo: string;
   command: string;
   parser: "bun";
@@ -117,6 +118,8 @@ type Spawned = {
   finished: () => Promise<{ code: number; out: string; err: string }>;
   /** Resolves when stderr holds `text`. */
   errorHas: (text: string) => Promise<void>;
+  /** Resolves when stdout holds `text`. */
+  outputHas: (text: string) => Promise<void>;
 };
 
 function spawnArk(fixture: Fixture, args: string[]): Spawned {
@@ -127,14 +130,21 @@ function spawnArk(fixture: Fixture, args: string[]): Spawned {
     stderr: "pipe",
   });
   const seen = { out: "", err: "" };
-  const listeners: { text: string; done: () => void }[] = [];
+  const listeners: { stream: "out" | "err"; text: string; done: () => void }[] = [];
   const read = async (stream: ReadableStream<Uint8Array>, key: "out" | "err") => {
     for await (const chunk of stream) {
       seen[key] += new TextDecoder().decode(chunk);
-      for (const listener of listeners) if (seen.err.includes(listener.text)) listener.done();
+      for (const listener of listeners)
+        if (listener.stream === key && seen[key].includes(listener.text)) listener.done();
     }
   };
   const reading = Promise.all([read(child.stdout, "out"), read(child.stderr, "err")]);
+  const has = (stream: "out" | "err", text: string): Promise<void> => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    if (seen[stream].includes(text)) resolve();
+    else listeners.push({ stream, text, done: resolve });
+    return promise;
+  };
   return {
     child,
     seen,
@@ -142,12 +152,8 @@ function spawnArk(fixture: Fixture, args: string[]): Spawned {
       await reading;
       return { code: await child.exited, out: seen.out, err: seen.err };
     },
-    errorHas: (text) => {
-      const { promise, resolve } = Promise.withResolvers<void>();
-      if (seen.err.includes(text)) resolve();
-      else listeners.push({ text, done: resolve });
-      return promise;
-    },
+    errorHas: (text) => has("err", text),
+    outputHas: (text) => has("out", text),
   };
 }
 
@@ -235,6 +241,17 @@ echo $side >> "$1/count"
 bun test "$3" --reporter=junit --reporter-outfile="$2"
 `,
   );
+  // usage: side.sh <directory> <report>. Prints the side of this start; a head start also appends a line to `invocations`.
+  writeFileSync(
+    join(directory, "side.sh"),
+    `#!/bin/sh
+side=head
+case "$PWD" in *ark-base-*) side=base;; esac
+case "$2" in */census/*) side=census;; esac
+if [ "$side" = head ]; then echo head >> "$1/invocations"; fi
+echo $side
+`,
+  );
   Bun.spawnSync(["mkfifo", join(directory, "gate")]);
 }
 
@@ -243,6 +260,7 @@ function makeFixture(options: {
   suites: (directory: string) => Suite[];
   checks?: (directory: string) => Fixture["checks"];
   forge?: boolean;
+  budgetCores?: number;
 }): Fixture {
   const home = tempArkHome();
   const directory = mkdtempSync(join(tmpdir(), "ark-detached-"));
@@ -272,7 +290,8 @@ function makeFixture(options: {
     suites: options.suites(directory),
     checks: options.checks?.(directory) ?? [],
   } as Fixture;
-  fixture.rewriteProject = () =>
+  fixture.rewriteProject = () => {
+    if (options.budgetCores !== undefined) writeHost({ test_budget_cores: options.budgetCores });
     writeProject("demo", {
       workspace,
       ticket_source: "local",
@@ -280,6 +299,7 @@ function makeFixture(options: {
       checks: fixture.checks,
       roles,
     });
+  };
   fixture.mirrorOf = (repo, runDirectory = fixture.runDirectory) =>
     join(runDirectory, "workspace", repo);
   fixture.startRun = (ticketId) => {
@@ -1305,7 +1325,7 @@ describe("ark test flaky retry", () => {
     ]);
   });
 
-  test("ARK-T164 a failed test whose report names no file is not retried and the suite stays failed", async () => {
+  test("ARK-T164 a failed test whose report names no file, in a suite that is not a Playwright one, is not retried and the suite stays failed", async () => {
     const fixture = makeFixture({ suites: () => [bunSuite("placeholder", ["none"])] });
     writeFileSync(
       join(fixture.directory, "nofile.sh"),
@@ -1357,6 +1377,374 @@ exit 1
     expect(headStarts(fixture, "samea")).toBe(2);
     expect(headStarts(fixture, "sameb")).toBe(2);
   });
+});
+
+// ARK-509: a Playwright suite. The real Playwright binary of this repo writes a JUnit report with no `file`, so a failed
+// test is rerun by its title through `base_command`. The specs live in the fixture folder, outside the git repo, and a
+// test counts only its head starts (`PW_SIDE`, written by side.sh).
+const playwrightBinary = resolve(import.meta.dir, "..", "node_modules", ".bin", "playwright");
+const playwrightPackage = resolve(import.meta.dir, "..", "node_modules", "@playwright", "test");
+
+const playwrightSuite = (directory: string): Suite => {
+  const command = `PW_SIDE=$(sh ${directory}/side.sh ${directory} {report}) PLAYWRIGHT_JUNIT_OUTPUT_FILE={report} ${playwrightBinary} test --reporter=junit --config ${directory}/playwright.config.ts`;
+  return {
+    name: "pw",
+    level: "e2e",
+    repo: ".",
+    command,
+    parser: "bun",
+    base_files: "test/pw/**/*.pw.ts",
+    base_command: `${command} {files}`,
+  };
+};
+
+/** Writes `playwright.config.ts` and one spec file for each entry of `specs` (the source of its tests). */
+function writePlaywrightSpecs(
+  directory: string,
+  specs: Record<string, string>,
+  globalSetup = false,
+  globalTeardown = false,
+): void {
+  mkdirSync(join(directory, "specs"), { recursive: true });
+  for (const [name, tests] of Object.entries(specs))
+    writeFileSync(
+      join(directory, "specs", `${name}.pw.ts`),
+      `import { test } from ${JSON.stringify(playwrightPackage)};
+import { appendFileSync, readFileSync } from "node:fs";
+const starts = (key: string): number => {
+  if (process.env.PW_SIDE !== "head") return 0;
+  const counter = ${JSON.stringify(directory)} + "/pw-" + key;
+  appendFileSync(counter, "head\\n");
+  return readFileSync(counter, "utf8").split("\\n").filter((line) => line !== "").length;
+};
+${tests}
+`,
+    );
+  writeFileSync(
+    join(directory, "playwright.config.ts"),
+    `import { defineConfig } from ${JSON.stringify(playwrightPackage)};
+export default defineConfig({ testDir: ${JSON.stringify(join(directory, "specs"))}, testMatch: "**/*.pw.ts", workers: 1, retries: 0, timeout: 20_000, outputDir: ${JSON.stringify(join(directory, "out-pw"))}${globalSetup ? `, globalSetup: ${JSON.stringify(join(directory, "setup.ts"))}` : ""}${globalTeardown ? `, globalTeardown: ${JSON.stringify(join(directory, "teardown.ts"))}` : ""} });
+`,
+  );
+  if (globalSetup)
+    writeFileSync(
+      join(directory, "setup.ts"),
+      'export default async () => { if (process.env.PW_SIDE === "head") throw new Error("setup crash"); };\n',
+    );
+  if (globalTeardown)
+    writeFileSync(
+      join(directory, "teardown.ts"),
+      'export default async () => { if (process.env.PW_SIDE === "head") throw new Error("teardown crash"); };\n',
+    );
+}
+
+function playwrightFixture(
+  specs: Record<string, string>,
+  options: { forge?: boolean; globalSetup?: boolean; globalTeardown?: boolean } = {},
+) {
+  const fixture = makeFixture({
+    forge: options.forge,
+    budgetCores: 3,
+    suites: (directory) => {
+      writePlaywrightSpecs(directory, specs, options.globalSetup, options.globalTeardown);
+      return [playwrightSuite(directory)];
+    },
+  });
+  commitFiles(fixture.mirrorOf("."), { "note.txt": "change\n" });
+  return fixture;
+}
+
+/** The report names of the failed testcases of a JUnit report, as the report writes them (Playwright marks a thrown error `<error>`). */
+const failedNames = (report: string): string[] =>
+  report
+    .split("<testcase ")
+    .slice(1)
+    .filter((chunk) => chunk.includes("<error ") || chunk.includes("<failure"))
+    .map((chunk) => chunk.match(/^name="([^"]*)"/)![1]);
+
+const pwStarts = (fixture: Fixture, key: string) =>
+  lines(join(fixture.directory, `pw-${key}`)).length;
+const pwReport = (fixture: Fixture) =>
+  readFileSync(join(fixture.runDirectory, "results", "pw.report"), "utf8");
+const pwRow = (fixture: Fixture) =>
+  completedEvents(fixture)
+    .at(-1)
+    .suites.find((entry: { name: string }) => entry.name === "pw");
+
+describe("ark test Playwright title retry", () => {
+  test("ARK-T760 a Playwright suite whose failed tests pass on one rerun by title passes: the failed titles run again in one Playwright process, a passing sibling does not, and each title is listed as flaky in the output, test.completed, the retro and the MR body", async () => {
+    const fixture = playwrightFixture(
+      {
+        first: `test("first flake", () => { if (starts("first") === 1) throw new Error("flake"); });
+test("stable sibling", () => { starts("stable"); });
+test("first flake extra", () => { starts("extra"); });`,
+        second: `test("second flake", () => { if (starts("second") === 1) throw new Error("flake"); });`,
+      },
+      { forge: true },
+    );
+    const result = await arkDone(fixture, "test", fixture.runId);
+    expect(result.code, result.err + result.out).toBe(0);
+    expect(result.err).not.toContain("suite pw failed");
+    expect(result.out).not.toContain("not retried");
+
+    // the names as the first report wrote them: no `file`, so the title is all that names a test
+    const report = pwReport(fixture);
+    expect(report).not.toContain(" file=");
+    const names = failedNames(report);
+    expect(names.toSorted()).toEqual(["first flake", "second flake"]);
+    const line = result.out
+      .split("\n")
+      .find((text) => text.startsWith("suite      pw (e2e)  passed"))!;
+    expect(line).toContain("flaky:");
+    for (const name of names) expect(line).toContain(name);
+    expect(line).toContain("(failed once, passed on retry)");
+
+    // one start of the suite, one rerun for both titles, and the passing sibling does not run again
+    expect(lines(join(fixture.directory, "invocations"))).toEqual(["head", "head"]);
+    expect(pwStarts(fixture, "first")).toBe(2);
+    expect(pwStarts(fixture, "second")).toBe(2);
+    expect(pwStarts(fixture, "stable")).toBe(1);
+    // a title that starts with a failed title does not run again: the grep ends at the title
+    expect(pwStarts(fixture, "extra")).toBe(1);
+
+    const completed = completedEvents(fixture).at(-1);
+    expect(completed.passed).toBe(true);
+    expect(pwRow(fixture).passed).toBe(true);
+    expect(pwRow(fixture).failed_files).toBeUndefined();
+    expect(completed.flaky).toHaveLength(2);
+    for (const name of names) expect(completed.flaky).toContainEqual({ suite: "pw", file: name });
+
+    const retro = await arkDone(fixture, "retro", fixture.runId);
+    expect(retro.code, retro.err).toBe(0);
+    const flakyFiles = readJson(join(fixture.runDirectory, "metrics.json")).tests.flaky_files;
+    for (const name of names) expect(flakyFiles).toContain(`pw: ${name}`);
+
+    writeEvidenceFile(fixture.runDirectory, "DET-1-AC1");
+    const opened = await arkDone(fixture, "merge-request", "open", fixture.runId);
+    expect(opened.code, opened.err).toBe(0);
+    const body = lines(fixture.environment.FAKE_LOG)
+      .map((entry) => JSON.parse(entry))
+      .find((call) => call.argv.includes("create")).body as string;
+    for (const name of names)
+      expect(body).toContain(`Flaky: \`${name}\` in suite \`pw\` failed once and passed on retry.`);
+  });
+
+  // Titles with `(`, `)`, `.`, `:`, `+` and `/`, and a describe title in front of one: the report joins them with ` › `.
+  const brokenSpec = `test.describe("group (retry) 9", () => {
+  test("keeps failing: a.b + c/d", () => { starts("broken"); throw new Error("always"); });
+});`;
+  const mixedSpec = `test("flaky (once) 1.5: x+y/z", () => { if (starts("flaky") === 1) throw new Error("flake"); });
+test("stable sibling", () => { starts("stable"); });`;
+
+  test("ARK-T761 a Playwright test that fails again after its rerun by title stays failed: a title with regex characters inside a describe block is rerun once, a flaky title of the same retry is still flaky, the suite fails with exit 1 and the rerun under load says so", async () => {
+    const fixture = playwrightFixture({ broken: brokenSpec, mixed: mixedSpec });
+    fixture.environment.ARK_FAKE_LOAD_ONE = "50";
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "1";
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("suite pw failed");
+    expect(result.out).toContain("suite      pw (e2e)  failed");
+    expect(result.out).not.toContain("not retried");
+    // the retry waited for the load and ran when the wait ran out
+    expect(result.out).toMatch(/suite {6}pw head {2}retry waits for load/);
+    expect(result.out).toMatch(/suite {6}pw head {2}reran under load/);
+
+    const names = failedNames(pwReport(fixture));
+    expect(names).toHaveLength(2);
+    const broken = names.find((name) => name.includes("keeps failing"))!;
+    const flaky = names.find((name) => name.includes("flaky (once)"))!;
+    expect(lines(join(fixture.directory, "invocations"))).toEqual(["head", "head"]);
+    // one start fewer means the rerun matched no test: the title was not split on the describe separator or not escaped
+    expect(pwStarts(fixture, "broken")).toBe(2);
+    expect(pwStarts(fixture, "flaky")).toBe(2);
+    expect(pwStarts(fixture, "stable")).toBe(1);
+
+    const completed = completedEvents(fixture).at(-1);
+    expect(completed.passed).toBe(false);
+    expect(pwRow(fixture).passed).toBe(false);
+    expect(pwRow(fixture).failed_files).toEqual([broken]);
+    expect(completed.flaky).toEqual([{ suite: "pw", file: flaky }]);
+  });
+
+  test("ARK-T761 a title shared by two tests stays failed when one copy fails again: it is listed in failed_files and not as flaky", async () => {
+    // the same title in two spec files: the rerun by title runs both copies, one passes and one fails again
+    const fixture = playwrightFixture({
+      bad: `test("shared title", () => { starts("bad"); throw new Error("always"); });`,
+      good: `test("shared title", () => { starts("good"); });`,
+    });
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("suite pw failed");
+    expect(failedNames(pwReport(fixture))).toEqual(["shared title"]);
+    expect(pwStarts(fixture, "bad")).toBe(2);
+    expect(pwStarts(fixture, "good")).toBe(2);
+    const completed = completedEvents(fixture).at(-1);
+    expect(completed.passed).toBe(false);
+    expect(pwRow(fixture).failed_files).toEqual(["shared title"]);
+    expect(completed.flaky ?? []).toEqual([]);
+    expect(result.out).not.toContain("flaky:");
+  });
+
+  test("ARK-T761 a rerun by title whose Playwright process exits non-zero outside every test fails the suite although the title passed", async () => {
+    // a globalTeardown that throws on every head start: the rerun holds one passed testcase and exits 1
+    const fixture = playwrightFixture(
+      {
+        mixed: `test("flaky (once) 1.5: x+y/z", () => { if (starts("flaky") === 1) throw new Error("flake"); });`,
+      },
+      { globalTeardown: true },
+    );
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("suite pw failed");
+    expect(lines(join(fixture.directory, "invocations"))).toEqual(["head", "head"]);
+    expect(pwStarts(fixture, "flaky")).toBe(2);
+    const completed = completedEvents(fixture).at(-1);
+    expect(completed.passed).toBe(false);
+    expect(pwRow(fixture).failed_files).toEqual(["flaky (once) 1.5: x+y/z"]);
+    expect(completed.flaky ?? []).toEqual([]);
+  });
+
+  test("ARK-T761 a test inside a tagged describe block is rerun by its title and passes as flaky", async () => {
+    // Playwright greps `tagged group @slow inner flake`, and the report names the test `tagged group › inner flake`
+    const fixture = playwrightFixture({
+      tagged: `test.describe("tagged group", { tag: "@slow" }, () => {
+  test("inner flake", () => { if (starts("inner") === 1) throw new Error("flake"); });
+});`,
+    });
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code, result.err + result.out).toBe(0);
+    expect(failedNames(pwReport(fixture))).toEqual(["tagged group › inner flake"]);
+    expect(pwStarts(fixture, "inner")).toBe(2);
+    expect(lines(join(fixture.directory, "invocations"))).toEqual(["head", "head"]);
+    expect(completedEvents(fixture).at(-1).flaky).toEqual([
+      { suite: "pw", file: "tagged group › inner flake" },
+    ]);
+  });
+
+  test("ARK-T761 a Playwright suite that fails with no failed test is not rerun: an empty --grep would match every test", async () => {
+    const fixture = playwrightFixture({ mixed: mixedSpec }, { globalSetup: true });
+    fixture.environment.ARK_FAKE_LOAD_ONE = "50";
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "1";
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("suite pw failed");
+    expect(lines(join(fixture.directory, "invocations"))).toEqual(["head"]);
+    expect(readdirSync(fixture.directory).filter((name) => name.startsWith("pw-"))).toEqual([]);
+    expect(result.out).not.toContain("retry waits for load");
+    expect(result.out).not.toContain("under load");
+    const completed = completedEvents(fixture).at(-1);
+    expect(completed.passed).toBe(false);
+    expect(pwRow(fixture).passed).toBe(false);
+    expect(pwRow(fixture).failed_files).toBeUndefined();
+    expect(completed.flaky ?? []).toEqual([]);
+  });
+});
+
+// ARK-509: the wait before a retry. The load is the real reader of cli/host.ts, set by ARK_FAKE_LOAD_ONE.
+function loadedFixture(load: string) {
+  const fixture = makeFixture({
+    budgetCores: 3,
+    suites: () => [bunSuite("loaded", ["flaky", "stable"])],
+  });
+  const loadFile = join(fixture.directory, "load");
+  const loadSeen = join(fixture.directory, "load-seen");
+  writeFileSync(loadFile, load);
+  // each head start of `flaky` writes the load file as it reads it at that start
+  commitCounted(fixture, {
+    flaky: `if (side === "head") appendFileSync(${JSON.stringify(loadSeen)}, readFileSync(${JSON.stringify(loadFile)}, "utf8").trim() + "\\n"); ${flakyBody}`,
+    stable: "",
+  });
+  return { fixture, loadFile, loadSeen };
+}
+
+describe("ark test retry waits for the host load", () => {
+  test("ARK-T762 a failed bun file runs again at once when the load is below the budget", async () => {
+    const { fixture, loadFile, loadSeen } = loadedFixture("2.9");
+    fixture.environment.ARK_FAKE_LOAD_ONE = `file:${loadFile}`;
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "120";
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code, result.err).toBe(0);
+    expect(headStarts(fixture, "flaky")).toBe(2);
+    expect(lines(loadSeen)).toEqual(["2.9", "2.9"]);
+    expect(result.out).not.toContain("retry waits for load");
+    expect(result.out).not.toContain("under load");
+    expect(result.out).toContain("flaky: test/flaky.test.ts");
+  });
+
+  test("ARK-T762 a load equal to the budget holds the retry until the load drops below it", async () => {
+    const { fixture, loadFile, loadSeen } = loadedFixture("3");
+    fixture.environment.ARK_FAKE_LOAD_ONE = `file:${loadFile}`;
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "120";
+    const spawned = spawnArk(fixture, ["test", fixture.runId]);
+    await spawned.outputHas("retry waits for load");
+    // the first run is over and the retry has not started
+    expect(headStarts(fixture, "flaky")).toBe(1);
+    expect(spawned.seen.out).toMatch(
+      /suite {6}loaded head {2}retry waits for load {2}\(load 3 is not below the budget 3\)/,
+    );
+    writeFileSync(loadFile, "2.9");
+    const result = await spawned.finished();
+
+    expect(result.code, result.err).toBe(0);
+    expect(headStarts(fixture, "flaky")).toBe(2);
+    // the retry started after the drop, not at the end of the wait
+    expect(lines(loadSeen)).toEqual(["3", "2.9"]);
+    expect(result.out).not.toContain("under load");
+    expect(result.out).toContain("flaky: test/flaky.test.ts");
+  });
+
+  // The 90 s limit of the next two tests is the proof of the bound: the default wait is 180 s.
+  test("ARK-T762 a load that never drops ends the retry wait at ARK_RETRY_LOAD_WAIT_S: the file still runs again within the test limit and the output says it reran under load", async () => {
+    const { fixture } = loadedFixture("2.9");
+    fixture.environment.ARK_FAKE_LOAD_ONE = "50";
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "1";
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code, result.err).toBe(0);
+    expect(headStarts(fixture, "flaky")).toBe(2);
+    const waited = result.out.indexOf("retry waits for load");
+    const reran = result.out.search(/suite {6}loaded head {2}reran under load/);
+    expect(waited).toBeGreaterThanOrEqual(0);
+    expect(reran).toBeGreaterThan(waited);
+    expect(result.out).toContain("flaky: test/flaky.test.ts");
+  }, 90_000);
+
+  test("ARK-T762 two failed bun files wait for the load once, before the first retry: the second file runs at once", async () => {
+    const fixture = makeFixture({
+      budgetCores: 3,
+      suites: () => [bunSuite("loaded", ["first", "second"])],
+    });
+    commitCounted(fixture, { first: flakyBody, second: flakyBody });
+    fixture.environment.ARK_FAKE_LOAD_ONE = "50";
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "1";
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code, result.err).toBe(0);
+    expect(headStarts(fixture, "first")).toBe(2);
+    expect(headStarts(fixture, "second")).toBe(2);
+    // one bounded wait for the suite: a wait before each file prints each line twice
+    expect(result.out.match(/retry waits for load/g)).toHaveLength(1);
+    expect(result.out.match(/reran under load/g)).toHaveLength(1);
+    expect(result.out).toContain("flaky: test/first.test.ts, test/second.test.ts");
+  }, 90_000);
+
+  test("ARK-T762 an unreadable load does not hold the retry", async () => {
+    const { fixture } = loadedFixture("2.9");
+    fixture.environment.ARK_FAKE_LOAD_ONE = "unreadable";
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "120";
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code, result.err).toBe(0);
+    expect(headStarts(fixture, "flaky")).toBe(2);
+    expect(result.out).not.toContain("retry waits for load");
+    expect(result.out).toContain("flaky: test/flaky.test.ts");
+  }, 60_000);
 });
 
 // ARK-428: red on main. Every start of a test file appends the side it ran on to the file's counter: `head` (the run's

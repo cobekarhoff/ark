@@ -246,6 +246,37 @@ function readLoadOne(): number | null {
   }
 }
 
+/** How long a retry waits for the load to fall below the budget: `ARK_RETRY_LOAD_WAIT_S` seconds, 180 by default. */
+function retryLoadWaitSeconds(): number {
+  const seconds = Number(process.env.ARK_RETRY_LOAD_WAIT_S ?? "");
+  return process.env.ARK_RETRY_LOAD_WAIT_S !== undefined && Number.isFinite(seconds) && seconds >= 0
+    ? seconds
+    : 180;
+}
+
+/**
+ * Before a retry: waits until the 1-minute load is below `budget` (strictly), at most `retryLoadWaitSeconds()`.
+ * `announce` gets the load once, when the wait starts. Returns the load that is still not below the budget when the
+ * limit ends, so the caller runs the retry anyway and says so; null when the load is below the budget now or fell
+ * during the wait. An unreadable load never holds the retry.
+ */
+export async function waitForLoadBelow(
+  budget: number,
+  announce: (load: number) => void,
+): Promise<number | null> {
+  let load = readLoadOne();
+  if (load === null || load < budget) return null;
+  announce(load);
+  const deadline = Date.now() + retryLoadWaitSeconds() * 1000;
+  while (load !== null && load >= budget) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return load;
+    await Bun.sleep(Math.min(1000, remaining));
+    load = readLoadOne();
+  }
+  return null;
+}
+
 /** The 1-minute load when it started and the highest value sampled since; both null while nothing could be read. */
 export type LoadSampler = {
   start: number | null;
