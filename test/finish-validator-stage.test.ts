@@ -1,5 +1,13 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
