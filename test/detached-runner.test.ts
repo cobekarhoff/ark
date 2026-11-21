@@ -1401,6 +1401,7 @@ function writePlaywrightSpecs(
   directory: string,
   specs: Record<string, string>,
   globalSetup = false,
+  globalTeardown = false,
 ): void {
   mkdirSync(join(directory, "specs"), { recursive: true });
   for (const [name, tests] of Object.entries(specs))
@@ -1420,7 +1421,7 @@ ${tests}
   writeFileSync(
     join(directory, "playwright.config.ts"),
     `import { defineConfig } from ${JSON.stringify(playwrightPackage)};
-export default defineConfig({ testDir: ${JSON.stringify(join(directory, "specs"))}, testMatch: "**/*.pw.ts", workers: 1, retries: 0, timeout: 20_000, outputDir: ${JSON.stringify(join(directory, "out-pw"))}${globalSetup ? `, globalSetup: ${JSON.stringify(join(directory, "setup.ts"))}` : ""} });
+export default defineConfig({ testDir: ${JSON.stringify(join(directory, "specs"))}, testMatch: "**/*.pw.ts", workers: 1, retries: 0, timeout: 20_000, outputDir: ${JSON.stringify(join(directory, "out-pw"))}${globalSetup ? `, globalSetup: ${JSON.stringify(join(directory, "setup.ts"))}` : ""}${globalTeardown ? `, globalTeardown: ${JSON.stringify(join(directory, "teardown.ts"))}` : ""} });
 `,
   );
   if (globalSetup)
@@ -1428,17 +1429,22 @@ export default defineConfig({ testDir: ${JSON.stringify(join(directory, "specs")
       join(directory, "setup.ts"),
       'export default async () => { if (process.env.PW_SIDE === "head") throw new Error("setup crash"); };\n',
     );
+  if (globalTeardown)
+    writeFileSync(
+      join(directory, "teardown.ts"),
+      'export default async () => { if (process.env.PW_SIDE === "head") throw new Error("teardown crash"); };\n',
+    );
 }
 
 function playwrightFixture(
   specs: Record<string, string>,
-  options: { forge?: boolean; globalSetup?: boolean } = {},
+  options: { forge?: boolean; globalSetup?: boolean; globalTeardown?: boolean } = {},
 ) {
   const fixture = makeFixture({
     forge: options.forge,
     budgetCores: 3,
     suites: (directory) => {
-      writePlaywrightSpecs(directory, specs, options.globalSetup);
+      writePlaywrightSpecs(directory, specs, options.globalSetup, options.globalTeardown);
       return [playwrightSuite(directory)];
     },
   });
@@ -1468,7 +1474,8 @@ describe("ark test Playwright title retry", () => {
     const fixture = playwrightFixture(
       {
         first: `test("first flake", () => { if (starts("first") === 1) throw new Error("flake"); });
-test("stable sibling", () => { starts("stable"); });`,
+test("stable sibling", () => { starts("stable"); });
+test("first flake extra", () => { starts("extra"); });`,
         second: `test("second flake", () => { if (starts("second") === 1) throw new Error("flake"); });`,
       },
       { forge: true },
@@ -1495,6 +1502,8 @@ test("stable sibling", () => { starts("stable"); });`,
     expect(pwStarts(fixture, "first")).toBe(2);
     expect(pwStarts(fixture, "second")).toBe(2);
     expect(pwStarts(fixture, "stable")).toBe(1);
+    // a title that starts with a failed title does not run again: the grep ends at the title
+    expect(pwStarts(fixture, "extra")).toBe(1);
 
     const completed = completedEvents(fixture).at(-1);
     expect(completed.passed).toBe(true);
@@ -1554,6 +1563,64 @@ test("stable sibling", () => { starts("stable"); });`;
     expect(pwRow(fixture).passed).toBe(false);
     expect(pwRow(fixture).failed_files).toEqual([broken]);
     expect(completed.flaky).toEqual([{ suite: "pw", file: flaky }]);
+  });
+
+  test("ARK-T761 a title shared by two tests stays failed when one copy fails again: it is listed in failed_files and not as flaky", async () => {
+    // the same title in two spec files: the rerun by title runs both copies, one passes and one fails again
+    const fixture = playwrightFixture({
+      bad: `test("shared title", () => { starts("bad"); throw new Error("always"); });`,
+      good: `test("shared title", () => { starts("good"); });`,
+    });
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("suite pw failed");
+    expect(failedNames(pwReport(fixture))).toEqual(["shared title"]);
+    expect(pwStarts(fixture, "bad")).toBe(2);
+    expect(pwStarts(fixture, "good")).toBe(2);
+    const completed = completedEvents(fixture).at(-1);
+    expect(completed.passed).toBe(false);
+    expect(pwRow(fixture).failed_files).toEqual(["shared title"]);
+    expect(completed.flaky ?? []).toEqual([]);
+    expect(result.out).not.toContain("flaky:");
+  });
+
+  test("ARK-T761 a rerun by title whose Playwright process exits non-zero outside every test fails the suite although the title passed", async () => {
+    // a globalTeardown that throws on every head start: the rerun holds one passed testcase and exits 1
+    const fixture = playwrightFixture(
+      {
+        mixed: `test("flaky (once) 1.5: x+y/z", () => { if (starts("flaky") === 1) throw new Error("flake"); });`,
+      },
+      { globalTeardown: true },
+    );
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("suite pw failed");
+    expect(lines(join(fixture.directory, "invocations"))).toEqual(["head", "head"]);
+    expect(pwStarts(fixture, "flaky")).toBe(2);
+    const completed = completedEvents(fixture).at(-1);
+    expect(completed.passed).toBe(false);
+    expect(pwRow(fixture).failed_files).toEqual(["flaky (once) 1.5: x+y/z"]);
+    expect(completed.flaky ?? []).toEqual([]);
+  });
+
+  test("ARK-T761 a test inside a tagged describe block is rerun by its title and passes as flaky", async () => {
+    // Playwright greps `tagged group @slow inner flake`, and the report names the test `tagged group › inner flake`
+    const fixture = playwrightFixture({
+      tagged: `test.describe("tagged group", { tag: "@slow" }, () => {
+  test("inner flake", () => { if (starts("inner") === 1) throw new Error("flake"); });
+});`,
+    });
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code, result.err + result.out).toBe(0);
+    expect(failedNames(pwReport(fixture))).toEqual(["tagged group › inner flake"]);
+    expect(pwStarts(fixture, "inner")).toBe(2);
+    expect(lines(join(fixture.directory, "invocations"))).toEqual(["head", "head"]);
+    expect(completedEvents(fixture).at(-1).flaky).toEqual([
+      { suite: "pw", file: "tagged group › inner flake" },
+    ]);
   });
 
   test("ARK-T761 a Playwright suite that fails with no failed test is not rerun: an empty --grep would match every test", async () => {
@@ -1644,6 +1711,25 @@ describe("ark test retry waits for the host load", () => {
     expect(waited).toBeGreaterThanOrEqual(0);
     expect(reran).toBeGreaterThan(waited);
     expect(result.out).toContain("flaky: test/flaky.test.ts");
+  }, 90_000);
+
+  test("ARK-T762 two failed bun files wait for the load once, before the first retry: the second file runs at once", async () => {
+    const fixture = makeFixture({
+      budgetCores: 3,
+      suites: () => [bunSuite("loaded", ["first", "second"])],
+    });
+    commitCounted(fixture, { first: flakyBody, second: flakyBody });
+    fixture.environment.ARK_FAKE_LOAD_ONE = "50";
+    fixture.environment.ARK_RETRY_LOAD_WAIT_S = "1";
+    const result = await arkDone(fixture, "test", fixture.runId);
+
+    expect(result.code, result.err).toBe(0);
+    expect(headStarts(fixture, "first")).toBe(2);
+    expect(headStarts(fixture, "second")).toBe(2);
+    // one bounded wait for the suite: a wait before each file prints each line twice
+    expect(result.out.match(/retry waits for load/g)).toHaveLength(1);
+    expect(result.out.match(/reran under load/g)).toHaveLength(1);
+    expect(result.out).toContain("flaky: test/first.test.ts, test/second.test.ts");
   }, 90_000);
 
   test("ARK-T762 an unreadable load does not hold the retry", async () => {

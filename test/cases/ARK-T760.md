@@ -21,9 +21,9 @@ Prove that when a Playwright suite fails and every failed test passes when it ru
   - `base_command`: the same, followed by ` {files}`, as in the project `ark.yml`. It holds the text `playwright test`, which is how S1 recognizes a Playwright suite.
   - The side prefix applies the side rule of `count.sh` in ARK-T164: the side is `base` when `$PWD` holds `ark-base-`, `census` when `{report}` holds `/census/`, and `head` otherwise. It appends one line to `invocations` only on the head side and exports the side to Playwright as `PW_SIDE`. The run commits no file that `base_files` matches, so the base run skips the suite; a start of `command` at base or in the census would write no line.
 - Specs. They live in the fixture folder, outside the git repo, so no committed file holds them, and no title holds a case id (the ARK-431 plan-membership scan has nothing to read). On each start where `PW_SIDE` is `head`, each test appends one line to a counter file of its own, so starts are counted per test at head only:
-  - `first.pw.ts`: `test("first flake", …)` fails on its first head start and passes after it; `test("stable sibling", …)` always passes.
+  - `first.pw.ts`: `test("first flake", …)` fails on its first head start and passes after it; `test("stable sibling", …)` always passes; `test("first flake extra", …)` always passes and its title starts with the failed title `first flake`.
   - `second.pw.ts`: `test("second flake", …)` fails on its first head start and passes after it.
-  - No title is a substring of another title, so a correct rerun starts no other test.
+  - `first flake extra` is the only title that holds another title as its start: a rerun whose `--grep` does not end at the title starts it again.
 - The report is the real Playwright JUnit shape: `<testcase name=… classname="first.pw.ts">` with no `file` attribute. A hand-written report with `file=` would take the file path and hide the gap.
 - The expected names are the `name` attributes of the two failed `testcase` elements in `results/pw.report` (the first report, on disk). The test reads them from that file and never takes them from the code under test.
 
@@ -38,7 +38,7 @@ Prove that when a Playwright suite fails and every failed test passes when it ru
 ## Expected results
 
 - Step 1: exit 0, and stderr has no `suite pw failed`. The `suite      pw (e2e)  passed` line holds `flaky:`, each of the two report names and `(failed once, passed on retry)`. The output has no `not retried` line for `pw`.
-- Step 2: `invocations` has exactly 2 head lines: the suite, then one retry for both titles. `first flake` and `second flake` each start exactly twice at head. `stable sibling` starts exactly once at head: a whole-suite or whole-file rerun starts it twice.
+- Step 2: `invocations` has exactly 2 head lines: the suite, then one retry for both titles. `first flake` and `second flake` each start exactly twice at head. `stable sibling` starts exactly once at head: a whole-suite or whole-file rerun starts it twice. `first flake extra` starts exactly once at head: a `--grep` with no end anchor matches it too and starts it twice.
 - Step 3: `passed` is `true`. The `pw` suite row has `passed: true` and no `failed_files`. The event's `flaky` list holds `{ suite: "pw", file: <name> }` for each of the two report names (in any order) and nothing for `stable sibling`.
 - Step 4: `tests.flaky_files` holds `pw: <name>` for each of the two names.
 - Step 5: the body names each of the two report names and the suite `pw` in its flaky lines, and says they failed once and passed on retry.
