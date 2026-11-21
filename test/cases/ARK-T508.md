@@ -22,15 +22,15 @@ Authoring gate:
 
 ## Preconditions
 
-- The fixture of the `plan check by ticket kind` block of `test/plan.test.ts`: a project, a recorded evaluation, and a bug run started with `ark run start` on ticket `ARK-901` (kind `bug`) whose criteria the case names. Every plan is valid for every other rule of plan check (roles, needs, test cases), so only the bug-run rule can refuse it.
-- Ticket T (refusal rows and the first accept row): `AC1` and `AC2`, both `method: test`.
-- Ticket M, one per method `analysis`, `inspection` and `demonstration`: `AC1` and `AC2` with `method: test`, and `AC3` with that method.
+- The fixture of the `plan check by ticket kind` block of `test/plan.test.ts`: a project, a recorded evaluation, and a bug run started with `ark run start` on a ticket of kind `bug` whose criteria the case names. Every plan is valid for every other rule of plan check (roles, needs, test cases), so only the bug-run rule can refuse it.
+- Ticket T (`ARK-901`; refusal rows and the first accept row): `AC1` and `AC2`, both `method: test`.
+- Ticket M, one per method `analysis`, `inspection` and `demonstration` (`ARK-910`, `ARK-911` and `ARK-912`, in that order): `AC1` and `AC2` with `method: test`, and `AC3` with that method.
 
 ## Steps
 
 1. On ticket T, write each plan below, run `ark plan check <run>`, and read the exit code and the output:
    - the first step is an implementer step;
-   - the first step is a validator that serves `AC1` only, a later implementer serves `AC1` and `AC2`;
+   - the first step is a validator that serves `AC1` only, a later implementer serves `AC1` only;
    - an implementer step serving `AC1` and `AC2` comes first and a validator serving both second.
 2. On ticket T, write a plan whose first step is a validator serving `AC1` and `AC2`, then an implementer that needs it. Run plan check.
 3. On each ticket M, write a plan whose first step is a validator serving `AC1` and `AC2` only, then an implementer that needs it and serves `AC1` and `AC2`, then a validator that needs the implementer and serves `AC3` (the step that writes the evidence after the fix). Run plan check.

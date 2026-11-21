@@ -648,7 +648,7 @@ describe("plan check by ticket kind", () => {
       step("evidence", { role: "validator", needs: ["build"], criteria: ["ARK-900-AC3"] }),
     ]);
 
-  test("ARK-T508 ARK-302-AC5 a bug run refuses a plan whose first step is not a validator step serving every test criterion, and accepts one that is", () => {
+  test("ARK-T508 a bug run refuses a plan whose first step is not a validator step serving every test criterion, and accepts one that is", () => {
     startKindRun("bug", testCriteria);
     const refusals = [
       validPlan(), // first step is an implementer
@@ -695,7 +695,7 @@ describe("plan check by ticket kind", () => {
     expect(refused.out).toContain(refusal);
   });
 
-  test("ARK-T509 ARK-302-AC5 a bug run's first validator need not serve a manual criterion, and must serve a criterion with no method", () => {
+  test("ARK-T509 a bug run's first validator need not serve a manual criterion, and must serve a criterion with no method", () => {
     // AC1 has no `method` and no `manual` (a test criterion); AC2 has `manual: true` and no `method` (demonstration).
     startKindRun("bug", [criteria[0], { ...criteria[1], manual: true }]);
     const plan = (first: string[]) => ({
