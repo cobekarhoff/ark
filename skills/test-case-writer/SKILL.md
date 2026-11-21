@@ -27,13 +27,13 @@ You write no product code and no test code. You write only test cases and `test-
 5. Link each case to the ACs it proves in `verified_by`. Give every AC with `method: test` at least one integration or E2E case. Prefer E2E and integration over unit: a unit case needs a reason that an integration case cannot do the job.
 6. Mark each existing affected case `update`, `reuse` or `retire`.
 7. Write `<run folder>/test-design.md`: one section for each case with its id, action (`add`, `update`, `reuse`, `retire`), level, risk, and the ACs it verifies; one line for each existing affected case with its mark and the reason; and one line for each contract class below with the id of the case that covers it or the reason no case is needed.
-8. When the reviewer rejects, read its findings file in the run folder, fix each named case, and rewrite `test-design.md`.
+8. When the reviewer rejects, read its findings file in the run folder, fix each named case, and rewrite `test-design.md`. When the reviewer approves with a `## Notes (P2)` heading, fix each note in one pass the same way: no review follows.
 9. Commit the case files before the report: commit the case files it wrote (one commit) before it sends worker_done.
    - Commit only when a case file changed. A design with only `reuse` marks changes no file and makes no commit.
    - The commit holds only `test/cases/*.md`: new cases, and the existing cases you marked `update` or `retire` (those edit a file). `test-design.md` lives in the run folder and stays out.
    - Stage each file by its path. Never use `git add -A` or `git add .`: the worktree holds untracked entries that Ark made.
    - Run the repo's format check first (the repo's `AGENTS.md` wins; in the Ark repo `bun run format:check` checks `test/cases/*.md`) and fix what it reports. Never use `--no-verify`.
-   - "One commit" is for the first design pass. After a reject, the fix pass adds a new commit and never amends or rewrites one.
+   - "One commit" is for the first design pass. After a reject or a list of notes, the fix pass adds a new commit and never amends or rewrites one. Name each note you fixed in your `worker_done`.
    - In a multi-repo run, each repo that holds a changed case file gets its own commit.
    - The rule is for `test_case_source: local`. A Zephyr project has no case file to commit.
    - Name the commit (hash and subject) in your `worker_done`.
@@ -64,5 +64,12 @@ Cover each class that applies to the ticket with one case, or with one line of r
 - The evidence and ownership files that a command writes.
 
 A fake command's assertion names the flags and the scope it proves. It never asserts a call shape that a boundary case already proves.
+
+## A sentence about a command
+
+Run each command before you write a sentence about what it shows (a negative control, a `-t` pattern, a grep count). Write what the command printed, not what you expect.
+
+- Run only the command of the sentence. A `bun test` command runs one test file (`bun test <file> -t <pattern>`), never the suite and never `--rerun-each` of a suite. The command edits no tracked file. Never stop a process by name (`pkill`, `killall`): stop only a process you started, by its PID.
+- When the test does not exist yet (the validator writes it later), run the command against the code that exists, or write the result as a plan ("the validator checks that ... fails"), never as a shown output.
 
 Never edit product code or test code. Never start an agent. Commit the case files as step 9 says, then report with `worker_done`, name the commit in the text and name `test-design.md` in `--report-path`.
