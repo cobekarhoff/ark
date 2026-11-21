@@ -13,19 +13,19 @@ changed_by: 2026-11-21-ARK-618-1
 
 Prove that a scenario of `describe("ark test budget admission")` in `test/test-lock.test.ts` that waits for a marker no process writes ends with a named error at the default limit of `waitFor`, not at the 90 s test timeout. Serves ARK-618/AC1.
 
-Expected: When a scenario calls `waitFor` with no limit for a marker that never appears, the wait shall reject after 20 s and no later than 25 s, and its error shall name the missing marker and list the files in the scenario home.
+Expected: When a scenario calls `waitFor` with marker names only (so the 20 s default limit applies) for a marker that never appears, the wait shall reject after 20 s and no later than 25 s, and its error shall name the missing marker and list the files in the scenario home.
 
 ## Preconditions
 
 - The real `scenario()` helper of `test/test-lock.test.ts` with its temp home; no child process is started (no child writes the asked marker).
 - The test writes one marker file `present-running` into the scenario home itself before the wait. It is not one of the names asked for, so the only way the error can name it is the listing of the home.
 - The test's own timeout is 25 s (the third argument of `test(...)`, a named constant), so a wait without a limit fails at 25 s and not at 90 s. No `setTimeout(`, no `toBeLessThan(<3+ digits>)`: the wall-clock guard (ARK-T126) gives this file no allowance.
-- This is the only case that runs the 20 s default; every other case passes a short limit.
+- This is the only case that waits until the 20 s default ends. ARK-T775 calls `waitForWithin(1000, ...)` with a 1 s limit. The ARK-T155 and ARK-T721 tests call `waitFor` with names only and so run with the 20 s default, but their markers appear and their waits end early.
 
 ## Steps
 
 1. In a scenario, write `present-running` into `home`.
-2. Note `performance.now()` and call `waitFor("ghost-running")` with no limit argument.
+2. Note `performance.now()` and call `waitFor("ghost-running")` (one marker name, no other argument).
 3. Await its rejection and note `performance.now()` again.
 
 ## Expected results
