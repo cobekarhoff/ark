@@ -6,7 +6,7 @@ technique: decision table over finish case (malformed served file, malformed uns
 priority: high
 risk: "finish refuses for something that a later step or the human owns (the first validator of a bug run is blocked by the string the fix creates, by the missing evidence file of a criterion it does not serve, a pending manual criterion or a reviewer file), so the run lead loops on the finish or writes a placeholder evidence file; or it lets a malformed demonstration file through, so the D12 refusal comes back at open; or a refusal still writes a step.finished event, or --failed is refused"
 status: active
-changed_by: 2026-11-21-ARK-626-1
+changed_by: 2026-11-21-ARK-619-1
 ---
 
 ## Objective
@@ -34,7 +34,7 @@ Prove `ark run step <run> <step> finish` for a validator step calls stage `step`
 8. Variant F (not a validator): the shared files, the string absent, `fix` serves `AC1` and `AC4`. Finish `fix` (role `implementer`). Assert exit 0: only the role `validator` runs the check.
 9. Existing refusal order: in variant A with an uncommitted change in the worktree, assert the finish is refused for the dirty worktree with its old text (ARK-T332), not for the evidence.
 10. Variant G (analysis AC, a later step can write the file): the bug run of variant C with `AC3` of method `analysis` and no `AC3.md` (`AC2.md` and `AC4.md` well-formed). In one run a later validator `val-2` serves `AC1` and `AC3` and has not finished; in another the implementer `fix` serves `AC3` and has not finished. Assert `ark run step <run> val-1 finish` exits 0 with one `step.finished` event in both.
-11. Variant H (analysis AC, no later step can write the file): the same bug run where only `val-1` serves `AC3` (`fix` serves `AC1` only). Assert `val-1` finish exits 1 with the line `evidence missing: AC3 (analysis): expected results/evidence/AC3.md` and no new event; write a well-formed analysis `AC3.md` and assert it finishes. In the plan where `val-2` also serves `AC3`, finish `val-1` and `fix`, commit a file with the AC string, start `val-2`: the finish exits 1 with the same line (the string is present, so only the missing file refuses), and after the file is written it finishes.
+11. Variant H (analysis AC, no later step can write the file): the same bug run where only `val-1` serves `AC3` (`fix` serves `AC1` only). Assert `val-1` finish exits 1 with the line `evidence missing: AC3 (analysis)` and no new event; write a well-formed analysis `AC3.md` and assert it finishes. In the plan where `val-2` also serves `AC3`, finish `val-1` and `fix`, commit a file with the AC string, start `val-2`: the finish exits 1 with the same line (the string is present, so only the missing file refuses), and after the file is written it finishes.
 12. Variant I (the first validator of a bug run serves only the test criterion): the bug run of variant G (`AC3` of method `analysis`) with no evidence file at all (`AC2.md`, `AC3.md` and `AC4.md` not written); `val-1` serves `AC1` only, `fix` needs `val-1` and serves `AC1`, `val-2` needs `fix` and serves `AC2`, `AC3` and `AC4`. Run `ark run step <run> val-1 finish` without `--failed`: assert exit 0, one `step.finished` event, and no file in `results/evidence/` of the run folder. Then run `ark run step <run> fix start`: assert exit 0 (the red proof of the recorded `test.completed` is enough with the non-test criteria unserved so far).
 
 ## Expected results
