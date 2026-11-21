@@ -326,17 +326,17 @@ strategy record or with an open strategy gate. When the evaluation lists web_ui,
 skills list in at least one step, only skills that `ark ui-skills <run>` lists, and every required
 skill in each non-empty list; plan.md then has a Skills column. A run with no recorded evaluation,
 or with no web_ui surface, needs no skills list. It records the number of open decisions. For `kind:
-bug` the first step must be a validator step that serves every AC, a manual one too. For `kind:
-perf` the `goal` of the first step must name `results/baseline.md` and the `goal` of the last step
-must name `results/compare.md`. `goal` is an optional step text. A test case has an `id` of the
-shape `<KEY>-T<n>` and an `action` of `add`, `update`, `reuse` or `retire`; only add and update need
-`given`, `when` and `then`, and retire needs `reason`. It refuses an unknown action, a retire with
-no reason, a reuse, update or retire whose id has no entry in `test/cases/` of a repo of the
-workspace, a `verified_by` id that is no active entry there and no add entry of the plan, and a
-new-scheme AC with `method: test` whose `verified_by` holds no integration or e2e case. A plan test
-case in the old shape (free id, one `criterion`, no action) still loads and keeps the old rule. It
-also refuses any bad entry in `test/cases/` and names its file; an absent folder is valid. plan.md
-lists each case with its action.
+bug` the first step must be a validator step that serves every AC with `method: test`; a later
+validator step may serve the other ACs. For `kind: perf` the `goal` of the first step must name
+`results/baseline.md` and the `goal` of the last step must name `results/compare.md`. `goal` is an
+optional step text. A test case has an `id` of the shape `<KEY>-T<n>` and an `action` of `add`,
+`update`, `reuse` or `retire`; only add and update need `given`, `when` and `then`, and retire needs
+`reason`. It refuses an unknown action, a retire with no reason, a reuse, update or retire whose id
+has no entry in `test/cases/` of a repo of the workspace, a `verified_by` id that is no active entry
+there and no add entry of the plan, and a new-scheme AC with `method: test` whose `verified_by`
+holds no integration or e2e case. A plan test case in the old shape (free id, one `criterion`, no
+action) still loads and keeps the old rule. It also refuses any bad entry in `test/cases/` and names
+its file; an absent folder is valid. plan.md lists each case with its action.
 
 The optional `repos` block holds the repo edges of a plan that touches 2 or more repos: a list of `{
 repo, why, depends_on }`, where `depends_on` is a list of edges `{ repo, kind, pin, evidence, bump

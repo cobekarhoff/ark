@@ -325,7 +325,12 @@ export function findProblems(
   const first = plan.steps[0];
   const last = plan.steps.at(-1);
   if (kind === "bug") {
-    if (first?.role !== "validator" || !ticketCriteria.every((id) => first.criteria.includes(id)))
+    if (
+      first?.role !== "validator" ||
+      !ticketCriteria
+        .filter((id) => !manual.includes(id))
+        .every((id) => first.criteria.includes(id))
+    )
       problems.push("bug run: the first step must be a validator step that serves every criterion");
   }
   if (kind === "perf") {

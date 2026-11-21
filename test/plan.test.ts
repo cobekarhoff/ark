@@ -610,8 +610,12 @@ describe("plan check UI skills", () => {
 
 describe("plan check by ticket kind", () => {
   /** Starts a run of `kind` on a second ticket with the same ACs as `criteria`, and makes it the current run. */
-  function startKindRun(kind: string, ticketCriteria: Record<string, unknown>[] = criteria) {
-    const ticket = writeTicket("demo", "ARK-901", ticketCriteria as never, undefined, kind);
+  function startKindRun(
+    kind: string,
+    ticketCriteria: Record<string, unknown>[] = criteria,
+    ticketId = "ARK-901",
+  ) {
+    const ticket = writeTicket("demo", ticketId, ticketCriteria as never, undefined, kind);
     const started = ark("run", "start", ticket);
     expect(started.code).toBe(0);
     runId = started.out.trim();
@@ -619,9 +623,33 @@ describe("plan check by ticket kind", () => {
     recordEvaluation(runDirectory);
   }
   const both = ["ARK-900-AC1", "ARK-900-AC2"];
+  const refusal = "bug run: the first step must be a validator step that serves every criterion";
+  const testCriteria = criteria.map((criterion) => ({ ...criterion, method: "test" }));
+  /** Two test criteria and `ARK-900-AC3` of `method`; the plan summary has a row for it. */
+  const methodCriteria = (method: string) => [
+    ...testCriteria,
+    { id: "ARK-900-AC3", text: "third", method },
+  ];
+  const withThird = (steps: Record<string, any>[]) => {
+    const plan = { ...validPlan(), steps };
+    plan.summary.changes.push({
+      criterion: "ARK-900-AC3",
+      where: "cli/plan.ts",
+      now: "No third.",
+      fix: "Add a third.",
+    });
+    return plan;
+  };
+  /** A first validator that serves `first`, the fix, then a validator that serves the third criterion. */
+  const laterThird = (first: string[]) =>
+    withThird([
+      step("tests", { role: "validator", criteria: first }),
+      step("build", { needs: ["tests"], criteria: both }),
+      step("evidence", { role: "validator", needs: ["build"], criteria: ["ARK-900-AC3"] }),
+    ]);
 
-  test("ARK-T508 ARK-302-AC5 a bug run refuses a plan whose first step is not a validator step serving every AC, and accepts one that is", () => {
-    startKindRun("bug");
+  test("ARK-T508 a bug run refuses a plan whose first step is not a validator step serving every test criterion, and accepts one that is", () => {
+    startKindRun("bug", testCriteria);
     const refusals = [
       validPlan(), // first step is an implementer
       {
@@ -640,7 +668,7 @@ describe("plan check by ticket kind", () => {
       writePlan(plan);
       const result = ark("plan", "check", runId);
       expect(result.code).toBe(1);
-      expect(result.out).toContain("bug run");
+      expect(result.out).toContain(refusal);
     }
 
     writePlan({
@@ -653,27 +681,40 @@ describe("plan check by ticket kind", () => {
     expect(ark("plan", "check", runId).code).toBe(0);
   });
 
-  test("ARK-T509 ARK-302-AC5 a bug run with a manual criterion still needs the first validator step to serve it", () => {
-    startKindRun("bug", [criteria[0], { ...criteria[1], manual: true }]);
-    writePlan({
-      ...validPlan(),
-      steps: [
-        step("tests", { role: "validator", criteria: ["ARK-900-AC1"] }),
-        step("build", { needs: ["tests"], criteria: both }),
-      ],
-    });
+  test("ARK-T508 a bug run accepts a first validator that leaves an analysis, inspection or demonstration criterion to a later step, and refuses one that misses a test criterion", () => {
+    for (const [index, method] of ["analysis", "inspection", "demonstration"].entries()) {
+      startKindRun("bug", methodCriteria(method), `ARK-91${index}`);
+      writePlan(laterThird(both));
+      const accepted = ark("plan", "check", runId);
+      expect(accepted.code, `${method}: ${accepted.out}`).toBe(0);
+      expect(accepted.out).not.toContain("bug run");
+    }
+    writePlan(laterThird(["ARK-900-AC1", "ARK-900-AC3"]));
     const refused = ark("plan", "check", runId);
     expect(refused.code).toBe(1);
-    expect(refused.out).toContain("bug run");
+    expect(refused.out).toContain(refusal);
+  });
 
-    writePlan({
+  test("ARK-T509 a bug run's first validator need not serve a manual criterion, and must serve a criterion with no method", () => {
+    // AC1 has no `method` and no `manual` (a test criterion); AC2 has `manual: true` and no `method` (demonstration).
+    startKindRun("bug", [criteria[0], { ...criteria[1], manual: true }]);
+    const plan = (first: string[]) => ({
       ...validPlan(),
       steps: [
-        step("tests", { role: "validator", criteria: both }),
-        step("build", { needs: ["tests"], criteria: both }),
+        step("tests", { role: "validator", criteria: first }),
+        step("build", { needs: ["tests"], criteria: ["ARK-900-AC1"] }),
+        step("evidence", { role: "validator", needs: ["build"], criteria: ["ARK-900-AC2"] }),
       ],
     });
-    expect(ark("plan", "check", runId).code).toBe(0);
+    writePlan(plan(["ARK-900-AC1"]));
+    const accepted = ark("plan", "check", runId);
+    expect(accepted.code, accepted.out).toBe(0);
+    expect(accepted.out).not.toContain("bug run");
+
+    writePlan(plan(["ARK-900-AC2"]));
+    const refused = ark("plan", "check", runId);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toContain(refusal);
   });
 
   test("ARK-T510 ARK-302-AC6 a perf run refuses a plan with no first step naming results/baseline.md or no last step naming results/compare.md, and accepts one with both", () => {

@@ -1,5 +1,5 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
@@ -346,4 +346,18 @@ test("ARK-T381 a validator finish refuses a missing analysis file when no later 
   expectRefused(run, "val-2", "evidence missing: AC3 (analysis)");
   writeEvidenceFile(run.directory, "AC3", "analysis");
   expectFinished(run, "val-2");
+});
+
+test("ARK-T381 the first validator of a bug run that serves only the test criterion finishes with no evidence file of the unserved analysis criterion, writes none, and the fix starts", () => {
+  const run = validatorRun(
+    [
+      validator("val-1", ["ARK-900-AC1"], []),
+      { ...fix, needs: ["val-1"] },
+      validator("val-2", ["ARK-900-AC2", "ARK-900-AC3", "ARK-900-AC4"]),
+    ],
+    { start: ["val-1"], kind: "bug", criterionMethods: analysisMethods },
+  );
+  expectFinished(run, "val-1");
+  expect(existsSync(join(run.directory, "results", "evidence"))).toBe(false);
+  expect(ark("run", "step", run.runId, "fix", "start").code).toBe(0);
 });
