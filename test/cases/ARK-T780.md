@@ -53,7 +53,7 @@ Expected: If the visibility read fails or prints no visibility and the body name
 
 1. Protects: the GitLab visibility rule (only `private` in any case passes), the fail-closed rule for a visibility read that fails or answers nothing on both hosts, and the dry-run report.
 2. Regression: `internal` treated as private; a case-sensitive compare against `PRIVATE`; a failed read or `JSON.parse` error swallowed as private; a message with no `unknown`; a refusal of checkpoints on a failed read; a dry run that skips the read or uploads.
-3. Existing proof misses it: ARK-T285 and ARK-T286 cover uploads and upload failure under the fake's default answer (`public` on `glab`, `PUBLIC` on `gh`), with checkpoint files only; none names a video that a non-private project refuses, and none reads an unknown visibility. ARK-T778 covers GitHub PUBLIC and PRIVATE only; ARK-T56 covers a dry run of a body with no media.
+3. Existing proof misses it: ARK-T285 and ARK-T286 cover uploads and upload failure of checkpoint files under the fake's default answer (`public` on `glab`, `PUBLIC` on `gh`), except the ARK-T284 ARK-T285 decoy test, which names `../private.png` outside the run folder and sets `private` on `glab` (`PRIVATE` on `gh`); none names a video that a non-private project refuses, and none reads an unknown visibility. ARK-T778 covers GitHub PUBLIC and PRIVATE only; ARK-T56 covers a dry run of a body with no media.
 4. No test-only hook: the real `post_mr.ts` process, and for the dry run the driver that already runs the real `postMergeRequest` for ARK-T284 and ARK-T285 (the only entry point with `dryRun`).
 
 ## Screenshot checkpoints
