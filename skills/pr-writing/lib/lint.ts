@@ -233,7 +233,8 @@ const PROV01: Check = ({ body, ledger }) => {
 
 const modelTrailer =
   /^\s*Co-Authored-By:.*(Claude|Anthropic|OpenAI|GPT|Copilot|Gemini|Codex|noreply@anthropic)/im;
-const generatedLine = /^.*Generated with.*$/im;
+/** The tool's trailer line: `Generated with` at the start of a line, after blanks and an optional emoji, in the tools' case. */
+const generatedLine = /^[ \t]*(?:\p{Extended_Pictographic}\uFE0F?[ \t]*)?Generated with\b.*$/mu;
 
 const PROV02: Check = ({ body, ledger }) => {
   const found = (text: string) => text.match(modelTrailer)?.[0] ?? text.match(generatedLine)?.[0];

@@ -1283,21 +1283,53 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
     ),
   ).toMatchObject({ result: "fail", reason: expect.stringContaining("not a provenance variant") });
 
-  // PROV02: Generated with in the body, and a trailer only in a commit of the range.
-  expect(lintLine(good, "PROV02", `${good.body}\nGenerated with Claude Code\n`).reason).toContain(
-    'the body has "Generated with Claude Code"',
-  );
-  const trailer = "ARK-316: fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>";
-  const inRange = lintOf({
-    ...good,
-    input: {
-      ...good.input,
-      ledger: baseLedger({
-        repos: [{ commits: [{ sha: head, subject: "ARK-316: fix", message: trailer }] }],
-      }),
-    },
+  // PROV02: a Generated with trailer line fails in the body and in a commit of the range, in
+  // each shape the tools write it, and its reason names the whole line without its indent.
+  const modelTrailerLine = "Co-Authored-By: Claude <noreply@anthropic.com>";
+  const trailerLines: [string, string, string][] = [
+    ["plain", "Generated with Claude Code", "Generated with Claude Code"],
+    [
+      "emoji",
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+      "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+    ],
+    [
+      "emoji with a variation selector",
+      "🤖\uFE0F Generated with [Claude Code](https://claude.com/claude-code)",
+      "🤖\uFE0F Generated with [Claude Code](https://claude.com/claude-code)",
+    ],
+    ["indented", "  Generated with Claude Code", "Generated with Claude Code"],
+  ];
+  const rangeOf = (message: string) =>
+    lintOf({
+      ...good,
+      input: {
+        ...good.input,
+        ledger: baseLedger({
+          repos: [{ commits: [{ sha: head, subject: "ARK-316: fix", message }] }],
+        }),
+      },
+    });
+  for (const [shape, line, named] of trailerLines) {
+    expect({ shape, ...lintLine(good, "PROV02", `${good.body}\n${line}\n`) }).toMatchObject({
+      result: "fail",
+      reason: `the body has "${named}"`,
+    });
+    expect({ shape, ...result(rangeOf(`ARK-316: fix\n\n${line}\n`), "PROV02") }).toMatchObject({
+      result: "fail",
+      reason: `commit abc1234 in the range has "${named}"`,
+    });
+  }
+  // The trailer as the last line of the body and of a commit message, with no final newline.
+  expect(lintLine(good, "PROV02", `${good.body}\nGenerated with Claude Code`)).toMatchObject({
+    result: "fail",
+    reason: 'the body has "Generated with Claude Code"',
   });
-  expect(result(inRange, "PROV02")).toMatchObject({
+  expect(result(rangeOf("ARK-316: fix\n\nGenerated with Claude Code"), "PROV02")).toMatchObject({
+    result: "fail",
+    reason: 'commit abc1234 in the range has "Generated with Claude Code"',
+  });
+  expect(result(rangeOf(`ARK-316: fix\n\n${modelTrailerLine}`), "PROV02")).toMatchObject({
     result: "fail",
     reason: expect.stringMatching(/commit abc1234 in the range has "Co-Authored-By/),
   });
@@ -1454,6 +1486,55 @@ test("ARK-T39 the variants of each decidable check fail and the near misses pass
   expect(lintLine(good, "STALE01", good.body, { bodyHash: hashBody(good.body) }).result).toBe(
     "pass",
   );
+});
+
+test("ARK-T783 lint PROV02 passes a body or commit that has `regenerated with` or a mid-sentence `generated with`, and still fails the same body once it holds a `Generated with` trailer line", () => {
+  const control = loadFixture("PROV02", "control");
+  // Each input adds one line under How to verify and replaces nothing, so no check but PROV02
+  // may change its result against the control body.
+  const verifyItem = "- [ ] `bun test test/pr-writing.test.ts`. Expect: exits 0.";
+  expect(control.body).toContain(verifyItem);
+  const withLine = (line: string) =>
+    control.body.replace(verifyItem, () => `${verifyItem}\n\n${line}`);
+  const others = (results: LintResult[]) =>
+    results.filter((entry) => entry.id !== "PROV02").map(({ id, result }) => ({ id, result }));
+  const baseline = others(lintOf(control));
+  expect(result(lintOf(control), "PROV02").result).toBe("pass");
+
+  // AC1 of ARK-629: a body whose only match is docs/reference/cli.md regenerated with \`bun scripts/cli-reference.ts\` inside a criterion line, and for a body with `generated with` in the middle of a sentence, passes PROV02.
+  const falseMatches = [
+    "- AC1: `docs/reference/cli.md` regenerated with `bun scripts/cli-reference.ts`",
+    "The cache file is generated with bun at build time.",
+    "Regenerated with bun scripts/cli-reference.ts",
+    "generated with bun",
+    "The page is Generated with care.",
+    "Generated without review",
+  ];
+  for (const line of falseMatches) {
+    const results = lintOf(control, { body: withLine(line) });
+    expect({ line, ...result(results, "PROV02") }).toMatchObject({ line, result: "pass" });
+    expect(others(results)).toEqual(baseline);
+  }
+
+  const commitMessage =
+    "ARK-316: fix\n\ndocs/reference/cli.md regenerated with `bun scripts/cli-reference.ts`";
+  const inRange = lintOf({
+    ...control,
+    input: {
+      ...control.input,
+      ledger: baseLedger({
+        repos: [{ commits: [{ sha: head, subject: "ARK-316: fix", message: commitMessage }] }],
+      }),
+    },
+  });
+  expect(result(inRange, "PROV02").result).toBe("pass");
+
+  // Negative control: the same false-match line plus a trailer line fails and names the trailer.
+  const trailerBody = withLine(`${falseMatches[0]!}\nGenerated with Claude Code`);
+  expect(result(lintOf(control, { body: trailerBody }), "PROV02")).toMatchObject({
+    result: "fail",
+    reason: 'the body has "Generated with Claude Code"',
+  });
 });
 
 const judgment: [string, RegExp][] = [
