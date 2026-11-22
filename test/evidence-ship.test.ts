@@ -499,14 +499,16 @@ describe.each(commands)("ark %s evidence for ACs with no test", (_name, argsFor)
       [...allProven, "AC5"],
     );
     const message = expectRefused(run, argsFor(run));
+    const printedLines = message.split("\n");
     for (const line of [
-      "evidence missing: AC1 (demonstration)",
-      "evidence missing: AC2 (inspection)",
-      "evidence missing: AC3 (analysis)",
-      "evidence missing: AC4 (demonstration)",
-      "evidence missing: AC5 (demonstration)",
+      "evidence missing: AC1 (demonstration): expected results/evidence/AC1.md",
+      "evidence missing: AC2 (inspection): expected results/evidence/AC2.md",
+      "evidence missing: AC3 (analysis): expected results/evidence/AC3.md",
+      "evidence missing: AC4 (demonstration): expected results/evidence/AC4.md",
+      "evidence missing: AC5 (demonstration): expected results/evidence/AC5.md",
     ])
-      expect(message).toContain(line);
+      expect(printedLines).toContain(line);
+    expect(message).not.toContain("; found");
   });
 
   test("ARK-T7 names a missing and each malformed file and not the well-formed one", () => {
@@ -515,10 +517,26 @@ describe.each(commands)("ark %s evidence for ACs with no test", (_name, argsFor)
     run.write("AC3", analysis({ section: "Result", label: "Head" }));
     run.write("AC4", demonstration());
     const message = expectRefused(run, argsFor(run));
-    expect(message).toContain("evidence missing: AC1 (demonstration)");
+    expect(message).toContain(
+      "evidence missing: AC1 (demonstration): expected results/evidence/AC1.md",
+    );
     expect(message).toMatch(/evidence malformed: AC2: .*Verdict/);
     expect(message).toMatch(/evidence malformed: AC3: .*Result/);
     expect(message).not.toContain("AC4");
+  });
+
+  test("ARK-T790 adds the found path and the move text for a file under results/evidence/<ticket id>/ and moves nothing", () => {
+    const run = shipRun([nonTestCriteria[1]!], ["AC2"]);
+    const misplaced = join(run.directory, "results", "evidence", "ARK-900", "AC2.md");
+    mkdirSync(dirname(misplaced), { recursive: true });
+    writeFileSync(misplaced, inspection("reviewer: pass"));
+    const message = expectRefused(run, argsFor(run));
+    expect(message).toContain("refused: evidence is not complete");
+    expect(message.split("\n")).toContain(
+      "evidence missing: AC2 (inspection): expected results/evidence/AC2.md; found results/evidence/ARK-900/AC2.md: move it to results/evidence/AC2.md",
+    );
+    expect(readFileSync(misplaced, "utf8")).toBe(inspection("reviewer: pass"));
+    expect(existsSync(join(run.directory, "results", "evidence", "AC2.md"))).toBe(false);
   });
 
   test("ARK-T7 keeps the manual-gate refusal, which comes before the evidence check", () => {

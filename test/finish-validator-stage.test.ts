@@ -1,5 +1,13 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { appendEvent, deriveState, readEvents } from "../cli/events.ts";
 import { planHash } from "../cli/plan.ts";
@@ -360,4 +368,57 @@ test("ARK-T381 the first validator of a bug run that serves only the test criter
   expectFinished(run, "val-1");
   expect(existsSync(join(run.directory, "results", "evidence"))).toBe(false);
   expect(ark("run", "step", run.runId, "fix", "start").code).toBe(0);
+});
+
+// --- ARK-626: the evidence missing line of a finish names the file it looked for and the file it found --------------
+
+const analysisAlone = () =>
+  analysisBugRun([validator("val-1", allIds, []), { ...fix, needs: ["val-1"] }], ["val-1"]);
+
+/** The sorted names under `results/evidence/` of the run folder, with the size of each file. */
+const evidenceListing = (run: ValidatorRun) =>
+  readdirSync(join(run.directory, "results", "evidence"), { recursive: true })
+    .map(String)
+    .sort()
+    .map((name) => `${name} ${statSync(join(run.directory, "results", "evidence", name)).size}`);
+
+/** The finish is refused, writes no event and no file; returns the lines of its error text. */
+function refusedLines(run: ValidatorRun, id: string): string[] {
+  const events = run.eventLines();
+  const listing = evidenceListing(run);
+  const refused = run.finish(id);
+  expect(refused.code, refused.err).toBe(1);
+  expect(run.eventLines()).toEqual(events);
+  expect(evidenceListing(run)).toEqual(listing);
+  return refused.err.split("\n");
+}
+
+test("ARK-T789 a validator finish names results/evidence/AC3.md for the missing analysis file of a served AC", () => {
+  const run = analysisAlone();
+  expect(refusedLines(run, "val-1")).toContain(
+    "evidence missing: AC3 (analysis): expected results/evidence/AC3.md",
+  );
+});
+
+test("ARK-T790 a validator finish adds the found path and the move text for an analysis file under results/evidence/ARK-900/, moves nothing, and finishes once the file is moved", () => {
+  const run = analysisAlone();
+  const misplaced = join(run.directory, "results", "evidence", "ARK-900", "AC3.md");
+  const text = readFileSync(join(run.directory, "results", "evidence", "AC2.md"), "utf8");
+  run.evidence("ARK-900/AC3", text);
+  const line =
+    "evidence missing: AC3 (analysis): expected results/evidence/AC3.md; found results/evidence/ARK-900/AC3.md: move it to results/evidence/AC3.md";
+  expect(refusedLines(run, "val-1")).toContain(line);
+  expect(readFileSync(misplaced, "utf8")).toBe(text);
+  expect(existsSync(join(run.directory, "results", "evidence", "AC3.md"))).toBe(false);
+
+  // A folder named like the file gives the plain line.
+  rmSync(join(run.directory, "results", "evidence", "ARK-900"), { recursive: true });
+  run.evidence("ARK-900/AC3.md/note", "x\n");
+  const plain = refusedLines(run, "val-1");
+  expect(plain).toContain("evidence missing: AC3 (analysis): expected results/evidence/AC3.md");
+  expect(plain.join("\n")).not.toContain("; found");
+
+  // The move the line asks for: the file at the right path finishes the step.
+  writeEvidenceFile(run.directory, "AC3", "analysis");
+  expectFinished(run, "val-1");
 });

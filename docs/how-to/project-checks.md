@@ -169,7 +169,7 @@ Before it writes the event, `ark gate record <run> manual <AC id> ok` checks the
 
 `ark merge-request open` and `ark run close <run> handed_off` check the evidence last, before any push and before any event. They name every AC and case that fails, after `refused: evidence is not complete`:
 
-- `evidence missing: <AC id> (<method>)`: a non-test AC has no file.
+- `evidence missing: <AC id> (<method>): expected results/evidence/<AC id>.md`: a non-test AC has no file; the path is relative to the run folder. When `results/evidence/<ticket id>/<AC id>.md` is a file, the line adds `; found results/evidence/<ticket id>/<AC id>.md: move it to results/evidence/<AC id>.md`. The check moves nothing: move the file and commit.
 - `evidence malformed: <AC id>: <reason>`: the file lacks a section of its method or a required value. The reason names it.
 - `test evidence missing: <AC id> <test case id> (<base|head>)`: a case in the `verified_by` of a `test` AC has no `base/` or no `head/` folder.
 - `test evidence stale: <AC id> <test case id>`: the `sha` in its `head` `result.json` is not the current head of the repo named in that `result.json`. Run `ark test <run>` again after the last commit.

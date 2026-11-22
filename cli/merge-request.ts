@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { ArkError } from "./errors.ts";
 import { canonicalCriterion } from "./criterion-id.ts";
 import { appendEvent, deriveState, readEvents, type ArkEvent, type RunState } from "./events.ts";
@@ -297,6 +297,27 @@ function worktreeMap(events: ArkEvent[]): Map<string, Worktree> {
 const localId = (criterionId: string): string => criterionId.split("/").pop()!;
 
 /**
+ * The `evidence missing` line: the criterion, its method and the path that the check looked for, relative to the run folder.
+ * When that file is absent but `results/evidence/<ticket id>/<AC id>.md` is a regular file (the common misplacement of a worker),
+ * the line adds where it found the file and where it belongs. It reads files only and moves nothing.
+ */
+function missingEvidenceLine(directory: string, criterionId: string, method: Method): string {
+  const expected = relative(directory, evidenceFile(directory, criterionId));
+  const line = `evidence missing: ${localId(criterionId)} (${method}): expected ${expected}`;
+  const separator = criterionId.indexOf("/");
+  if (separator < 0) return line;
+  const found = join(
+    "results",
+    "evidence",
+    criterionId.slice(0, separator),
+    `${localId(criterionId)}.md`,
+  );
+  const foundFile = join(directory, found);
+  if (!existsSync(foundFile) || !statSync(foundFile).isFile()) return line;
+  return `${line}; found ${found}: move it to ${expected}`;
+}
+
+/**
  * The evidence refusals: a non-test AC needs a well-formed `results/evidence/<AC id>.md`; each case in the
  * `verified_by` of a `test` AC needs `base/` and `head/` folders, and the head SHA must be the current head of the repo that ran the case
  * (the tested head for a repo that is not in `currentHeadOf`: a clean sync moved its head, see `cleanSyncMerged`).
@@ -326,7 +347,7 @@ function evidenceProblems(
     if (method === "test" || !includes(id)) continue;
     const file = evidenceFile(directory, id);
     if (!existsSync(file)) {
-      if (reportMissing(id, method)) lines.push(`evidence missing: ${localId(id)} (${method})`);
+      if (reportMissing(id, method)) lines.push(missingEvidenceLine(directory, id, method));
       continue;
     }
     const problem = evidenceProblem(method, readFileSync(file, "utf8"), { lastLine: strict });
